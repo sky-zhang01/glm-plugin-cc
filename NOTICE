@@ -1,0 +1,20 @@
+glm-plugin-cc
+Copyright 2026 Sky Zhang
+
+This product includes code derived from OpenAI's codex-plugin-cc:
+  https://github.com/openai/codex-plugin-cc
+  Copyright OpenAI, licensed under the Apache License, Version 2.0.
+
+Files directly adapted (scaffold-level):
+- scripts/session-lifecycle-hook.mjs
+- scripts/lib/{args,fs,git,process,prompts,render,state,workspace,job-control,tracked-jobs}.mjs
+- schemas/review-output.schema.json
+- prompts/*.md (review prompt templates)
+- commands/*.md (command interface templates, rewritten to /glm namespace)
+- agents/glm-rescue.md (adapted from agents/codex-rescue.md)
+
+Backend-specific files (glm-plugin-cc original work):
+- scripts/glm-companion.mjs
+- scripts/lib/glm-client.mjs
+
+The Apache License, Version 2.0, applies to this work. See LICENSE.

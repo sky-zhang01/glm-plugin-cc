@@ -1,0 +1,9 @@
+{
+  "name": "glm",
+  "version": "0.1.0",
+  "description": "Use Z.AI GLM models from Claude Code to review code or delegate tasks. Stateless HTTP via Anthropic-compatible endpoint. No Stop hook — orchestration lives in claude-dev-harness SEV /verify.",
+  "author": {
+    "name": "Sky Zhang"
+  },
+  "homepage": "https://gitea.tokyo.skyzhang.net/SkyLab/glm-plugin-cc"
+}
