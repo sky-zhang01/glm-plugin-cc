@@ -1,6 +1,6 @@
 {
   "name": "glm",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Use 智谱 GLM models from Claude Code to review code or delegate tasks. Stateless HTTP via OpenAI-compatible endpoint. No Stop hook — orchestration lives in claude-dev-harness SEV /verify.",
   "author": {
     "name": "Sky Zhang"

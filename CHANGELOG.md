@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.3.3 — 2026-04-20
+
+Simplify thinking default: v0.3.2's per-command split was
+over-engineered. Codex CLI itself doesn't split `model_reasoning_effort`
+per task — it just uses a single `medium` default across all calls.
+Match that: thinking defaults `on` globally; user can pass
+`--thinking off` on any command for light calls.
+
+### Changed
+
+- `scripts/glm-companion.mjs`:
+  - `runReview` still passes default `true` (unchanged behavior).
+  - `runTask` now passes default `true` uniformly (was `rescueMode` in
+    v0.3.2, meaning `task` defaulted `off`). Both `rescue` and `task`
+    are now default `on`.
+- `commands/task.md`: description updated — thinking defaults ON, not
+  OFF.
+- `commands/review.md`, `adversarial-review.md`, `rescue.md`,
+  `agents/glm-rescue.md`: wording updated from "default on for this
+  command" to "default on across all commands".
+- `README.md` "Thinking / reasoning" section collapsed from per-command
+  table to a single-sentence explanation.
+
+### Non-breaking for most callers
+
+- Users explicitly passing `--thinking on|off` keep exact prior
+  behavior.
+- Users calling `/glm:review`, `/glm:adversarial-review`, or
+  `/glm:rescue` without `--thinking` keep exact v0.3.2 behavior
+  (already defaulted `on`).
+- Only change: `/glm:task` without `--thinking` now defaults `on`
+  (was `off` in v0.3.2). Pass `--thinking off` to restore v0.3.2
+  behavior on that command.
+
 ## v0.3.2 — 2026-04-20
 
 Corrections to two v0.3.1 claims that were based on incomplete research.

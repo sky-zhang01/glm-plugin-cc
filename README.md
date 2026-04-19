@@ -138,20 +138,12 @@ are **rejected** — this plugin only sends text messages.
 
 ### Thinking / reasoning
 
-Thinking defaults are **per-command**, mirroring codex CLI's
-`model_reasoning_effort = "medium"` default on `gpt-5.4` for
-deep-analysis work:
-
-| Command | Default | Rationale |
-|---|---|---|
-| `/glm:review` | **on** | Code review benefits from reasoning. |
-| `/glm:adversarial-review` | **on** | Adversarial passes need depth. |
-| `/glm:rescue` | **on** | Rescue = stuck work needs extended analysis. |
-| `/glm:task` | **off** | Free-form channel; user opts in with `--thinking on`. |
-
-Override on any command with `--thinking on` or `--thinking off`. GLM
-routes this via the `thinking: {"type": "enabled" | "disabled"}` request
-field.
+Thinking is **on by default across all commands**, mirroring codex
+CLI's single `model_reasoning_effort = "medium"` default on `gpt-5.4`
+(codex applies `medium` reasoning uniformly, not per-task — we do the
+same). Pass `--thinking off` on any command to disable for quick /
+light calls. GLM routes this via the `thinking: {"type": "enabled" |
+"disabled"}` request field.
 
 ## Architecture
 

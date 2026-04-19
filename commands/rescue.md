@@ -24,10 +24,10 @@ Operating rules:
   closest to codex `gpt-5.4`; also accepts `glm-5`, `glm-5-turbo`,
   `glm-4.7`, `glm-4.6`, etc. Check the 智谱 BigModel text-model
   catalog — vision models are rejected).
-- `--thinking on|off` toggles GLM reasoning mode (default `on` for
-  rescue — rescue work almost always needs extended reasoning. Mirrors
-  codex CLI default `medium` reasoning on `gpt-5.4`). Use `--thinking off`
-  only for quick recall-style rescue prompts.
+- `--thinking on|off` toggles GLM reasoning mode (default `on` across
+  all commands; mirrors codex CLI default `model_reasoning_effort =
+  "medium"` on `gpt-5.4`). Use `--thinking off` only for quick
+  recall-style rescue prompts.
 - `--system` overrides the default rescue system prompt.
 - Do not ask the subagent to inspect files, monitor progress, or poll
   status/result; that's the user's next step if needed.

@@ -275,9 +275,8 @@ async function runReview(argv, { adversarial }) {
   const cwd = resolveCommandCwd(options);
   const workspaceRoot = resolveCommandWorkspace(options);
   const focusText = positionals.join(" ").trim();
-  // review + adversarial-review default thinking ON (deep-analysis tasks,
-  // matching codex CLI default model_reasoning_effort = "medium"). User can
-  // opt out with --thinking off.
+  // Global default ON — mirrors codex CLI's single model_reasoning_effort
+  // = "medium" default on gpt-5.4 (no per-command split).
   const thinking = parseThinkingFlag(options.thinking, true);
 
   ensureGitRepository(cwd);
@@ -362,10 +361,10 @@ async function runTask(argv, { rescueMode }) {
   });
   const cwd = resolveCommandCwd(options);
   const workspaceRoot = resolveCommandWorkspace(options);
-  // rescue default thinking ON (stuck-work investigation needs depth);
-  // plain task default OFF (free-form channel — user turns on explicitly
-  // when reasoning is worth the latency/token cost).
-  const thinking = parseThinkingFlag(options.thinking, rescueMode);
+  // Global default ON — mirrors codex CLI's single model_reasoning_effort
+  // = "medium" default on gpt-5.4 (no per-command split). User can always
+  // pass --thinking off for light/quick calls.
+  const thinking = parseThinkingFlag(options.thinking, true);
 
   const prompt = positionals.join(" ").trim() || DEFAULT_CONTINUE_PROMPT;
   const systemPrompt = options.system ||
