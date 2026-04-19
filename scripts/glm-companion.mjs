@@ -16,6 +16,11 @@ import {
   runGlmTask
 } from "./lib/glm-client.mjs";
 import { collectReviewContext, ensureGitRepository, resolveReviewTarget } from "./lib/git.mjs";
+import {
+  applyPreset,
+  listPresets,
+  resolveEffectiveConfig
+} from "./lib/preset-config.mjs";
 import { loadPromptTemplate, interpolateTemplate } from "./lib/prompts.mjs";
 import {
   generateJobId,
@@ -136,44 +141,88 @@ function buildTargetLabel(target, focusText) {
 async function buildSetupReport(cwd, actionsTaken = [], pingRequested = false) {
   const workspaceRoot = resolveWorkspaceRoot(cwd);
   const nodeDetail = `${process.version} (global fetch ${typeof fetch === "function" ? "present" : "missing"})`;
+
+  let effectiveConfig = null;
+  let configError = null;
+  try {
+    effectiveConfig = resolveEffectiveConfig();
+  } catch (error) {
+    configError = error instanceof Error ? error.message : String(error);
+  }
+
   const glmAvailability = getGlmAvailability(cwd);
   const authStatus = pingRequested
     ? await getGlmAuthStatus(cwd)
     : { ok: null, detail: "ping skipped (pass --ping to probe)" };
-  const config = getConfig(workspaceRoot);
+  const repoConfig = getConfig(workspaceRoot);
 
   const nextSteps = [];
+  if (configError) {
+    nextSteps.push(`Fix config file error: ${configError}`);
+  }
+  if (!effectiveConfig?.preset_id && !process.env.ZAI_BASE_URL) {
+    nextSteps.push("Pick a preset: /glm:setup --preset coding-plan | pay-as-you-go | custom --base-url <url>");
+  }
   if (!glmAvailability.available) {
-    nextSteps.push("Set ZAI_API_KEY (obtain from https://z.ai or the Z.AI API console).");
+    nextSteps.push("Set ZAI_API_KEY in your shell (e.g. export ZAI_API_KEY='...')");
   }
   if (glmAvailability.available && pingRequested && authStatus.ok === false) {
     nextSteps.push(`Auth probe failed: ${authStatus.detail}`);
   }
 
   return {
-    ready: glmAvailability.available && authStatus.ok !== false,
+    ready: Boolean(effectiveConfig?.preset_id || process.env.ZAI_BASE_URL) &&
+      glmAvailability.available &&
+      authStatus.ok !== false,
     node: { detail: nodeDetail },
     npm: { detail: "not required for glm-plugin-cc (zero runtime deps)" },
     glm: { detail: glmAvailability.detail },
     auth: { detail: authStatus.detail },
     sessionRuntime: getSessionRuntimeStatus(process.env, cwd),
-    reviewGateEnabled: Boolean(config.stopReviewGate),
+    reviewGateEnabled: Boolean(repoConfig.stopReviewGate),
     actionsTaken,
-    nextSteps
+    nextSteps,
+    config: {
+      source: effectiveConfig?.source ?? "error",
+      preset_id: effectiveConfig?.preset_id ?? null,
+      preset_display: effectiveConfig?.preset_display ?? null,
+      base_url: effectiveConfig?.base_url ?? null,
+      default_model: effectiveConfig?.default_model ?? null,
+      updated_at_utc: effectiveConfig?.updated_at_utc ?? null,
+      env_override: process.env.ZAI_BASE_URL ? "ZAI_BASE_URL" : null,
+      error: configError
+    },
+    presets: listPresets()
   };
 }
 
 async function runSetup(argv) {
   const { options } = parseCommandInput(argv, {
+    valueOptions: ["preset", "base-url", "default-model"],
     booleanOptions: ["json", "ping", "enable-review-gate", "disable-review-gate"]
   });
   const cwd = resolveCommandCwd(options);
   const workspaceRoot = resolveCommandWorkspace(options);
 
   const actionsTaken = [];
+
+  if (options.preset || options["base-url"] || options["default-model"]) {
+    if (!options.preset) {
+      throw new Error("--base-url / --default-model require --preset (coding-plan | pay-as-you-go | custom).");
+    }
+    const result = applyPreset({
+      preset_id: options.preset,
+      base_url: options["base-url"],
+      default_model: options["default-model"]
+    });
+    actionsTaken.push(
+      `wrote ${result.path}: preset=${result.config.preset_id}, base_url=${result.config.base_url ?? "(null)"}, default_model=${result.config.default_model ?? "(null)"}`
+    );
+  }
+
   if (options["enable-review-gate"]) {
     setConfig(workspaceRoot, "stopReviewGate", true);
-    actionsTaken.push("enabled stopReviewGate flag (harness still owns the actual Stop hook wiring)");
+    actionsTaken.push("enabled stopReviewGate flag (harness owns the actual Stop hook wiring)");
   }
   if (options["disable-review-gate"]) {
     setConfig(workspaceRoot, "stopReviewGate", false);

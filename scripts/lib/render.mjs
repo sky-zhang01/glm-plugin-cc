@@ -181,7 +181,6 @@ export function renderSetupReport(report) {
     "",
     "Checks:",
     `- node: ${report.node.detail}`,
-    `- npm: ${report.npm.detail}`,
     `- glm: ${report.glm.detail}`,
     `- auth: ${report.auth.detail}`,
     `- session runtime: ${report.sessionRuntime.label}`,
@@ -189,7 +188,36 @@ export function renderSetupReport(report) {
     ""
   ];
 
-  if (report.actionsTaken.length > 0) {
+  if (report.config) {
+    lines.push("Endpoint config:");
+    if (report.config.env_override) {
+      lines.push(`- env override: ${report.config.env_override} (takes precedence over config file)`);
+    }
+    if (report.config.error) {
+      lines.push(`- error: ${report.config.error}`);
+    } else if (report.config.preset_id) {
+      lines.push(`- preset: ${report.config.preset_display} (${report.config.preset_id})`);
+      lines.push(`- base_url: ${report.config.base_url ?? "(not set)"}`);
+      lines.push(`- default_model: ${report.config.default_model ?? "(not set)"}`);
+      if (report.config.updated_at_utc) {
+        lines.push(`- written_at: ${report.config.updated_at_utc}`);
+      }
+    } else {
+      lines.push("- no preset saved yet (run /glm:setup --preset ...)");
+    }
+    lines.push("");
+  }
+
+  if (report.presets?.length) {
+    lines.push("Available presets:");
+    for (const preset of report.presets) {
+      const url = preset.base_url ?? "(custom: pass --base-url)";
+      lines.push(`- ${preset.id} — ${preset.display}: ${url}`);
+    }
+    lines.push("");
+  }
+
+  if (report.actionsTaken?.length) {
     lines.push("Actions taken:");
     for (const action of report.actionsTaken) {
       lines.push(`- ${action}`);
@@ -197,7 +225,7 @@ export function renderSetupReport(report) {
     lines.push("");
   }
 
-  if (report.nextSteps.length > 0) {
+  if (report.nextSteps?.length) {
     lines.push("Next steps:");
     for (const step of report.nextSteps) {
       lines.push(`- ${step}`);

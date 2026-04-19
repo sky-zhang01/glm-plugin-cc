@@ -1,5 +1,55 @@
 # Changelog
 
+## v0.2.0 — 2026-04-20
+
+Endpoint preset system + command-layer cleanup. Key UX change: `/glm:setup`
+is now interactive (menu-driven via `AskUserQuestion`) for first-time
+configuration; behavior for existing env-only users is unchanged.
+
+### Added
+
+- `scripts/lib/preset-config.mjs` with three built-in presets:
+  - `coding-plan` → `https://api.z.ai/api/anthropic` (Z.AI subscription)
+  - `pay-as-you-go` → `https://open.bigmodel.cn/api/anthropic` (BigModel metered)
+  - `custom` → user-provided `https://` endpoint
+- Endpoint config persists to `~/.config/glm-plugin-cc/config.json`
+  (XDG_CONFIG_HOME honored). Dir 0700, file 0600. API key is **never**
+  written to disk — always read from `ZAI_API_KEY` env.
+- `glm-companion.mjs setup` accepts `--preset`, `--base-url`,
+  `--default-model`.
+- `renderSetupReport` shows current endpoint config, env overrides, and
+  all available presets.
+
+### Changed
+
+- Endpoint priority now: `ZAI_BASE_URL` env > config file preset >
+  built-in fallback (`api.z.ai`). Model priority: `--model` arg >
+  `GLM_MODEL` env > config `default_model` > `glm-4.6`.
+- `commands/setup.md` rewritten to use `AskUserQuestion` menu for
+  first-time setup. Removes the copy-paste `npm install -g` block that
+  was incorrect (GLM has no external CLI — plugin IS the runtime).
+- `commands/review.md` + `commands/adversarial-review.md` drop the
+  `--wait` / `--background` argument-hint lies. Companion is sync-only.
+  Both commands now correctly document sync foreground execution.
+- `commands/status.md` drops `--wait` / `--timeout-ms` (polling
+  leftovers from codex scaffold).
+- `commands/cancel.md` description clarified: marks local record only,
+  no server-side abort (GLM is stateless HTTP).
+- `review.md` removed incorrect claim that focus text is unsupported.
+
+### Security
+
+- Config file written with mode 0600 (owner-only read/write).
+- Config dir created with mode 0700, with a follow-up `chmodSync` in case
+  the dir pre-existed with looser perms (defense-in-depth).
+- `writeConfigFile` writes to a `.tmp-<pid>-<epoch>` file then
+  `renameSync` — atomic swap prevents half-written state from concurrent
+  `/glm:setup` runs.
+- `applyPreset` and `sanitizeConfig` reject non-`https://` base URLs.
+  Error messages truncate over-long URLs to avoid echoing
+  accidentally-pasted credentials.
+- No API key ever written to disk; env-only by design.
+
 ## v0.1.1 — 2026-04-20
 
 Post-review fixes from internal sev-verifier + security-auditor passes.

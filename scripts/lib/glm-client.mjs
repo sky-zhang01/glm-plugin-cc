@@ -10,8 +10,9 @@
  */
 
 import { readJsonFile } from "./fs.mjs";
+import { resolveEffectiveConfig } from "./preset-config.mjs";
 
-const DEFAULT_ENDPOINT = "https://api.z.ai/api/anthropic/v1/messages";
+const FALLBACK_BASE_URL = "https://api.z.ai/api/anthropic";
 const DEFAULT_MODEL = "glm-4.6";
 const DEFAULT_MAX_TOKENS = 8192;
 const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000; // 15 min aligned with codex review gate
@@ -31,21 +32,41 @@ function resolveApiKey() {
   return getEnv("ZAI_API_KEY") || getEnv("Z_AI_API_KEY") || getEnv("GLM_API_KEY");
 }
 
-function resolveEndpoint() {
+function resolveBaseUrl() {
   const override = getEnv("ZAI_BASE_URL");
-  if (!override) {
-    return DEFAULT_ENDPOINT;
+  if (override) {
+    if (!/^https:\/\//i.test(override)) {
+      throw new Error(
+        `ZAI_BASE_URL must use https:// (got: ${override}). Plaintext endpoints would leak the API key.`
+      );
+    }
+    return override.replace(/\/+$/, "").replace(/\/v1\/messages$/i, "");
   }
-  if (!/^https:\/\//i.test(override)) {
-    throw new Error(
-      `ZAI_BASE_URL must use https:// (got: ${override}). Plaintext endpoints would leak the API key.`
-    );
+  const config = resolveEffectiveConfig();
+  if (config.base_url) {
+    return config.base_url;
   }
-  return `${override.replace(/\/+$/, "")}/v1/messages`;
+  return FALLBACK_BASE_URL;
+}
+
+function resolveEndpoint() {
+  return `${resolveBaseUrl()}/v1/messages`;
 }
 
 function resolveModel(options = {}) {
-  return options.model || getEnv("GLM_MODEL") || DEFAULT_MODEL;
+  if (options.model) {
+    return options.model;
+  }
+  const envModel = getEnv("GLM_MODEL");
+  if (envModel) {
+    return envModel;
+  }
+  const config = resolveEffectiveConfig();
+  return config.default_model || DEFAULT_MODEL;
+}
+
+export function resolveConfigSummary() {
+  return resolveEffectiveConfig();
 }
 
 function resolveTimeoutMs(options = {}) {
