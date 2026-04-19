@@ -180,12 +180,35 @@ function removeJobFile(jobFile) {
   }
 }
 
+const JOB_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
+
+function assertSafeJobId(jobId) {
+  const normalized = String(jobId ?? "").trim();
+  if (!normalized || !JOB_ID_PATTERN.test(normalized) || normalized.length > 128) {
+    throw new Error(
+      `Invalid job id: "${jobId}". Expected alphanumeric with dashes/underscores (1-128 chars).`
+    );
+  }
+  return normalized;
+}
+
+function resolveSafeJobPath(cwd, jobId, extension) {
+  const safeId = assertSafeJobId(jobId);
+  const jobsDir = resolveJobsDir(cwd);
+  const candidate = path.resolve(jobsDir, `${safeId}${extension}`);
+  const jobsDirResolved = path.resolve(jobsDir);
+  if (!candidate.startsWith(`${jobsDirResolved}${path.sep}`)) {
+    throw new Error(`Resolved job path escaped jobs directory: ${candidate}`);
+  }
+  return candidate;
+}
+
 export function resolveJobLogFile(cwd, jobId) {
   ensureStateDir(cwd);
-  return path.join(resolveJobsDir(cwd), `${jobId}.log`);
+  return resolveSafeJobPath(cwd, jobId, ".log");
 }
 
 export function resolveJobFile(cwd, jobId) {
   ensureStateDir(cwd);
-  return path.join(resolveJobsDir(cwd), `${jobId}.json`);
+  return resolveSafeJobPath(cwd, jobId, ".json");
 }

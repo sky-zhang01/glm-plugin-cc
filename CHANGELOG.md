@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.1.1 — 2026-04-20
+
+Post-review fixes from internal sev-verifier + security-auditor passes.
+
+- Add missing `commands/task.md` (sev-verifier finding: `/glm:task` was
+  documented + dispatched but no slash-command frontmatter existed; Claude
+  Code wouldn't register it).
+- Enforce `https://` on `ZAI_BASE_URL` env override (security-auditor T5
+  HIGH: plaintext endpoint would leak API key). Override now throws if
+  scheme is not https.
+- Validate job IDs and enforce path containment in
+  `scripts/lib/state.mjs:resolveJobFile` / `resolveJobLogFile`
+  (security-auditor T4: defense-in-depth against path traversal via
+  malicious `--job-id ../../etc/passwd`). Pattern:
+  `/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/`, max 128 chars; resolved path must
+  stay inside jobs dir.
+
 ## v0.1.0 — 2026-04-20
 
 Initial release.

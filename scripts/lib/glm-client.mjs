@@ -32,7 +32,16 @@ function resolveApiKey() {
 }
 
 function resolveEndpoint() {
-  return getEnv("ZAI_BASE_URL") ? `${getEnv("ZAI_BASE_URL").replace(/\/+$/, "")}/v1/messages` : DEFAULT_ENDPOINT;
+  const override = getEnv("ZAI_BASE_URL");
+  if (!override) {
+    return DEFAULT_ENDPOINT;
+  }
+  if (!/^https:\/\//i.test(override)) {
+    throw new Error(
+      `ZAI_BASE_URL must use https:// (got: ${override}). Plaintext endpoints would leak the API key.`
+    );
+  }
+  return `${override.replace(/\/+$/, "")}/v1/messages`;
 }
 
 function resolveModel(options = {}) {
