@@ -123,25 +123,35 @@ per-command model split) — override per-invocation with `--model <name>`
 or globally via the `GLM_MODEL` env var. See 智谱 BigModel's text-model
 catalog for available names.
 
-Commonly useful text models:
+Commonly useful text models (ordered by generation, newest first):
 
-| Model | When to use |
-|---|---|
-| `glm-5.1` | **Default** — flagship, closest to `gpt-5.4` on capability. |
-| `glm-5` | Near-flagship — cheaper + faster than 5.1, marginal intelligence drop (AA Index 50 vs 51). |
-| `glm-5-turbo` | Agent-optimized lightweight. Use for high-volume or simple tasks. |
-| `glm-4.7` | Previous-generation flagship. |
-| `glm-4.6` | Previous-generation mid-tier. Use when 5.x quota is tight. |
+| Model | Tier | When to use |
+|---|---|---|
+| `glm-5.1` | Current flagship | **Default** — closest open-weights tier to `gpt-5.4` (AA Index 51 vs 57); SWE-Bench Pro 58.4 beats `gpt-5.4` / Opus 4.6 / Gemini 3.1 Pro. |
+| `glm-5` | Current near-flagship | AA Index 50. Cheaper + faster than 5.1, marginal capability drop. |
+| `glm-5-turbo` | Current lightweight | Agent-optimized. Use for high-volume or simple tasks where latency matters more than depth. |
+| `glm-4.7` | **Previous-generation flagship** | LiveCodeBench V6 open-source SOTA; surpassed GLM-4.6 across multiple dimensions. Use if on a 4.x-only plan. |
+| `glm-4.6` | Older generation | Aligned with Claude Sonnet 4 on most benchmarks. Earlier architecture. Only use if 4.7 / 5.x unavailable. |
 
 Vision models (`glm-4v`, `glm-4.5v`, `glm-4.6v`, `glm-4.1v-thinking`, etc.)
 are **rejected** — this plugin only sends text messages.
 
 ### Thinking / reasoning
 
-Thinking is **off by default** (matches codex `--effort unset`). Opt in
-per-call with `--thinking on` when the task genuinely needs extended
-reasoning; costs latency and token budget. GLM routes this via the
-`thinking: {"type": "enabled"}` request field.
+Thinking defaults are **per-command**, mirroring codex CLI's
+`model_reasoning_effort = "medium"` default on `gpt-5.4` for
+deep-analysis work:
+
+| Command | Default | Rationale |
+|---|---|---|
+| `/glm:review` | **on** | Code review benefits from reasoning. |
+| `/glm:adversarial-review` | **on** | Adversarial passes need depth. |
+| `/glm:rescue` | **on** | Rescue = stuck work needs extended analysis. |
+| `/glm:task` | **off** | Free-form channel; user opts in with `--thinking on`. |
+
+Override on any command with `--thinking on` or `--thinking off`. GLM
+routes this via the `thinking: {"type": "enabled" | "disabled"}` request
+field.
 
 ## Architecture
 

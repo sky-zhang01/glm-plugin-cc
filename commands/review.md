@@ -42,7 +42,8 @@ review output.
   models (e.g. `glm-4v`, `glm-4.5v`) are rejected. Use `--model glm-4.6`
   or `--model glm-5-turbo` when latency / cost matters more than the
   flagship reasoning tier.
-- `--thinking on|off` — toggle GLM reasoning mode (default: `off`, matching
-  codex `--effort unset`). Turn on for harder review targets if the
-  latency cost is acceptable.
+- `--thinking on|off` — toggle GLM reasoning mode (default: `on` for
+  `review`; mirrors codex CLI default `model_reasoning_effort = "medium"`
+  for `gpt-5.4`). Use `--thinking off` on fast targets when the latency /
+  token cost outweighs the reasoning benefit.
 - Trailing tokens after flags are treated as free-form focus text.

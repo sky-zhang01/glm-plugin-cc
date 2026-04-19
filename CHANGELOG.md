@@ -1,5 +1,49 @@
 # Changelog
 
+## v0.3.2 — 2026-04-20
+
+Corrections to two v0.3.1 claims that were based on incomplete research.
+Functional behavior changes: thinking defaults now split per command.
+Non-breaking for configured endpoints / API keys / model names.
+
+### Corrections
+
+- **GLM generation ordering in README was wrong.** Listed `glm-4.6` as
+  "previous-generation mid-tier" and `glm-4.7` as "previous-generation
+  flagship" in the same tier. Official docs.bigmodel.cn confirms
+  `glm-4.7` strictly succeeds `glm-4.6` ("surpassing GLM-4.6 across
+  multiple dimensions"). Corrected ordering: `glm-5.1 > glm-5 >
+  glm-5-turbo (current gen) > glm-4.7 (previous-gen flagship) > glm-4.6
+  (older gen, aligned with Claude Sonnet 4)`.
+- **Codex CLI default behavior claim was wrong.** v0.3.0 / v0.3.1 said
+  "codex `--effort` defaults to unset → equivalent off". Actual codex
+  CLI default per `developers.openai.com/codex/config-reference` is
+  `model_reasoning_effort = "medium"` — reasoning ON by default. Our
+  "thinking default off" was mis-aligned with codex, not aligned.
+
+### Changed
+
+- `scripts/glm-companion.mjs`: `parseThinkingFlag` now accepts a
+  per-command default. Call sites pass task-appropriate defaults:
+  - `runReview` (review + adversarial-review): default **on**
+  - `runTask` with `rescueMode=true`: default **on**
+  - `runTask` with `rescueMode=false` (plain `/glm:task`): default **off**
+- `commands/review.md`, `commands/adversarial-review.md`,
+  `commands/rescue.md`, `commands/task.md`, `agents/glm-rescue.md`:
+  wording updated to reflect per-command defaults + codex-`medium`
+  alignment.
+- `README.md`: generation table rewritten with explicit `Tier` column
+  and newest-first ordering. "Thinking / reasoning" section rewritten
+  with per-command default table.
+
+### Non-breaking
+
+- `--thinking on|off` still overrides on every command.
+- No config file changes; no preset URL changes; no API shape changes.
+- Users with `--thinking` explicitly in their invocations keep exact
+  prior behavior. Users who never pass `--thinking` will now get `on`
+  for review/adversarial-review/rescue (previously `off`).
+
 ## v0.3.1 — 2026-04-20
 
 Benchmark-informed default model correction. Functional API unchanged

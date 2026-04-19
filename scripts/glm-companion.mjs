@@ -75,8 +75,8 @@ function printUsage() {
   );
 }
 
-function parseThinkingFlag(value) {
-  if (value === undefined || value === null || value === "") return false;
+function parseThinkingFlag(value, defaultValue = false) {
+  if (value === undefined || value === null || value === "") return defaultValue;
   const normalized = String(value).trim().toLowerCase();
   if (normalized === "on" || normalized === "true" || normalized === "1" || normalized === "enabled") {
     return true;
@@ -275,7 +275,10 @@ async function runReview(argv, { adversarial }) {
   const cwd = resolveCommandCwd(options);
   const workspaceRoot = resolveCommandWorkspace(options);
   const focusText = positionals.join(" ").trim();
-  const thinking = parseThinkingFlag(options.thinking);
+  // review + adversarial-review default thinking ON (deep-analysis tasks,
+  // matching codex CLI default model_reasoning_effort = "medium"). User can
+  // opt out with --thinking off.
+  const thinking = parseThinkingFlag(options.thinking, true);
 
   ensureGitRepository(cwd);
   const target = resolveReviewTarget(cwd, { base: options.base, scope: options.scope });
@@ -359,7 +362,10 @@ async function runTask(argv, { rescueMode }) {
   });
   const cwd = resolveCommandCwd(options);
   const workspaceRoot = resolveCommandWorkspace(options);
-  const thinking = parseThinkingFlag(options.thinking);
+  // rescue default thinking ON (stuck-work investigation needs depth);
+  // plain task default OFF (free-form channel — user turns on explicitly
+  // when reasoning is worth the latency/token cost).
+  const thinking = parseThinkingFlag(options.thinking, rescueMode);
 
   const prompt = positionals.join(" ").trim() || DEFAULT_CONTINUE_PROMPT;
   const systemPrompt = options.system ||

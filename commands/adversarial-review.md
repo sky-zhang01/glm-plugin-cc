@@ -41,7 +41,8 @@ or rewrite the user's focus text.
 - `--model <model>` — override GLM model. Text models only — vision
   models are rejected. Consider `--model glm-5.1` for the strongest
   adversarial pass.
-- `--thinking on|off` — toggle GLM reasoning mode (default: `off`). Turn
-  on when the adversarial pass needs deeper reasoning; costs latency and
-  token budget.
+- `--thinking on|off` — toggle GLM reasoning mode (default: `on`;
+  adversarial review benefits most from reasoning. Mirrors codex CLI
+  default `model_reasoning_effort = "medium"` on `gpt-5.4`). Use
+  `--thinking off` only if the latency / token cost is prohibitive.
 - Trailing tokens after flags are treated as free-form focus text.
