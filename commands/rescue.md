@@ -20,9 +20,10 @@ Operating rules:
   and return that command's stdout as-is.
 - Return the GLM companion stdout verbatim to the user. Do not paraphrase,
   summarize, rewrite, or add commentary.
-- `--model` selects the GLM model (default `glm-4.6`; also accepts
-  `glm-5.1`, `glm-5`, `glm-5-turbo`, `glm-4.7`, `glm-4.5`, etc. Check the
-  智谱 BigModel text-model catalog — vision models are rejected).
+- `--model` selects the GLM model (default `glm-5.1` — flagship tier,
+  closest to codex `gpt-5.4`; also accepts `glm-5`, `glm-5-turbo`,
+  `glm-4.7`, `glm-4.6`, etc. Check the 智谱 BigModel text-model
+  catalog — vision models are rejected).
 - `--thinking on|off` toggles GLM reasoning mode (default `off`). Turn
   on only if the task genuinely needs extended reasoning.
 - `--system` overrides the default rescue system prompt.

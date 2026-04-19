@@ -19,7 +19,7 @@ export const BUILTIN_PRESETS = Object.freeze({
     id: "coding-plan",
     display: "智谱 BigModel Coding Plan",
     base_url: "https://open.bigmodel.cn/api/coding/paas/v4",
-    default_model: "glm-4.6",
+    default_model: "glm-5.1",
     api_key_env: "ZAI_API_KEY",
     docs_url: "https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys",
     notes: "Subscription-priced coding plan via 智谱 BigModel (国内)."
@@ -28,7 +28,7 @@ export const BUILTIN_PRESETS = Object.freeze({
     id: "pay-as-you-go",
     display: "智谱 BigModel Pay-as-you-go",
     base_url: "https://open.bigmodel.cn/api/paas/v4",
-    default_model: "glm-4.6",
+    default_model: "glm-5.1",
     api_key_env: "ZAI_API_KEY",
     docs_url: "https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys",
     notes: "Metered billing via 智谱 BigModel (国内). Pay per token."
@@ -37,7 +37,7 @@ export const BUILTIN_PRESETS = Object.freeze({
     id: "custom",
     display: "Custom endpoint",
     base_url: null,
-    default_model: "glm-4.6",
+    default_model: "glm-5.1",
     api_key_env: "ZAI_API_KEY",
     docs_url: null,
     notes: "Bring-your-own OpenAI-compatible endpoint (e.g. 海外 Z.AI, self-hosted)."

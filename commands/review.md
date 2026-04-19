@@ -37,9 +37,11 @@ review output.
 - `--base <ref>` — base branch for branch-scope review (default: repo's
   default branch).
 - `--scope auto|working-tree|branch` — review scope (default: `auto`).
-- `--model <model>` — override GLM model (default: `glm-4.6` or whatever
+- `--model <model>` — override GLM model (default: `glm-5.1` or whatever
   the `GLM_MODEL` env var / config says). Text models only — vision
-  models (e.g. `glm-4v`, `glm-4.5v`) are rejected.
+  models (e.g. `glm-4v`, `glm-4.5v`) are rejected. Use `--model glm-4.6`
+  or `--model glm-5-turbo` when latency / cost matters more than the
+  flagship reasoning tier.
 - `--thinking on|off` — toggle GLM reasoning mode (default: `off`, matching
   codex `--effort unset`). Turn on for harder review targets if the
   latency cost is acceptable.

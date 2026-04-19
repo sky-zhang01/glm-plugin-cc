@@ -90,7 +90,7 @@ Verify with a minimal network probe:
 | `GLM_TIMEOUT_MS` | per-request timeout (default 900000 = 15 min) |
 
 Priority: CLI flag > env var > config file > built-in default
-(`https://open.bigmodel.cn/api/paas/v4`, `glm-4.6`).
+(`https://open.bigmodel.cn/api/paas/v4`, `glm-5.1`).
 
 ## Commands
 
@@ -107,20 +107,31 @@ Priority: CLI flag > env var > config file > built-in default
 
 ## Model configuration
 
-Default model is **`glm-4.6`**. This matches the codex-plugin-cc pattern of
-a single default (no per-command model split) — override per-invocation
-with `--model <name>` or globally via the `GLM_MODEL` env var. See 智谱
-BigModel's text-model catalog for available names.
+Default model is **`glm-5.1`** — the flagship tier on 智谱 BigModel.
+Picked to match codex CLI's default tier (`gpt-5.4`):
+
+- Artificial Analysis Intelligence Index: `gpt-5.4` = 57, `glm-5.1` = 51
+  (closest open-weights model)
+- SWE-Bench Pro: `glm-5.1` = **58.4** (outperforms `gpt-5.4`, Claude
+  Opus 4.6, Gemini 3.1 Pro on this benchmark)
+- BenchLM aggregate: `glm-5.1` = 84 vs `gpt-5.4-mini` = 73
+- Available to all 智谱 Coding Plan tiers (Max/Pro/Lite) since
+  2026-03-28
+
+This mirrors the codex-plugin-cc pattern of a single default (no
+per-command model split) — override per-invocation with `--model <name>`
+or globally via the `GLM_MODEL` env var. See 智谱 BigModel's text-model
+catalog for available names.
 
 Commonly useful text models:
 
 | Model | When to use |
 |---|---|
-| `glm-4.6` | Default — good balance of capability + latency + cost. |
-| `glm-5.1` | Flagship — strongest reasoning. Use for `adversarial-review` on hard targets. |
-| `glm-5` | Near-flagship — cheaper + faster than 5.1, marginal intelligence drop. |
+| `glm-5.1` | **Default** — flagship, closest to `gpt-5.4` on capability. |
+| `glm-5` | Near-flagship — cheaper + faster than 5.1, marginal intelligence drop (AA Index 50 vs 51). |
 | `glm-5-turbo` | Agent-optimized lightweight. Use for high-volume or simple tasks. |
 | `glm-4.7` | Previous-generation flagship. |
+| `glm-4.6` | Previous-generation mid-tier. Use when 5.x quota is tight. |
 
 Vision models (`glm-4v`, `glm-4.5v`, `glm-4.6v`, `glm-4.1v-thinking`, etc.)
 are **rejected** — this plugin only sends text messages.

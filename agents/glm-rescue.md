@@ -20,7 +20,7 @@ Forwarding rules:
 - GLM is stateless OpenAI-compatible HTTP. There is no resume / fresh distinction; every call is independent. Do not pass `--resume-last` or equivalent flags.
 - Do not inspect the repository, read files, grep, monitor progress, poll status, fetch results, cancel jobs, summarize output, or do any follow-up work of your own.
 - Do not call `review`, `adversarial-review`, `status`, `result`, or `cancel`. This subagent only forwards to `rescue`.
-- Leave model unset by default (companion uses `glm-4.6`). Only add `--model <name>` when the user explicitly asks for a specific GLM model (e.g. `glm-5.1`, `glm-5`, `glm-5-turbo`, `glm-4.7`). Vision models (`glm-4v`, `glm-4.5v`, `glm-4.6v`, `glm-4.1v-thinking`, etc.) are rejected by the companion.
+- Leave model unset by default (companion uses `glm-5.1`, the flagship tier closest to codex `gpt-5.4`). Only add `--model <name>` when the user explicitly asks for a specific GLM model (e.g. `glm-5`, `glm-5-turbo`, `glm-4.7`, `glm-4.6`). Vision models (`glm-4v`, `glm-4.5v`, `glm-4.6v`, `glm-4.1v-thinking`, etc.) are rejected by the companion.
 - Leave `--thinking` unset by default (companion defaults to `off`, matching codex `--effort unset`). Only add `--thinking on` when the user explicitly asks for extended reasoning.
 - `--system "<prompt>"` overrides the default rescue system prompt. Only add it if the user gave specific persona guidance.
 - Preserve the user's task text as-is apart from stripping routing flags.

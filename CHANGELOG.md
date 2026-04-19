@@ -1,5 +1,51 @@
 # Changelog
 
+## v0.3.1 — 2026-04-20
+
+Benchmark-informed default model correction. Functional API unchanged
+from v0.3.0; only the default model changes.
+
+### Changed
+
+- `scripts/lib/model-catalog.mjs`: `DEFAULT_MODEL` `glm-4.6` → `glm-5.1`.
+- `scripts/lib/preset-config.mjs`: all three preset `default_model`
+  fields updated `glm-4.6` → `glm-5.1`.
+- `README.md`: rewrote "Model configuration" section with the benchmark
+  rationale + re-sorted the commonly-useful table.
+- `commands/review.md`, `commands/rescue.md`, `agents/glm-rescue.md`:
+  updated default model reference + guidance.
+
+### Why
+
+v0.3.0 defaulted to `glm-4.6` without actually cross-checking against
+codex's CLI default. Codex CLI default = `gpt-5.4` (flagship), not
+`gpt-5.4-mini` (subagent tier). Picking `glm-4.6` as our default left us
+two generations below codex's default tier.
+
+Benchmark check:
+
+| Model | AA Intelligence Index | SWE-Bench Pro |
+|---|---|---|
+| `gpt-5.4` (codex default) | 57 | — |
+| `glm-5.1` | 51 | **58.4** (beats gpt-5.4, Claude Opus 4.6, Gemini 3.1 Pro) |
+| `glm-5` | 50 | — |
+| `glm-4.6` (previous default) | (older tier) | — |
+
+`glm-5.1` is the closest open-weights tier to `gpt-5.4` on general
+intelligence and *leads* on the SWE-Bench Pro coding axis. It's included
+in all 智谱 Coding Plan subscription tiers (Max/Pro/Lite) since
+2026-03-28. BenchLM aggregate: `glm-5.1` (84) vs `gpt-5.4-mini` (73),
+confirming the direction.
+
+### Notes
+
+- Users whose v0.3.0 `~/.config/glm-plugin-cc/config.json` already has
+  `default_model: "glm-4.6"` keep that — config-file value wins over the
+  built-in default. Re-run `/glm:setup --preset <id>` to refresh to the
+  new default, or pass `--default-model glm-5.1` explicitly.
+- Thinking still defaults off. Turning on `--thinking on` with `glm-5.1`
+  is the strongest mode; it costs latency and token budget.
+
 ## v0.3.0 — 2026-04-20
 
 **Breaking**: API format switched from Anthropic-compatible to

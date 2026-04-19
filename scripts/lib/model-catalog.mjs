@@ -14,7 +14,13 @@
  * model out of the deny list and let the HTTP response tell the user.
  */
 
-export const DEFAULT_MODEL = "glm-4.6";
+// Picked to match codex CLI's default tier (gpt-5.4 flagship):
+//   - Artificial Analysis Intelligence Index: gpt-5.4 = 57, glm-5.1 = 51 (closest open-weights)
+//   - SWE-Bench Pro: glm-5.1 = 58.4 (outperforms gpt-5.4, Claude Opus 4.6, Gemini 3.1 Pro)
+//   - BenchLM aggregate: glm-5.1 (84) vs gpt-5.4-mini (73)
+//   - Available to all 智谱 Coding Plan tiers (Max/Pro/Lite) since 2026-03-28
+// Override per-call with --model glm-4.6/glm-5/glm-5-turbo when latency or cost matters more.
+export const DEFAULT_MODEL = "glm-5.1";
 
 /**
  * Vision-only / vision-primary GLM models. Lower-cased for case-insensitive
