@@ -1,5 +1,71 @@
 # Changelog
 
+## v0.3.0 — 2026-04-20
+
+**Breaking**: API format switched from Anthropic-compatible to
+**OpenAI-compatible**. This plugin never was meant to replace GLM as a
+Claude Code CLI provider; it calls GLM from inside a session over
+OpenAI-compatible HTTP. Preset URLs updated accordingly. Users on v0.2.0
+must re-run `/glm:setup` (no auto-migration — the previous Anthropic
+URLs would 404 against the new client).
+
+### Changed
+
+- `scripts/lib/glm-client.mjs` rewritten:
+  - Endpoint now `${base_url}/chat/completions` (was `/v1/messages`).
+  - Auth now `Authorization: Bearer <key>` (was `x-api-key`).
+  - Request body uses OpenAI `messages[]` schema; `system` promoted to a
+    first-role message (was top-level `system`).
+  - Response parses `choices[0].message.content` (was `content[].text`).
+  - Extracts `choices[0].message.reasoning_content` when present, exposed
+    to `render.mjs` as `reasoningSummary`.
+- Preset URLs switched to 智谱 BigModel OpenAI-compatible endpoints:
+  - `coding-plan` → `https://open.bigmodel.cn/api/coding/paas/v4`
+    (was `https://api.z.ai/api/anthropic`)
+  - `pay-as-you-go` → `https://open.bigmodel.cn/api/paas/v4`
+    (was `https://open.bigmodel.cn/api/anthropic`)
+  - `custom` unchanged in shape; now expects OpenAI-compatible URL.
+- Fallback base URL when no preset/env is set: now
+  `https://open.bigmodel.cn/api/paas/v4` (was `https://api.z.ai/api/anthropic`).
+- Preset `display` text rebranded to 智谱 BigModel (国内 default); overseas
+  Z.AI or self-hosted endpoints go through `custom`.
+- `commands/setup.md` menu wording updated.
+- `commands/review.md`, `adversarial-review.md`, `task.md`, `rescue.md`,
+  `agents/glm-rescue.md`: documented `--thinking on|off` flag and text-only
+  model constraint.
+
+### Added
+
+- `scripts/lib/model-catalog.mjs`:
+  - `DEFAULT_MODEL` constant (`glm-4.6`).
+  - `isVisionModel(model)` + `assertNonVisionModel(model)` — reject vision
+    models (`glm-4v`, `glm-4.5v`, `glm-4.6v`, `glm-4.1v-thinking`, etc.)
+    so text-review commands fail fast instead of silently wasting tokens.
+- `--thinking on|off` CLI flag for `review`, `adversarial-review`, `task`,
+  `rescue`. Default `off` matches codex `--effort unset`; GLM routes via
+  `thinking: {"type": "enabled" | "disabled"}` request field.
+- `resolveModel()` now validates the selected model against the vision
+  deny-list before any HTTP call.
+
+### Security
+
+- Error message on non-https base URLs still truncates long inputs to
+  avoid echoing accidentally-pasted credentials (carried from v0.2.0).
+- API key still env-only, never persisted.
+- `ZAI_BASE_URL` still rejected unless `https://`.
+
+### Rationale
+
+- Clarified architectural intent after confusion in v0.1/v0.2: this plugin
+  calls GLM from *inside* a Claude session over OpenAI-compatible HTTP,
+  it does not swap Claude for GLM at the CLI provider layer.
+- 国内智谱 `open.bigmodel.cn` is the default; 海外 Z.AI is reachable via the
+  `custom` preset. Users on v0.2.0 with an Anthropic-format Z.AI URL in
+  their config.json need to re-run `/glm:setup` — the plugin will throw
+  a clear 404 error if they don't, rather than silently failing.
+- Single default model + `--thinking off` by default mirror the
+  codex-plugin-cc pattern (no per-command splits; reasoning opt-in).
+
 ## v0.2.0 — 2026-04-20
 
 Endpoint preset system + command-layer cleanup. Key UX change: `/glm:setup`

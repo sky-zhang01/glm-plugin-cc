@@ -1,6 +1,6 @@
 ---
 description: Delegate investigation, fix, or rescue work to the GLM rescue subagent
-argument-hint: "[--model <model>] [--system <system-prompt>] [what GLM should investigate, solve, or continue]"
+argument-hint: "[--model <model>] [--system <system-prompt>] [--thinking on|off] [what GLM should investigate, solve, or continue]"
 context: fork
 allowed-tools: Bash(node:*), AskUserQuestion
 ---
@@ -21,7 +21,10 @@ Operating rules:
 - Return the GLM companion stdout verbatim to the user. Do not paraphrase,
   summarize, rewrite, or add commentary.
 - `--model` selects the GLM model (default `glm-4.6`; also accepts
-  `glm-4.7`, `glm-4.5`, etc. Check Z.AI model catalog).
+  `glm-5.1`, `glm-5`, `glm-5-turbo`, `glm-4.7`, `glm-4.5`, etc. Check the
+  智谱 BigModel text-model catalog — vision models are rejected).
+- `--thinking on|off` toggles GLM reasoning mode (default `off`). Turn
+  on only if the task genuinely needs extended reasoning.
 - `--system` overrides the default rescue system prompt.
 - Do not ask the subagent to inspect files, monitor progress, or poll
   status/result; that's the user's next step if needed.

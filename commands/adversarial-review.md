@@ -1,6 +1,6 @@
 ---
 description: Run a GLM review that challenges the implementation approach and design choices
-argument-hint: '[--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [focus ...]'
+argument-hint: '[--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [focus ...]'
 disable-model-invocation: true
 allowed-tools: Read, Glob, Grep, Bash(node:*), Bash(git:*)
 ---
@@ -38,5 +38,10 @@ or rewrite the user's focus text.
 
 - `--base <ref>` — base branch for branch-scope review.
 - `--scope auto|working-tree|branch` — review scope (default: `auto`).
-- `--model <model>` — override GLM model.
+- `--model <model>` — override GLM model. Text models only — vision
+  models are rejected. Consider `--model glm-5.1` for the strongest
+  adversarial pass.
+- `--thinking on|off` — toggle GLM reasoning mode (default: `off`). Turn
+  on when the adversarial pass needs deeper reasoning; costs latency and
+  token budget.
 - Trailing tokens after flags are treated as free-form focus text.

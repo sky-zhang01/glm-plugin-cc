@@ -1,6 +1,6 @@
 ---
 description: Run a GLM code review against local git state
-argument-hint: '[--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [focus text]'
+argument-hint: '[--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [focus text]'
 disable-model-invocation: true
 allowed-tools: Read, Glob, Grep, Bash(node:*), Bash(git:*)
 ---
@@ -38,5 +38,9 @@ review output.
   default branch).
 - `--scope auto|working-tree|branch` — review scope (default: `auto`).
 - `--model <model>` — override GLM model (default: `glm-4.6` or whatever
-  the `GLM_MODEL` env var / config says).
+  the `GLM_MODEL` env var / config says). Text models only — vision
+  models (e.g. `glm-4v`, `glm-4.5v`) are rejected.
+- `--thinking on|off` — toggle GLM reasoning mode (default: `off`, matching
+  codex `--effort unset`). Turn on for harder review targets if the
+  latency cost is acceptable.
 - Trailing tokens after flags are treated as free-form focus text.

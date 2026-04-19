@@ -1,19 +1,28 @@
 /**
- * GLM Anthropic-compatible client.
+ * GLM OpenAI-compatible client.
  *
  * GLM is stateless HTTP — no broker, no persistent sessions, no thread resume.
  * We keep the function surface aligned with the codex-plugin-cc scaffold so
  * the companion / render / job-control code can call us uniformly.
  *
- * Endpoint: https://api.z.ai/api/anthropic/v1/messages
- * Auth: `x-api-key: ${ZAI_API_KEY}` header (Anthropic-compatible).
+ * Endpoint: ${base_url}/chat/completions
+ *   base_url defaults to https://open.bigmodel.cn/api/paas/v4
+ *   coding-plan preset:   https://open.bigmodel.cn/api/coding/paas/v4
+ *   pay-as-you-go preset: https://open.bigmodel.cn/api/paas/v4
+ *   custom preset:        user-supplied https://... (e.g. 海外 api.z.ai/api/paas/v4)
+ *
+ * Auth: `Authorization: Bearer ${ZAI_API_KEY}` header (OpenAI-compatible).
+ *
+ * Thinking: OFF by default (matches codex `--effort unset`). Opt-in via
+ * `thinking: true` (or CLI `--thinking on`). GLM uses the `thinking`
+ * request field `{"type": "enabled" | "disabled"}`.
  */
 
 import { readJsonFile } from "./fs.mjs";
+import { assertNonVisionModel, DEFAULT_MODEL } from "./model-catalog.mjs";
 import { resolveEffectiveConfig } from "./preset-config.mjs";
 
-const FALLBACK_BASE_URL = "https://api.z.ai/api/anthropic";
-const DEFAULT_MODEL = "glm-4.6";
+const FALLBACK_BASE_URL = "https://open.bigmodel.cn/api/paas/v4";
 const DEFAULT_MAX_TOKENS = 8192;
 const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000; // 15 min aligned with codex review gate
 
@@ -32,6 +41,12 @@ function resolveApiKey() {
   return getEnv("ZAI_API_KEY") || getEnv("Z_AI_API_KEY") || getEnv("GLM_API_KEY");
 }
 
+function normalizeBaseUrl(url) {
+  return String(url || "")
+    .replace(/\/+$/, "")
+    .replace(/\/chat\/completions$/i, "");
+}
+
 function resolveBaseUrl() {
   const override = getEnv("ZAI_BASE_URL");
   if (override) {
@@ -40,29 +55,35 @@ function resolveBaseUrl() {
         `ZAI_BASE_URL must use https:// (got: ${override}). Plaintext endpoints would leak the API key.`
       );
     }
-    return override.replace(/\/+$/, "").replace(/\/v1\/messages$/i, "");
+    return normalizeBaseUrl(override);
   }
   const config = resolveEffectiveConfig();
   if (config.base_url) {
-    return config.base_url;
+    return normalizeBaseUrl(config.base_url);
   }
   return FALLBACK_BASE_URL;
 }
 
 function resolveEndpoint() {
-  return `${resolveBaseUrl()}/v1/messages`;
+  return `${resolveBaseUrl()}/chat/completions`;
 }
 
 function resolveModel(options = {}) {
+  let model = null;
   if (options.model) {
-    return options.model;
+    model = options.model;
+  } else {
+    const envModel = getEnv("GLM_MODEL");
+    if (envModel) {
+      model = envModel;
+    } else {
+      const config = resolveEffectiveConfig();
+      model = config.default_model || DEFAULT_MODEL;
+    }
   }
-  const envModel = getEnv("GLM_MODEL");
-  if (envModel) {
-    return envModel;
-  }
-  const config = resolveEffectiveConfig();
-  return config.default_model || DEFAULT_MODEL;
+  // Guard against accidentally routing vision models through text-only commands.
+  assertNonVisionModel(model);
+  return model;
 }
 
 export function resolveConfigSummary() {
@@ -93,10 +114,17 @@ export function getGlmAvailability(cwd) {
       detail: "ZAI_API_KEY (or Z_AI_API_KEY / GLM_API_KEY) environment variable not set."
     };
   }
-  return {
-    available: true,
-    detail: `endpoint=${resolveEndpoint()}, model=${resolveModel()}`
-  };
+  try {
+    return {
+      available: true,
+      detail: `endpoint=${resolveEndpoint()}, model=${resolveModel()}`
+    };
+  } catch (error) {
+    return {
+      available: false,
+      detail: error instanceof Error ? error.message : String(error)
+    };
+  }
 }
 
 /**
@@ -119,8 +147,7 @@ export async function getGlmAuthStatus(cwd, options = {}) {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01"
+        authorization: `Bearer ${apiKey}`
       },
       body: JSON.stringify({
         model: resolveModel(options),
@@ -197,17 +224,17 @@ export async function interruptAppServerTurn(cwd, { threadId, turnId } = {}) {
  *   { rawOutput, parsed, parseError, failureMessage, threadId, turnId, errorCode }
  */
 export async function runGlmReview(cwd, options = {}) {
-  return runMessagesRequest(cwd, { ...options, expectJson: true });
+  return runChatRequest(cwd, { ...options, expectJson: true });
 }
 
 /**
  * Send a free-form task request. Returns the raw output without JSON parsing.
  */
 export async function runGlmTask(cwd, options = {}) {
-  return runMessagesRequest(cwd, { ...options, expectJson: false });
+  return runChatRequest(cwd, { ...options, expectJson: false });
 }
 
-async function runMessagesRequest(cwd, options = {}) {
+async function runChatRequest(cwd, options = {}) {
   const availability = getGlmAvailability(cwd);
   if (!availability.available) {
     return failureShape(`GLM unavailable: ${availability.detail}`, "UNAVAILABLE");
@@ -220,39 +247,51 @@ async function runMessagesRequest(cwd, options = {}) {
 
   const apiKey = resolveApiKey();
   const endpoint = resolveEndpoint();
-  const model = resolveModel(options);
+  let model;
+  try {
+    model = resolveModel(options);
+  } catch (error) {
+    return failureShape(error instanceof Error ? error.message : String(error), "MODEL_REJECTED");
+  }
   const timeoutMs = resolveTimeoutMs(options);
   const systemPrompt = options.systemPrompt || null;
   const maxTokens = options.maxTokens || DEFAULT_MAX_TOKENS;
+  const thinkingEnabled = Boolean(options.thinking);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const startedAt = Date.now();
 
   try {
+    const messages = [];
+    if (systemPrompt) {
+      messages.push({ role: "system", content: systemPrompt });
+    }
+    const userContent = options.expectJson
+      ? `${prompt}\n\nRespond with ONLY a single JSON object. Do not wrap in markdown fences.`
+      : prompt;
+    messages.push({ role: "user", content: userContent });
+
     const body = {
       model,
       max_tokens: maxTokens,
-      messages: [{ role: "user", content: prompt }]
+      messages,
+      stream: false,
+      thinking: { type: thinkingEnabled ? "enabled" : "disabled" }
     };
-    if (systemPrompt) {
-      body.system = systemPrompt;
-    }
-    if (options.expectJson) {
-      body.messages[0].content =
-        `${prompt}\n\nRespond with ONLY a single JSON object. Do not wrap in markdown fences.`;
-    }
 
     if (typeof options.onProgress === "function") {
-      options.onProgress({ message: `calling ${model}`, phase: "starting" });
+      options.onProgress({
+        message: `calling ${model}${thinkingEnabled ? " (thinking on)" : ""}`,
+        phase: "starting"
+      });
     }
 
     const response = await fetch(endpoint, {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
+        authorization: `Bearer ${apiKey}`,
         "x-service-name": SERVICE_NAME
       },
       body: JSON.stringify(body),
@@ -282,6 +321,13 @@ async function runMessagesRequest(cwd, options = {}) {
         { rawResponse: responseText }
       );
     }
+    if (response.status === 404) {
+      return failureShape(
+        `HTTP 404 from ${endpoint}. Endpoint wrong for this preset? Preset base_url must be OpenAI-compatible (\`/chat/completions\` is appended automatically).`,
+        "NOT_FOUND",
+        { rawResponse: responseText }
+      );
+    }
     if (!response.ok) {
       return failureShape(
         `HTTP ${response.status} from ${endpoint}: ${responseText.slice(0, 400)}`,
@@ -301,14 +347,16 @@ async function runMessagesRequest(cwd, options = {}) {
       );
     }
 
-    const rawOutput = extractTextFromAnthropicResponse(payload);
+    const rawOutput = extractTextFromChatCompletion(payload);
     if (!rawOutput) {
       return failureShape(
-        "Response contained no text content.",
+        "Response contained no assistant text.",
         "EMPTY_RESPONSE",
         { rawResponse: responseText }
       );
     }
+
+    const reasoningSummary = extractReasoningFromChatCompletion(payload);
 
     if (typeof options.onProgress === "function") {
       options.onProgress({
@@ -318,7 +366,12 @@ async function runMessagesRequest(cwd, options = {}) {
     }
 
     if (options.expectJson) {
-      return parseStructuredOutput(rawOutput, { threadId: null, turnId: null, errorCode: null });
+      return parseStructuredOutput(rawOutput, {
+        threadId: null,
+        turnId: null,
+        errorCode: null,
+        reasoningSummary
+      });
     }
 
     return {
@@ -328,7 +381,8 @@ async function runMessagesRequest(cwd, options = {}) {
       failureMessage: null,
       threadId: null,
       turnId: null,
-      errorCode: null
+      errorCode: null,
+      reasoningSummary
     };
   } catch (error) {
     if (error?.name === "AbortError") {
@@ -340,15 +394,51 @@ async function runMessagesRequest(cwd, options = {}) {
   }
 }
 
-function extractTextFromAnthropicResponse(payload) {
-  if (!payload || !Array.isArray(payload.content)) {
+function extractTextFromChatCompletion(payload) {
+  const choice = payload?.choices?.[0];
+  if (!choice) {
     return "";
   }
-  return payload.content
-    .filter((block) => block && block.type === "text" && typeof block.text === "string")
-    .map((block) => block.text)
-    .join("\n")
-    .trim();
+  const message = choice.message ?? choice.delta ?? null;
+  if (!message) {
+    return "";
+  }
+  // Standard OpenAI: message.content is a string.
+  if (typeof message.content === "string") {
+    return message.content.trim();
+  }
+  // Defensive: some OpenAI-compatible providers return content as an array
+  // of parts (like the Chat Completions vision flow). Concatenate text parts.
+  if (Array.isArray(message.content)) {
+    return message.content
+      .map((part) => {
+        if (typeof part === "string") return part;
+        if (part && typeof part === "object" && typeof part.text === "string") return part.text;
+        return "";
+      })
+      .join("")
+      .trim();
+  }
+  return "";
+}
+
+function extractReasoningFromChatCompletion(payload) {
+  const choice = payload?.choices?.[0];
+  const message = choice?.message ?? null;
+  if (!message) return null;
+  // GLM returns thinking content under `reasoning_content` when
+  // thinking.type === "enabled". Expose it so render.mjs can show it.
+  if (typeof message.reasoning_content === "string" && message.reasoning_content.trim()) {
+    return [message.reasoning_content.trim()];
+  }
+  if (Array.isArray(message.reasoning_content)) {
+    const lines = message.reasoning_content
+      .map((part) => (typeof part === "string" ? part : typeof part?.text === "string" ? part.text : ""))
+      .filter(Boolean)
+      .map((line) => line.trim());
+    return lines.length > 0 ? lines : null;
+  }
+  return null;
 }
 
 function failureShape(message, errorCode, extra = {}) {
@@ -360,6 +450,7 @@ function failureShape(message, errorCode, extra = {}) {
     threadId: null,
     turnId: null,
     errorCode,
+    reasoningSummary: null,
     ...extra
   };
 }

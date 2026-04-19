@@ -1,9 +1,13 @@
 /**
- * Preset + user-config persistence for glm-plugin-cc.
+ * Preset + user-config persistence for glm-plugin-cc (OpenAI-compatible).
  *
  * API-key is NEVER stored here (always read from ZAI_API_KEY env).
  * Only endpoint preset + default model are persisted, to
  * `~/.config/glm-plugin-cc/config.json` (XDG-compliant).
+ *
+ * Endpoints are OpenAI-compatible (POST /chat/completions). Defaults
+ * target 国内智谱 BigModel; overseas Z.AI / self-hosted endpoints can be
+ * plugged in via the `custom` preset.
  */
 
 import fs from "node:fs";
@@ -13,21 +17,21 @@ import path from "node:path";
 export const BUILTIN_PRESETS = Object.freeze({
   "coding-plan": Object.freeze({
     id: "coding-plan",
-    display: "Z.AI Coding Plan",
-    base_url: "https://api.z.ai/api/anthropic",
-    default_model: "glm-4.6",
-    api_key_env: "ZAI_API_KEY",
-    docs_url: "https://z.ai",
-    notes: "Subscription-priced coding plan. Best for regular review use."
-  }),
-  "pay-as-you-go": Object.freeze({
-    id: "pay-as-you-go",
-    display: "Z.AI Pay-as-you-go (BigModel)",
-    base_url: "https://open.bigmodel.cn/api/anthropic",
+    display: "智谱 BigModel Coding Plan",
+    base_url: "https://open.bigmodel.cn/api/coding/paas/v4",
     default_model: "glm-4.6",
     api_key_env: "ZAI_API_KEY",
     docs_url: "https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys",
-    notes: "Metered billing via BigModel console. Pay per token."
+    notes: "Subscription-priced coding plan via 智谱 BigModel (国内)."
+  }),
+  "pay-as-you-go": Object.freeze({
+    id: "pay-as-you-go",
+    display: "智谱 BigModel Pay-as-you-go",
+    base_url: "https://open.bigmodel.cn/api/paas/v4",
+    default_model: "glm-4.6",
+    api_key_env: "ZAI_API_KEY",
+    docs_url: "https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys",
+    notes: "Metered billing via 智谱 BigModel (国内). Pay per token."
   }),
   "custom": Object.freeze({
     id: "custom",
@@ -36,7 +40,7 @@ export const BUILTIN_PRESETS = Object.freeze({
     default_model: "glm-4.6",
     api_key_env: "ZAI_API_KEY",
     docs_url: null,
-    notes: "Bring-your-own Anthropic-compatible endpoint."
+    notes: "Bring-your-own OpenAI-compatible endpoint (e.g. 海外 Z.AI, self-hosted)."
   })
 });
 
@@ -203,10 +207,10 @@ export function applyPreset({ preset_id, base_url, default_model } = {}) {
     throw new Error(`base_url must start with https:// (got: ${shown}).`);
   }
   if (resolvedBaseUrl) {
-    // strip trailing slashes and any accidental /v1/messages suffix users may paste
+    // strip trailing slashes and any accidental /chat/completions suffix users may paste
     resolvedBaseUrl = resolvedBaseUrl
       .replace(/\/+$/, "")
-      .replace(/\/v1\/messages$/i, "");
+      .replace(/\/chat\/completions$/i, "");
   }
 
   return writeConfigFile({

@@ -1,7 +1,7 @@
 # glm-plugin-cc
 
-Claude Code plugin: use Z.AI GLM models as an external reviewer or rescue
-backend via Anthropic-compatible HTTP. Scaffold derived from
+Claude Code plugin: use 智谱 GLM models as an external reviewer or rescue
+backend via **OpenAI-compatible HTTP**. Scaffold derived from
 [openai/codex-plugin-cc](https://github.com/openai/codex-plugin-cc) (Apache-2.0).
 
 ## Why this plugin exists
@@ -12,6 +12,11 @@ SEV `/verify` Layer 3 orchestration. When the primary codex reviewer is
 rate-limited or unavailable, GLM is the secondary provider in the
 fallback chain.
 
+It does **not** replace GLM as a provider in the Claude Code CLI itself —
+it's a plugin that calls GLM over OpenAI-compatible HTTP from inside a
+Claude session, so Claude stays the primary model while GLM provides a
+second opinion.
+
 Design constraints:
 
 - **Stateless HTTP.** No persistent sessions, no broker subprocess.
@@ -19,8 +24,10 @@ Design constraints:
   (`completion-stop-guard.sh`), not in plugins. See
   [claude-dev-harness docs/quality-loop-v3-boundary-crosswalk.md §4.4](https://gitea.tokyo.skyzhang.net/SkyLab/claude-dev-harness/src/branch/plan/quality-loop-v3/docs/quality-loop-v3-boundary-crosswalk.md).
 - **Zero runtime npm deps.** Only Node stdlib (global `fetch` since 18.18).
-- **Anthropic-compatible schema.** Works with Z.AI's
-  `https://api.z.ai/api/anthropic/v1/messages` endpoint out of the box.
+- **OpenAI-compatible schema.** Works with 智谱 BigModel's
+  `https://open.bigmodel.cn/api/.../chat/completions` endpoints out of the box;
+  any other OpenAI-compatible endpoint (海外 Z.AI, self-hosted) plugs in
+  via the `custom` preset.
 
 ## Install
 
@@ -38,10 +45,13 @@ to install — the plugin itself is the runtime. Configuration has two
 independent parts:
 
 1. **Endpoint preset** (persisted to `~/.config/glm-plugin-cc/config.json`,
-   dir 0700 / file 0600):
-   - `coding-plan` — `https://api.z.ai/api/anthropic` (subscription pricing)
-   - `pay-as-you-go` — `https://open.bigmodel.cn/api/anthropic` (BigModel metered)
-   - `custom` — bring-your-own Anthropic-compatible URL
+   dir 0700 / file 0600; all OpenAI-compatible):
+   - `coding-plan` — `https://open.bigmodel.cn/api/coding/paas/v4`
+     (智谱 BigModel subscription pricing, **recommended**)
+   - `pay-as-you-go` — `https://open.bigmodel.cn/api/paas/v4`
+     (智谱 BigModel metered)
+   - `custom` — bring-your-own OpenAI-compatible URL (e.g. 海外 Z.AI:
+     `https://api.z.ai/api/paas/v4`, or a self-hosted endpoint)
 2. **API key** — always read from the `ZAI_API_KEY` environment variable.
    Never written to disk.
 
@@ -53,15 +63,14 @@ pick a preset. Or pass one directly:
 ```
 /glm:setup --preset coding-plan
 /glm:setup --preset pay-as-you-go
-/glm:setup --preset custom --base-url https://your-endpoint.example.com/anthropic
+/glm:setup --preset custom --base-url https://your-endpoint.example.com/openai
 ```
 
 Then export your API key in your shell (add to `.zshrc` / `.bashrc` for
 persistence):
 
 ```bash
-# Coding Plan key → get from https://z.ai
-# Pay-as-you-go key → get from https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys
+# Get from https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys
 export ZAI_API_KEY="..."
 ```
 
@@ -76,20 +85,21 @@ Verify with a minimal network probe:
 | Env var | Effect |
 |---|---|
 | `ZAI_API_KEY` (also `Z_AI_API_KEY`, `GLM_API_KEY`) | required; no disk fallback |
-| `ZAI_BASE_URL` | overrides config-file preset (must be `https://`) |
+| `ZAI_BASE_URL` | overrides config-file preset (must be `https://`, OpenAI-compatible) |
 | `GLM_MODEL` | overrides config-file `default_model` |
 | `GLM_TIMEOUT_MS` | per-request timeout (default 900000 = 15 min) |
 
-Priority: CLI flag > env var > config file > built-in default.
+Priority: CLI flag > env var > config file > built-in default
+(`https://open.bigmodel.cn/api/paas/v4`, `glm-4.6`).
 
 ## Commands
 
 | Command | Purpose |
 |---|---|
 | `/glm:setup [--preset ...] [--base-url ...] [--default-model ...] [--ping]` | Pick endpoint preset, optionally probe connectivity. |
-| `/glm:review [--base <ref>] [--scope auto\|working-tree\|branch] [--model <name>] [focus text]` | Balanced review of git diff. Returns structured JSON per `schemas/review-output.schema.json`. |
+| `/glm:review [--base <ref>] [--scope auto\|working-tree\|branch] [--model <name>] [--thinking on\|off] [focus text]` | Balanced review of git diff. Returns structured JSON per `schemas/review-output.schema.json`. |
 | `/glm:adversarial-review [same flags] [focus text]` | Aggressive review prioritizing defects + design challenges. |
-| `/glm:task [--system <prompt>] [--model <name>] [prompt]` | Free-form GLM call. |
+| `/glm:task [--system <prompt>] [--model <name>] [--thinking on\|off] [prompt]` | Free-form GLM call. |
 | `/glm:rescue [same flags]` | Delegate to the `glm-rescue` subagent for stuck/blocked work. |
 | `/glm:status [job-id] [--all]` | List local job history (no server polling — GLM is stateless). |
 | `/glm:result <job-id>` | Replay a stored job's final output. |
@@ -97,9 +107,30 @@ Priority: CLI flag > env var > config file > built-in default.
 
 ## Model configuration
 
-Default model is `glm-4.6`. Override per-invocation with `--model glm-4.7`
-or globally via `GLM_MODEL` env var. See Z.AI's model catalog for
-available names.
+Default model is **`glm-4.6`**. This matches the codex-plugin-cc pattern of
+a single default (no per-command model split) — override per-invocation
+with `--model <name>` or globally via the `GLM_MODEL` env var. See 智谱
+BigModel's text-model catalog for available names.
+
+Commonly useful text models:
+
+| Model | When to use |
+|---|---|
+| `glm-4.6` | Default — good balance of capability + latency + cost. |
+| `glm-5.1` | Flagship — strongest reasoning. Use for `adversarial-review` on hard targets. |
+| `glm-5` | Near-flagship — cheaper + faster than 5.1, marginal intelligence drop. |
+| `glm-5-turbo` | Agent-optimized lightweight. Use for high-volume or simple tasks. |
+| `glm-4.7` | Previous-generation flagship. |
+
+Vision models (`glm-4v`, `glm-4.5v`, `glm-4.6v`, `glm-4.1v-thinking`, etc.)
+are **rejected** — this plugin only sends text messages.
+
+### Thinking / reasoning
+
+Thinking is **off by default** (matches codex `--effort unset`). Opt in
+per-call with `--thinking on` when the task genuinely needs extended
+reasoning; costs latency and token budget. GLM routes this via the
+`thinking: {"type": "enabled"}` request field.
 
 ## Architecture
 
@@ -110,9 +141,11 @@ Claude Code session
    │       │
    │       └─ node scripts/glm-companion.mjs adversarial-review ...
    │               │
-   │               ├─ lib/git.mjs       (collect diff)
-   │               ├─ lib/glm-client.mjs (HTTP POST to api.z.ai)
-   │               └─ lib/render.mjs    (schema-validated output)
+   │               ├─ lib/git.mjs          (collect diff)
+   │               ├─ lib/glm-client.mjs   (HTTP POST to /chat/completions)
+   │               ├─ lib/model-catalog.mjs (vision deny-list)
+   │               ├─ lib/preset-config.mjs (XDG config)
+   │               └─ lib/render.mjs       (schema-validated output)
    │
    └─ harness SEV /verify Layer 3 (external orchestration, stop-gate)
 ```

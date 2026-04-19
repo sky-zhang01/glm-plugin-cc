@@ -64,15 +64,27 @@ function printUsage() {
     [
       "Usage:",
       "  node scripts/glm-companion.mjs setup [--ping] [--enable-review-gate|--disable-review-gate] [--json]",
-      "  node scripts/glm-companion.mjs review [--base <ref>] [--scope auto|working-tree|branch] [--json] [focus text]",
-      "  node scripts/glm-companion.mjs adversarial-review [--base <ref>] [--scope auto|working-tree|branch] [--json] [focus text]",
-      "  node scripts/glm-companion.mjs task [--system <text>] [--model <model>] [--json] [prompt]",
-      "  node scripts/glm-companion.mjs rescue [--system <text>] [--model <model>] [--json] [prompt]",
+      "  node scripts/glm-companion.mjs review [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--json] [focus text]",
+      "  node scripts/glm-companion.mjs adversarial-review [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--json] [focus text]",
+      "  node scripts/glm-companion.mjs task [--system <text>] [--model <model>] [--thinking on|off] [--json] [prompt]",
+      "  node scripts/glm-companion.mjs rescue [--system <text>] [--model <model>] [--thinking on|off] [--json] [prompt]",
       "  node scripts/glm-companion.mjs status [job-id] [--all] [--json]",
       "  node scripts/glm-companion.mjs result [job-id] [--json]",
       "  node scripts/glm-companion.mjs cancel [job-id] [--json]"
     ].join("\n")
   );
+}
+
+function parseThinkingFlag(value) {
+  if (value === undefined || value === null || value === "") return false;
+  const normalized = String(value).trim().toLowerCase();
+  if (normalized === "on" || normalized === "true" || normalized === "1" || normalized === "enabled") {
+    return true;
+  }
+  if (normalized === "off" || normalized === "false" || normalized === "0" || normalized === "disabled") {
+    return false;
+  }
+  throw new Error(`--thinking expects on|off (got: ${value}).`);
 }
 
 function outputResult(value, asJson) {
@@ -257,12 +269,13 @@ function buildReviewSystemPrompt({ adversarial, schema }) {
 
 async function runReview(argv, { adversarial }) {
   const { options, positionals } = parseCommandInput(argv, {
-    valueOptions: ["base", "scope", "model"],
+    valueOptions: ["base", "scope", "model", "thinking"],
     booleanOptions: ["json"]
   });
   const cwd = resolveCommandCwd(options);
   const workspaceRoot = resolveCommandWorkspace(options);
   const focusText = positionals.join(" ").trim();
+  const thinking = parseThinkingFlag(options.thinking);
 
   ensureGitRepository(cwd);
   const target = resolveReviewTarget(cwd, { base: options.base, scope: options.scope });
@@ -299,6 +312,7 @@ async function runReview(argv, { adversarial }) {
     prompt: interpolated,
     systemPrompt,
     model: options.model,
+    thinking,
     expectJson: true,
     onProgress: reporter
   });
@@ -340,11 +354,12 @@ async function runReview(argv, { adversarial }) {
 
 async function runTask(argv, { rescueMode }) {
   const { options, positionals } = parseCommandInput(argv, {
-    valueOptions: ["system", "model"],
+    valueOptions: ["system", "model", "thinking"],
     booleanOptions: ["json"]
   });
   const cwd = resolveCommandCwd(options);
   const workspaceRoot = resolveCommandWorkspace(options);
+  const thinking = parseThinkingFlag(options.thinking);
 
   const prompt = positionals.join(" ").trim() || DEFAULT_CONTINUE_PROMPT;
   const systemPrompt = options.system ||
@@ -371,6 +386,7 @@ async function runTask(argv, { rescueMode }) {
     prompt,
     systemPrompt,
     model: options.model,
+    thinking,
     onProgress: reporter
   });
 

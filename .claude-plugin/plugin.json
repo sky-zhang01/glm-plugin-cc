@@ -1,7 +1,7 @@
 {
   "name": "glm",
-  "version": "0.2.0",
-  "description": "Use Z.AI GLM models from Claude Code to review code or delegate tasks. Stateless HTTP via Anthropic-compatible endpoint. No Stop hook — orchestration lives in claude-dev-harness SEV /verify.",
+  "version": "0.3.0",
+  "description": "Use 智谱 GLM models from Claude Code to review code or delegate tasks. Stateless HTTP via OpenAI-compatible endpoint. No Stop hook — orchestration lives in claude-dev-harness SEV /verify.",
   "author": {
     "name": "Sky Zhang"
   },

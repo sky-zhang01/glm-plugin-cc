@@ -9,6 +9,10 @@ install. `/glm:setup` writes an endpoint preset to
 `~/.config/glm-plugin-cc/config.json`; the API key itself is always read
 from the `ZAI_API_KEY` environment variable (never stored on disk).
 
+All built-in presets point at **OpenAI-compatible** endpoints
+(`POST /chat/completions`). Default presets target 国内智谱 BigModel.
+Overseas Z.AI or self-hosted endpoints go through the `custom` preset.
+
 Raw slash-command arguments:
 `$ARGUMENTS`
 
@@ -30,24 +34,24 @@ final JSON to the user and stop — no menu needed.
 ### Case B — no preset arguments, and `report.config.preset_id` is null (first-time setup)
 
 Use `AskUserQuestion` exactly once with these four options, putting
-`Z.AI Coding Plan` first and suffixing it with `(Recommended)`:
+`Coding Plan` first and suffixing it with `(Recommended)`:
 
-- `Z.AI Coding Plan (Recommended)` — `api.z.ai/api/anthropic`, subscription pricing
-- `Pay-as-you-go` — `open.bigmodel.cn/api/anthropic`, metered billing
-- `Custom endpoint` — bring-your-own Anthropic-compatible URL
+- `智谱 BigModel Coding Plan (Recommended)` — `open.bigmodel.cn/api/coding/paas/v4`, subscription pricing
+- `智谱 BigModel Pay-as-you-go` — `open.bigmodel.cn/api/paas/v4`, metered billing
+- `Custom endpoint` — bring-your-own OpenAI-compatible URL
 - `Skip` — don't configure now
 
 Based on the answer:
 
-- `Z.AI Coding Plan` → run:
+- `智谱 BigModel Coding Plan` → run:
   ```bash
   node "${CLAUDE_PLUGIN_ROOT}/scripts/glm-companion.mjs" setup --preset coding-plan --json
   ```
-- `Pay-as-you-go` → run:
+- `智谱 BigModel Pay-as-you-go` → run:
   ```bash
   node "${CLAUDE_PLUGIN_ROOT}/scripts/glm-companion.mjs" setup --preset pay-as-you-go --json
   ```
-- `Custom endpoint` → ask the user once with a plain-text prompt (NOT `AskUserQuestion`): *"Paste the base URL (must start with https://, do not include /v1/messages)."*
+- `Custom endpoint` → ask the user once with a plain-text prompt (NOT `AskUserQuestion`): *"Paste the base URL (must start with https://, OpenAI-compatible; do not include /chat/completions)."*
   Then run:
   ```bash
   node "${CLAUDE_PLUGIN_ROOT}/scripts/glm-companion.mjs" setup --preset custom --base-url "<url>" --json
@@ -73,9 +77,11 @@ If the rendered output shows `glm.detail: ... API key not set`, tell the user:
 
 If the user asks where to obtain the key:
 
-- Coding Plan key → https://z.ai subscription console
+- Coding Plan key → https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys
+  (subscription tier)
 - Pay-as-you-go key → https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys
-- Custom preset → whichever provider issued the endpoint
+  (metered tier)
+- Custom preset → whichever provider issued the endpoint (e.g. 海外 Z.AI)
 
 ## Output rules
 

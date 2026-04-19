@@ -1,9 +1,9 @@
 {
   "name": "@skylab/glm-plugin-cc",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
-  "description": "Claude Code plugin: GLM reviewer via Z.AI coding plan (Anthropic-compatible HTTP). Scaffold derived from openai/codex-plugin-cc (Apache-2.0).",
+  "description": "Claude Code plugin: GLM reviewer via 智谱 BigModel (OpenAI-compatible HTTP). Scaffold derived from openai/codex-plugin-cc (Apache-2.0).",
   "license": "Apache-2.0",
   "engines": {
     "node": ">=18.18.0"
