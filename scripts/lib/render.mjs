@@ -375,9 +375,16 @@ export function renderStatusReport(report) {
     "# GLM Status",
     "",
     `Session runtime: ${report.sessionRuntime.label}`,
-    `Review gate: ${report.config.stopReviewGate ? "enabled" : "disabled"}`,
+    `Review gate: ${report.config?.stopReviewGate ? "enabled" : "disabled"}`,
     ""
   ];
+
+  if (report.stateError) {
+    lines.push("State file:");
+    lines.push(`- error: ${report.stateError}`);
+    lines.push("- job list unavailable until state file is fixed.");
+    lines.push("");
+  }
 
   if (report.running.length > 0) {
     appendActiveJobsTable(lines, report.running);

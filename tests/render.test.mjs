@@ -127,3 +127,67 @@ test("renderReviewResult handles confidence at boundaries (0 and 1)", () => {
   assert.match(rendered, /\[critical · conf 1\.00\]/);
   assert.match(rendered, /\[low · conf 0\.00\]/);
 });
+
+// GAP-3: The original m-3 tests covered in-range confidence (0, 0.5,
+// 0.95, 1) but not out-of-range or non-numeric input. If GLM returns a
+// bad value, we must NOT render a misleading `conf 1.42` — we must
+// omit the suffix (treat as "unknown") so the user isn't misled.
+
+function renderSingleFinding(confidenceValue) {
+  return renderReviewResult(
+    {
+      parsed: {
+        verdict: "needs-attention",
+        summary: "Boundary-value test.",
+        findings: [
+          {
+            severity: "medium",
+            title: "Test finding",
+            body: "body text",
+            file: "x.ts",
+            line_start: 1,
+            line_end: 1,
+            confidence: confidenceValue,
+            recommendation: ""
+          }
+        ],
+        next_steps: []
+      }
+    },
+    { reviewLabel: "Review", targetLabel: "working tree diff" }
+  );
+}
+
+test("renderReviewResult OMITS confidence when value > 1 (out-of-range)", () => {
+  const rendered = renderSingleFinding(1.5);
+  assert.doesNotMatch(rendered, /conf /);
+  assert.match(rendered, /\[medium\] Test finding/);
+});
+
+test("renderReviewResult OMITS confidence when value < 0 (out-of-range)", () => {
+  const rendered = renderSingleFinding(-0.5);
+  assert.doesNotMatch(rendered, /conf /);
+  assert.match(rendered, /\[medium\] Test finding/);
+});
+
+test("renderReviewResult OMITS confidence when value is NaN", () => {
+  const rendered = renderSingleFinding(Number.NaN);
+  assert.doesNotMatch(rendered, /conf /);
+  assert.match(rendered, /\[medium\] Test finding/);
+});
+
+test("renderReviewResult OMITS confidence when value is a numeric string (no coercion)", () => {
+  // GLM should send a number per schema. If it sends "0.95" as a
+  // string, we intentionally do NOT coerce — the schema contract is
+  // number, and silently rescuing a string would mask a real
+  // integration bug between GLM and the client.
+  const rendered = renderSingleFinding("0.95");
+  assert.doesNotMatch(rendered, /conf /);
+  assert.match(rendered, /\[medium\] Test finding/);
+});
+
+test("renderReviewResult OMITS confidence when value is null", () => {
+  const rendered = renderSingleFinding(null);
+  assert.doesNotMatch(rendered, /conf /);
+  assert.match(rendered, /\[medium\] Test finding/);
+});

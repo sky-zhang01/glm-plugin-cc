@@ -6,12 +6,43 @@ export function ensureAbsolutePath(cwd, maybePath) {
   return path.isAbsolute(maybePath) ? maybePath : path.resolve(cwd, maybePath);
 }
 
+// Replace the user's home directory prefix with "~/" so error messages
+// and --json output don't leak the username when the user pastes them
+// into an issue / Slack / log. Only touches the home prefix; filenames
+// and other path components are preserved. Call at emission points
+// (stderr writes, JSON error fields) — NOT at throw sites, so local
+// debugging still sees the full path.
+export function redactHomePath(text) {
+  if (typeof text !== "string" || !text) {
+    return text;
+  }
+  const home = os.homedir();
+  if (!home || home === "/") {
+    return text;
+  }
+  // Escape regex metacharacters in the home path before building the pattern.
+  const escaped = home.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return text.replace(new RegExp(`${escaped}(?=/|$)`, "g"), "~");
+}
+
 export function createTempDir(prefix = "glm-plugin-") {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
 
 export function readJsonFile(filePath) {
-  return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  // Mirror the fail-closed pattern used by loadState / readConfigFile /
+  // readJobFile: if the file is corrupt, surface the file path + a
+  // recovery hint. Without this, callers like readOutputSchema (which
+  // loads the shipped review-output.schema.json) throw a bare
+  // `SyntaxError: Unexpected token ...` with no filename — users cannot
+  // tell which file to fix.
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch (error) {
+    throw new Error(
+      `Could not parse ${filePath}: ${error.message}. Delete or fix the file to recover.`
+    );
+  }
 }
 
 export function writeJsonFile(filePath, value) {

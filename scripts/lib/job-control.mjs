@@ -1,5 +1,6 @@
 import fs from "node:fs";
 
+import { redactHomePath } from "./fs.mjs";
 import { getSessionRuntimeStatus } from "./glm-client.mjs";
 import { getConfig, listJobs, readJobFile, resolveJobFile } from "./state.mjs";
 import { SESSION_ID_ENV } from "./tracked-jobs.mjs";
@@ -207,8 +208,24 @@ function matchJobReference(jobs, reference, predicate = () => true) {
 
 export function buildStatusSnapshot(cwd, options = {}) {
   const workspaceRoot = resolveWorkspaceRoot(cwd);
-  const config = getConfig(workspaceRoot);
-  const jobs = sortJobsNewestFirst(filterJobsForCurrentSession(listJobs(workspaceRoot), options));
+
+  // Both getConfig() and listJobs() read state.json via loadState(),
+  // which is fail-closed on corrupt (H-A fix). Catch here so /glm:status
+  // can still render a recovery hint instead of crashing — symmetric to
+  // the I-1 fix that protected /glm:setup.
+  let config = {};
+  let allJobs = [];
+  let stateError = null;
+  try {
+    config = getConfig(workspaceRoot);
+    allJobs = listJobs(workspaceRoot);
+  } catch (error) {
+    // Redact $HOME so --json output doesn't leak the username into
+    // issue trackers / Slack / pasted logs.
+    stateError = redactHomePath(error instanceof Error ? error.message : String(error));
+  }
+
+  const jobs = sortJobsNewestFirst(filterJobsForCurrentSession(allJobs, options));
   const maxJobs = options.maxJobs ?? DEFAULT_MAX_STATUS_JOBS;
   const maxProgressLines = options.maxProgressLines ?? DEFAULT_MAX_PROGRESS_LINES;
 
@@ -226,6 +243,7 @@ export function buildStatusSnapshot(cwd, options = {}) {
   return {
     workspaceRoot,
     config,
+    stateError,
     sessionRuntime: getSessionRuntimeStatus(options.env, workspaceRoot),
     running,
     latestFinished,

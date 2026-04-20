@@ -215,25 +215,42 @@ export async function runTrackedJob(job, runner, options = {}) {
     return execution;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    const existing = readStoredJobOrNull(job.workspaceRoot, job.id) ?? runningRecord;
+    // readStoredJobOrNull now throws (MED-2 fix) when the job file
+    // exists but is corrupt. Don't let a secondary "Could not parse
+    // <jobFile>" shadow the primary runner error — prefer the primary,
+    // fall back to runningRecord, and surface the secondary as context.
+    let existing = runningRecord;
+    let persistWarning = null;
+    try {
+      existing = readStoredJobOrNull(job.workspaceRoot, job.id) ?? runningRecord;
+    } catch (readError) {
+      persistWarning = readError instanceof Error ? readError.message : String(readError);
+    }
     const completedAt = nowIso();
-    writeJobFile(job.workspaceRoot, job.id, {
-      ...existing,
-      status: "failed",
-      phase: "failed",
-      errorMessage,
-      pid: null,
-      completedAt,
-      logFile: options.logFile ?? job.logFile ?? existing.logFile ?? null
-    });
-    upsertJob(job.workspaceRoot, {
-      id: job.id,
-      status: "failed",
-      phase: "failed",
-      pid: null,
-      errorMessage,
-      completedAt
-    });
+    try {
+      writeJobFile(job.workspaceRoot, job.id, {
+        ...existing,
+        status: "failed",
+        phase: "failed",
+        errorMessage: persistWarning ? `${errorMessage} (state write warning: ${persistWarning})` : errorMessage,
+        pid: null,
+        completedAt,
+        logFile: options.logFile ?? job.logFile ?? existing.logFile ?? null
+      });
+      upsertJob(job.workspaceRoot, {
+        id: job.id,
+        status: "failed",
+        phase: "failed",
+        pid: null,
+        errorMessage,
+        completedAt
+      });
+    } catch {
+      // If persistence itself fails, we still want the original runner
+      // error to reach main().catch — do not mask it with the write
+      // failure. The user's next /glm:status call will see the job as
+      // running-but-orphaned, which is a recoverable state.
+    }
     throw error;
   }
 }

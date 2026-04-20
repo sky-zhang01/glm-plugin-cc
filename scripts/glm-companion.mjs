@@ -5,6 +5,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import { parseArgs, splitRawArgumentString } from "./lib/args.mjs";
+import { redactHomePath } from "./lib/fs.mjs";
 import {
   DEFAULT_CONTINUE_PROMPT,
   buildPersistentTaskThreadName,
@@ -153,7 +154,7 @@ function firstMeaningfulLine(text, fallback) {
   return line ?? fallback;
 }
 
-function buildTargetLabel(target, focusText) {
+export function buildTargetLabel(target, focusText) {
   // resolveReviewTarget returns { mode, label, baseRef, explicit } — no
   // `base` / `scope`. The previous impl referenced target.base /
   // target.scope which were always undefined, so the label silently fell
@@ -171,7 +172,9 @@ async function buildSetupReport(cwd, actionsTaken = [], pingRequested = false) {
   try {
     effectiveConfig = resolveEffectiveConfig();
   } catch (error) {
-    configError = error instanceof Error ? error.message : String(error);
+    // Redact $HOME so --json output doesn't leak the username into
+    // issue trackers / Slack / pasted logs.
+    configError = redactHomePath(error instanceof Error ? error.message : String(error));
   }
 
   const glmAvailability = getGlmAvailability(cwd);
@@ -188,7 +191,7 @@ async function buildSetupReport(cwd, actionsTaken = [], pingRequested = false) {
   try {
     repoConfig = getConfig(workspaceRoot);
   } catch (error) {
-    stateError = error instanceof Error ? error.message : String(error);
+    stateError = redactHomePath(error instanceof Error ? error.message : String(error));
   }
 
   const hasApiKey = Boolean(effectiveConfig?.has_api_key);
@@ -563,8 +566,17 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  const message = error instanceof Error ? error.message : String(error);
-  process.stderr.write(`${message}\n`);
-  process.exitCode = 1;
-});
+// Only auto-run the CLI when this file is invoked directly. Without this
+// guard, tests that `import { buildTargetLabel }` would trigger main()
+// with whatever test-runner argv they inherit (usually "unknown command"
+// → exitCode=2). Matches Node's recommended direct-invocation check.
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  main().catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    // Redact $HOME before emitting so crash messages pasted into issues /
+    // logs / Slack don't leak the username. Debug info (file inside home)
+    // stays readable via the "~/..." form.
+    process.stderr.write(`${redactHomePath(message)}\n`);
+    process.exitCode = 1;
+  });
+}

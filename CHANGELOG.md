@@ -2,12 +2,17 @@
 
 ## v0.4.3 — 2026-04-20
 
-Bug-fix release. Thirteen issues resolved across two review passes —
-six in the first pass (arg parsing, review prompt pipeline, state/config
-corruption handling, template dispatch) and seven in the second pass
-(setup resilience, dead-code pruning, job-file error UX, shipped-schema
-fail-closed, finding confidence rendering, dead target metadata, doc
-drift). The headline fix: pre-fix, every `/glm:review` and
+Bug-fix release. **Twenty-two issues** resolved across **three review
+passes** — six in the first pass (arg parsing, review prompt pipeline,
+state/config corruption handling, template dispatch), seven in the
+second pass (setup resilience, dead-code pruning, job-file error UX,
+shipped-schema fail-closed, finding confidence rendering, dead target
+metadata, doc drift), and nine in the third pass (symmetric status
+resilience, generic fs fail-closed, error-shadow fix, home-path redaction,
+test-coverage backfill). Version stays at 0.4.3 per user directive to
+keep the public sequence `0.4.2 → 0.4.3` continuous — the three passes
+are recorded here as separate "Fixed (N pass)" subsections so readers
+can diff them individually. The headline fix: pre-fix, every `/glm:review` and
 `/glm:adversarial-review` call shipped an EMPTY repository context to
 GLM — the prompt template used `{{REVIEW_INPUT}}` / `{{TARGET_LABEL}}`
 / `{{USER_FOCUS}}` / `{{REVIEW_COLLECTION_GUIDANCE}}` while the
@@ -121,6 +126,62 @@ without changing the config shape or public surface.
   still recommended it. Corrected to point at `default_model` in
   the config file.
 
+### Fixed (third pass)
+
+Third-pass review (`pr-review-toolkit:code-reviewer` +
+`pr-review-toolkit:silent-failure-hunter` +
+`pr-review-toolkit:pr-test-analyzer`, each running heterogeneous
+verification paths per the multi-agent protocol; the in-house
+`security-auditor` agent was retired after two rounds of fabricated
+output) flagged a mix of real issues and test-coverage gaps. All nine
+resolved without changing public API or config shape.
+
+- **`scripts/lib/job-control.mjs` — `/glm:status` survives corrupt
+  `state.json`** (symmetric to the second-pass I-1 fix for `/glm:setup`).
+  `buildStatusSnapshot` called `getConfig(workspaceRoot)` and
+  `listJobs(workspaceRoot)` unwrapped; after `loadState` became
+  fail-closed, `/glm:status` crashed with a stacktrace instead of
+  showing the recovery hint. Now wraps both reads, surfaces
+  `snapshot.stateError`, and `renderStatusReport` emits a "State file:
+  error: … / job list unavailable until state file is fixed." block.
+- **`scripts/lib/fs.mjs` — `readJsonFile` fail-closed with file path**
+  (second-pass MED-3 sub-finding). The generic helper was still bare
+  `JSON.parse(fs.readFileSync(...))`, so any caller (including
+  `readOutputSchema` for the shipped review schema) threw a bare
+  `SyntaxError` with no filename. Now mirrors the
+  `loadState` / `readConfigFile` / `readJobFile` pattern — `Could not
+  parse <path>: … Delete or fix the file to recover.`
+- **`scripts/lib/tracked-jobs.mjs` — `runTrackedJob` catch no longer
+  shadows the primary runner error** (second-pass NEW-1 follow-up).
+  Pre-fix, `readStoredJobOrNull` could throw (MED-2 fix) and mask the
+  original runner exception. Post-fix, the read is wrapped; the primary
+  error propagates to `main().catch`, the secondary persist warning is
+  folded into `errorMessage` for diagnostic completeness, and
+  persistence failures never swallow the user-visible error.
+- **`scripts/lib/fs.mjs` — `redactHomePath` utility + wired into every
+  user-visible error surface** (second-pass Side-2 follow-up). Absolute
+  home paths (e.g. `/Users/<name>/.local/state/...`) no longer leak into
+  stderr crash lines or `--json` `state.error` / `config.error` fields;
+  they're rewritten to `~/...` before emission. Local debug still sees
+  the full path because redaction runs at the emission point, not the
+  throw site. Boundary tests lock in that `/Users/<name>foo/bar` (no
+  path separator) stays untouched.
+- **`scripts/glm-companion.mjs` — direct-invocation guard around
+  `main().catch`** (GAP-4 enabler). Importing the module used to fire
+  `main()` with the test runner's argv and set `exitCode = 2`; this
+  blocked `buildTargetLabel` (and future helpers) from being unit
+  tested in-process. Guard pattern matches Node's recommended check
+  (`fileURLToPath(import.meta.url) === process.argv[1]`).
+- **`scripts/glm-companion.mjs` — `export` on `buildTargetLabel`** for
+  direct unit testing (GAP-4). Function body unchanged.
+- **`tests/render.test.mjs` — confidence boundary handling** (GAP-3
+  backfill). Adds explicit guards for `> 1`, `< 0`, `NaN`, numeric
+  strings ("0.95" — intentionally NOT coerced, to keep schema
+  contract honest), and `null`. All five cases must omit the
+  ` · conf 0.xx` suffix rather than render a misleading value.
+- **CHANGELOG / release_card test-count typo**: second-pass section
+  said "32 tests second-pass"; actual was 33. Corrected.
+
 ### Added
 
 - **`tests/args.test.mjs`** — Extended from 13 to 15 tests. New
@@ -153,8 +214,37 @@ without changing the config shape or public surface.
   hint, `ready` is false.
 - **`tests/state.test.mjs`** — Extended with 1 new test for
   `readJobFile` corrupt-file throw path (MED-2 regression guard).
-- **Total**: 0 tests in v0.4.2 → 25 tests first-pass → 32 tests
-  second-pass (all pass).
+- **`tests/status-resilience.test.mjs`** (third pass, new) — 1
+  subprocess test for Side-1: `/glm:status --json` with corrupt
+  `state.json` pre-seeded; asserts exit 0, `snapshot.stateError`
+  surfaced, empty job lists, response shape intact.
+- **`tests/result-propagation.test.mjs`** (third pass, new, GAP-2
+  backfill) — 1 subprocess test: `/glm:result <id>` against a corrupt
+  job file; asserts exit 1, clean single-line stderr with file path
+  and "Delete or fix the file" hint, no stacktrace leakage, no raw
+  `SyntaxError: Expected property name` text.
+- **`tests/schema-load.test.mjs`** (third pass, new, GAP-1 backfill)
+  — 3 tests for `readOutputSchema`: shipped schema loads successfully
+  and still has the expected verdict enum (`approve` |
+  `needs-attention`) + `confidence` in finding required fields;
+  corrupt fixture schema fails closed with filename; missing fixture
+  emits ENOENT clearly.
+- **`tests/target-label.test.mjs`** (third pass, new, GAP-4
+  backfill) — 5 unit tests for `buildTargetLabel`: uses `target.label`
+  when no focus; appends focus; shortens long focus; falls through
+  to "working tree" on empty; never reads `target.base` /
+  `target.scope` (drift guard — deliberately populates those as noise
+  to catch a regression).
+- **`tests/fs.test.mjs`** (third pass, new) — 8 tests covering
+  `readJsonFile` (valid / corrupt with path / ENOENT) and
+  `redactHomePath` (replaces `$HOME` prefix, handles multiple
+  occurrences, leaves non-home paths alone, safe on
+  non-string/empty inputs, does NOT redact a prefix match without a
+  `/` boundary).
+- **`tests/render.test.mjs`** — Extended from 4 to 9 tests; added
+  the 5 GAP-3 confidence-boundary tests.
+- **Total**: 0 tests in v0.4.2 → 25 tests first-pass → 33 tests
+  second-pass → 56 tests third-pass (all pass).
 
 ### Codex scaffold alignment
 
