@@ -12,7 +12,8 @@ name: Release Gate
 
 on:
   push:
-    tags: ["v*.*.*"]
+    tags:
+      - 'v*.*.*'
 
 permissions:
   contents: read
