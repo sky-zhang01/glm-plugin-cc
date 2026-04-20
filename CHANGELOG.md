@@ -2,17 +2,20 @@
 
 ## v0.4.3 — 2026-04-20
 
-Bug-fix release. **Twenty-two issues** resolved across **three review
-passes** — six in the first pass (arg parsing, review prompt pipeline,
-state/config corruption handling, template dispatch), seven in the
-second pass (setup resilience, dead-code pruning, job-file error UX,
-shipped-schema fail-closed, finding confidence rendering, dead target
-metadata, doc drift), and nine in the third pass (symmetric status
-resilience, generic fs fail-closed, error-shadow fix, home-path redaction,
-test-coverage backfill). Version stays at 0.4.3 per user directive to
-keep the public sequence `0.4.2 → 0.4.3` continuous — the three passes
-are recorded here as separate "Fixed (N pass)" subsections so readers
-can diff them individually. The headline fix: pre-fix, every `/glm:review` and
+Bug-fix release. **Twenty-two issues fixed + one simplify pass**
+across **three review passes plus a cleanup pass** — six in the first
+pass (arg parsing, review prompt pipeline, state/config corruption
+handling, template dispatch), seven in the second pass (setup
+resilience, dead-code pruning, job-file error UX, shipped-schema
+fail-closed, finding confidence rendering, dead target metadata, doc
+drift), nine in the third pass (symmetric status resilience, generic
+fs fail-closed, error-shadow fix, home-path redaction, test-coverage
+backfill), and a sixth-round simplify pass pruning dead codex-scaffold
+functions, a bogus `"Resume thread: null"` output branch, and duplicated
+error-formatting boilerplate. Version stays at 0.4.3 per user directive
+to keep the public sequence `0.4.2 → 0.4.3` continuous — the passes
+are recorded here as separate "Fixed (N pass)" / "Simplified (cleanup
+pass)" subsections so readers can diff them individually. The headline fix: pre-fix, every `/glm:review` and
 `/glm:adversarial-review` call shipped an EMPTY repository context to
 GLM — the prompt template used `{{REVIEW_INPUT}}` / `{{TARGET_LABEL}}`
 / `{{USER_FOCUS}}` / `{{REVIEW_COLLECTION_GUIDANCE}}` while the
@@ -182,6 +185,54 @@ resolved without changing public API or config shape.
 - **CHANGELOG / release_card test-count typo**: second-pass section
   said "32 tests second-pass"; actual was 33. Corrected.
 
+### Simplified (cleanup pass)
+
+After the three hotfix passes landed, a review-only simplify scan by
+`pr-review-toolkit:code-simplifier` flagged a handful of opportunities
+that had accumulated as scar tissue. Four P1 items plus two P2 helper
+extractions applied without changing any user-visible behaviour.
+
+- **`scripts/lib/render.mjs` — deleted the `"Resume thread: null"`
+  output branch**. `renderStoredJobResult` declared
+  `const resumeCommand = null; // GLM is stateless` and then
+  interpolated that null into four conditional emissions
+  (`"Resume thread: ${resumeCommand}"`) guarded by `threadId`. Any
+  legacy job record that happened to carry a non-null `threadId` would
+  have rendered literal `"Resume thread: null"` to the user.
+  `formatResumeCommand` helper (always returns null) deleted with it.
+- **`scripts/glm-companion.mjs` — removed two unused imports**
+  (`listJobs` from `state.mjs`, `appendLogLine` from
+  `tracked-jobs.mjs`). `npm run check` validates.
+- **`scripts/lib/glm-client.mjs` + `scripts/lib/process.mjs` — deleted
+  three codex-scaffold carryovers that GLM does not use**:
+  `findLatestTaskThread` (always returned null — GLM is stateless),
+  `interruptAppServerTurn` (always returned the "nothing to interrupt"
+  shape), and `terminateProcessTree` (+ its private helper
+  `looksLikeMissingProcessMessage`). All three were exported but
+  zero call sites existed; the last one was only needed by codex's
+  persistent-subprocess model. ~70 LOC removed.
+- **`scripts/lib/state.mjs` — simplified `resolveStateDir` dead catch
+  branch**. The catch body re-assigned `canonicalWorkspaceRoot` to
+  the value it already held; replaced with a no-op comment. Behaviour
+  identical.
+- **`scripts/lib/fs.mjs` — new `formatUserFacingError(error)` helper**
+  (P2-1). Centralizes the pattern
+  `redactHomePath(error instanceof Error ? error.message : String(error))`
+  that used to be duplicated verbatim at four call sites
+  (`buildSetupReport` ×2, `buildStatusSnapshot`, `main().catch`).
+  Callers now read `configError = formatUserFacingError(error)`.
+- **`scripts/glm-companion.mjs` — removed dead `session_id` option
+  plumbing** (P2-5). `runStatus` and `runCancel` each fetched
+  `session_id` via `currentSessionId()` and passed it through as an
+  option to `buildStatusSnapshot` / `resolveCancelableJob`, but the
+  receiving functions read session scoping from `options.env` via
+  `filterJobsForCurrentSession → getCurrentSessionId`, never
+  `options.session_id`. `runCancel` now passes `{ env: process.env }`
+  so scoping actually reaches `filterJobsForCurrentSession` (a
+  latent correctness improvement — before this, cancel's session
+  scoping relied on process.env being inherited correctly down the
+  default path).
+
 ### Added
 
 - **`tests/args.test.mjs`** — Extended from 13 to 15 tests. New
@@ -243,8 +294,13 @@ resolved without changing public API or config shape.
   `/` boundary).
 - **`tests/render.test.mjs`** — Extended from 4 to 9 tests; added
   the 5 GAP-3 confidence-boundary tests.
+- **`tests/fs.test.mjs`** — Extended with 2 tests for the new
+  `formatUserFacingError` helper (pulls `.message` from Error
+  instances + redacts $HOME; falls back to `String()` for
+  non-Error throws).
 - **Total**: 0 tests in v0.4.2 → 25 tests first-pass → 33 tests
-  second-pass → 56 tests third-pass (all pass).
+  second-pass → 56 tests third-pass → 58 tests post-simplify
+  (all pass).
 
 ### Codex scaffold alignment
 

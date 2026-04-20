@@ -6,6 +6,17 @@ export function ensureAbsolutePath(cwd, maybePath) {
   return path.isAbsolute(maybePath) ? maybePath : path.resolve(cwd, maybePath);
 }
 
+// Normalize a caught `unknown` (Error | string | anything) into a plain
+// string message suitable for rendering in --json error fields or
+// stderr. Thin wrapper that (a) pulls `.message` from Error instances,
+// (b) falls back to String() for exotic throws, (c) redacts the user's
+// home path before returning. Four call sites used to repeat this
+// pattern by hand; centralizing keeps the redaction guarantee uniform.
+export function formatUserFacingError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  return redactHomePath(message);
+}
+
 // Replace the user's home directory prefix with "~/" so error messages
 // and --json output don't leak the username when the user pastes them
 // into an issue / Slack / log. Only touches the home prefix; filenames

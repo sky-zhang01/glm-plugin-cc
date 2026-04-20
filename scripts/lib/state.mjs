@@ -28,11 +28,16 @@ function defaultState() {
 
 export function resolveStateDir(cwd) {
   const workspaceRoot = resolveWorkspaceRoot(cwd);
+  // Prefer the canonical (realpath) form so symlinked worktrees hash
+  // to the same state dir as the underlying repo. If realpath fails
+  // (missing FS support, broken link, etc.), fall back to the raw
+  // workspaceRoot we already have — the catch body is intentionally
+  // empty because the initial value is already that fallback.
   let canonicalWorkspaceRoot = workspaceRoot;
   try {
     canonicalWorkspaceRoot = fs.realpathSync.native(workspaceRoot);
   } catch {
-    canonicalWorkspaceRoot = workspaceRoot;
+    /* keep workspaceRoot fallback */
   }
 
   const slugSource = path.basename(workspaceRoot) || "workspace";

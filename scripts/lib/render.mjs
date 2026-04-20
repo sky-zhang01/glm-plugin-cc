@@ -107,12 +107,6 @@ function escapeMarkdownCell(value) {
     .trim();
 }
 
-function formatResumeCommand(job) {
-  // GLM calls are stateless HTTP; there is no resume equivalent.
-  // Kept for interface parity with the original scaffold.
-  return null;
-}
-
 function appendActiveJobsTable(lines, jobs) {
   lines.push("Active jobs:");
   lines.push("| Job | Kind | Status | Phase | Elapsed | GLM Session ID | Summary | Actions |");
@@ -443,14 +437,17 @@ export function renderJobStatusReport(job) {
 }
 
 export function renderStoredJobResult(job, storedJob) {
+  // GLM is stateless HTTP — no resume equivalent, so we only emit the
+  // thread ref (when one happens to be stored on a legacy record) and
+  // skip the "Resume thread: …" line that the original codex scaffold
+  // carried. Pre-cleanup, that line read literal "null" whenever
+  // threadId was set.
   const threadId = storedJob?.threadId ?? job.threadId ?? null;
-  const resumeCommand = null; // GLM is stateless; no resume command.
+  const threadRefSuffix = threadId ? `\nGLM thread ref: ${threadId}\n` : "";
+
   if (isStructuredReviewStoredResult(storedJob) && storedJob?.rendered) {
     const output = storedJob.rendered.endsWith("\n") ? storedJob.rendered : `${storedJob.rendered}\n`;
-    if (!threadId) {
-      return output;
-    }
-    return `${output}\nGLM thread ref: ${threadId}\nResume thread: ${resumeCommand}\n`;
+    return threadId ? `${output}${threadRefSuffix}` : output;
   }
 
   const rawOutput =
@@ -459,18 +456,12 @@ export function renderStoredJobResult(job, storedJob) {
     "";
   if (rawOutput) {
     const output = rawOutput.endsWith("\n") ? rawOutput : `${rawOutput}\n`;
-    if (!threadId) {
-      return output;
-    }
-    return `${output}\nGLM thread ref: ${threadId}\nResume thread: ${resumeCommand}\n`;
+    return threadId ? `${output}${threadRefSuffix}` : output;
   }
 
   if (storedJob?.rendered) {
     const output = storedJob.rendered.endsWith("\n") ? storedJob.rendered : `${storedJob.rendered}\n`;
-    if (!threadId) {
-      return output;
-    }
-    return `${output}\nGLM thread ref: ${threadId}\nResume thread: ${resumeCommand}\n`;
+    return threadId ? `${output}${threadRefSuffix}` : output;
   }
 
   const lines = [
@@ -482,7 +473,6 @@ export function renderStoredJobResult(job, storedJob) {
 
   if (threadId) {
     lines.push(`GLM thread ref: ${threadId}`);
-    lines.push(`Resume thread: ${resumeCommand}`);
   }
 
   if (job.summary) {

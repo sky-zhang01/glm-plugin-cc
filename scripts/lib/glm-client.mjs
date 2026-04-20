@@ -240,13 +240,6 @@ export function getSessionRuntimeStatus(env = process.env, cwd = process.cwd()) 
 }
 
 /**
- * GLM has no persistent threads. This always resolves to null.
- */
-export async function findLatestTaskThread(cwd) {
-  return null;
-}
-
-/**
  * Persistent task name is not applicable for GLM. Returned value is purely
  * cosmetic so the job record still has a title.
  */
@@ -254,15 +247,6 @@ export function buildPersistentTaskThreadName(prompt) {
   const firstLine = String(prompt ?? "").split(/\r?\n/)[0].trim();
   const suffix = firstLine.length > 40 ? `${firstLine.slice(0, 40)}…` : firstLine || "(no prompt)";
   return `${TASK_THREAD_PREFIX} · ${suffix}`;
-}
-
-/**
- * HTTP isn't cancelable in the same way as a persistent session. We expose a
- * no-op so the companion's cancel path stays consistent; actual AbortController
- * is held inside the request function for its own lifetime.
- */
-export async function interruptAppServerTurn(cwd, { threadId, turnId } = {}) {
-  return { ok: true, detail: "GLM requests are stateless; nothing to interrupt server-side." };
 }
 
 /**

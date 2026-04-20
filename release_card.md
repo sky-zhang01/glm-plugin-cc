@@ -1,7 +1,7 @@
 # Release Card — glm-plugin-cc v0.4.3 (cumulative v0.4.1 → v0.4.3 + post-review hotfixes)
 
 Status: READY
-Approval Mode: user confirmed Option B (keep v0.4.1 + v0.4.2 on GitHub, backfill gitea-first chain) in message "选项 B：保留 v0.4.1 + v0.4.2，补上 gitea-first 的缺失链 / 直接在gitea 更新 并把bug修改好 然后还要做好自己内部的review flow 但codex的先不要用了". Subsequent bug batch (5 more issues found by 3-agent full-project review) authorized inline: "继续保留v0.4.3的版本不要升版本号了 ... 版本的事儿不要纠结太多 直接开始改bug吧 改完后 继续重新扫一遍". Bundle C (7 more issues found by round-2 review) authorized inline: "Bundle C（全部）". Bundle D3+ (9 more issues + test-coverage backfills found by round-3 review using Anthropic-official agents after retiring the in-house `security-auditor`) authorized inline: "Bundle D3（D2 + 完整）". Version number intentionally stays at 0.4.3 per user directive — public version sequence stays `0.4.2 → 0.4.3` without a skip.
+Approval Mode: user confirmed Option B (keep v0.4.1 + v0.4.2 on GitHub, backfill gitea-first chain) in message "选项 B：保留 v0.4.1 + v0.4.2，补上 gitea-first 的缺失链 / 直接在gitea 更新 并把bug修改好 然后还要做好自己内部的review flow 但codex的先不要用了". Subsequent bug batch (5 more issues found by 3-agent full-project review) authorized inline: "继续保留v0.4.3的版本不要升版本号了 ... 版本的事儿不要纠结太多 直接开始改bug吧 改完后 继续重新扫一遍". Bundle C (7 more issues found by round-2 review) authorized inline: "Bundle C（全部）". Bundle D3+ (9 more issues + test-coverage backfills found by round-3 review using Anthropic-official agents after retiring the in-house `security-auditor`) authorized inline: "Bundle D3（D2 + 完整）". Bundle E+ (simplify cleanup after round-3: 4 P1 dead-code/clarity items + 2 P2 helper extractions from `pr-review-toolkit:code-simplifier`) authorized inline: "Bundle E+（P1 + 选 P2）：加 P2-1 redactHomePath helper、P2-5 session_id dead option 清理". Version number intentionally stays at 0.4.3 per user directive — public version sequence stays `0.4.2 → 0.4.3` without a skip.
 
 Process acknowledgement: v0.4.1 and v0.4.2 were pushed directly to GitHub without a release card and without explicit per-release user approval. That violated the gitea-first rule in `~/.claude/rules/conditional/git-workflow.md` and the user's earlier directive "以后如果要做修改 也是先在gitea上弄完 确认没问题了再push到GitHub". This card consolidates v0.4.0 → v0.4.3 so the gitea-first evidence link is restored for every release in-scope, and commits for this work are unblocked only when the user authorizes the gitea push itself.
 
@@ -75,7 +75,7 @@ Second pass — Bundle C (df413dc → c8295d6):
 - `CHANGELOG.md` — v0.4.3 entry now lists both passes (13 issues after Bundle C) with "Fixed (first pass)" / "Fixed (second pass)" subsections.
 - `release_card.md` — updated to cover both passes.
 
-Third pass — Bundle D3+ (c8295d6 → HEAD):
+Third pass — Bundle D3+ (c8295d6 → a7a5fb9):
 - `scripts/lib/job-control.mjs` — `buildStatusSnapshot` wraps state reads; surfaces `snapshot.stateError` (Side-1 fix). Imports `redactHomePath`.
 - `scripts/lib/render.mjs` — `renderStatusReport` emits a "State file:" block when `stateError` present; `report.config?.stopReviewGate` (null-safe for corrupt-state case).
 - `scripts/lib/fs.mjs` — `readJsonFile` fail-closed with file path + recovery hint (Sub-MED fix). New `redactHomePath(text)` utility (Side-2 fix).
@@ -90,18 +90,47 @@ Third pass — Bundle D3+ (c8295d6 → HEAD):
 - `tests/render.test.mjs` — Extended 4 → 9 tests; added 5 confidence boundary tests (GAP-3).
 - `release_card.md` — this file, updated to cover all three passes.
 
+Simplify pass — Bundle E+ (a7a5fb9 → HEAD):
+- `scripts/lib/render.mjs` — `renderStoredJobResult` no longer
+  interpolates `"Resume thread: null"` into output (dead codex-scaffold
+  line); `formatResumeCommand` helper deleted.
+- `scripts/glm-companion.mjs` — removed unused `listJobs` /
+  `appendLogLine` imports; removed dead `session_id` option plumbing
+  from `runStatus` + `runCancel` (`runCancel` now passes
+  `{ env: process.env }` so session scoping actually reaches
+  `filterJobsForCurrentSession`).
+- `scripts/lib/glm-client.mjs` — deleted `findLatestTaskThread` and
+  `interruptAppServerTurn` (zero callers; GLM is stateless so the
+  codex-scaffold resume/interrupt primitives have no meaning).
+- `scripts/lib/process.mjs` — deleted `terminateProcessTree` +
+  `looksLikeMissingProcessMessage` (zero callers; GLM has no
+  persistent subprocess to tree-kill).
+- `scripts/lib/state.mjs` — simplified `resolveStateDir` catch branch
+  (was a no-op re-assignment to an already-held fallback value).
+- `scripts/lib/fs.mjs` — new `formatUserFacingError(error)` helper
+  centralizing the duplicated `redactHomePath(error instanceof Error
+  ? error.message : String(error))` pattern; wired into
+  `buildSetupReport` (configError + stateError), `buildStatusSnapshot`
+  (stateError), and `main().catch` (stderr emission).
+- `tests/fs.test.mjs` — Extended with 2 tests for
+  `formatUserFacingError` (Error path + non-Error fallback).
+- `CHANGELOG.md` — v0.4.3 entry now covers the simplify pass under
+  `### Simplified (cleanup pass)`.
+- `release_card.md` — this file, updated to cover all four passes.
+
 Outstanding In-Scope Work: none.
 
 Major Upgrade Review: DONE (patch-level in substance — all fixes are surgical and data-flow preserving; no API surface, config shape, endpoint URL, or schema changes). Breaking Changes: none for users with healthy state/config. Users with an already-corrupt `~/.config/glm-plugin-cc/config.json` or `state.json` who previously enjoyed silent masking will now see a clear error ("Could not parse …: delete or fix the file"); they can recover by deleting the file. This is the intended behavior change. Repo Usage Audit: `runReview` is the only caller of `loadPromptTemplate(_, "adversarial-review"|"review")`; `loadState` / `readConfigFile` callers propagate throw semantics cleanly up to the command boundary where it surfaces to the user. Verification Plan: executed — 25 automated tests pass (including regression guards for each of the 5 bugs); static template-contract test prevents future drift; empirical `--cwd` and `--base-url=…?foo=bar` scenarios manually run and verified.
 
-Local Verification: all pass. `npm run check` (13 lib modules + 3 top-level scripts + ESM import resolution) ✓. `npm test` **56/56** ✓ (was 33/33 after Bundle C, 25/25 after first-pass, 13/13 pre-hotfix). Subprocess integration tests (setup-resilience, status-resilience, result-propagation) confirm the three user-visible state-recovery command paths (`/glm:setup`, `/glm:status`, `/glm:result`) all propagate cleanly when state / job files are corrupt. Manual: `/tmp` → `node glm-companion status --cwd /repo --json` resolves workspaceRoot to `/repo`; `--base-url=https://x.com?foo=bar` is preserved intact through parseArgs.
+Local Verification: all pass. `npm run check` (13 lib modules + 3 top-level scripts + ESM import resolution) ✓. `npm test` **58/58** ✓ (was 56/56 after Bundle D3+, 33/33 after Bundle C, 25/25 after first-pass, 13/13 pre-hotfix). Subprocess integration tests (setup-resilience, status-resilience, result-propagation) confirm the three user-visible state-recovery command paths (`/glm:setup`, `/glm:status`, `/glm:result`) all propagate cleanly when state / job files are corrupt. Manual: `/tmp` → `node glm-companion status --cwd /repo --json` resolves workspaceRoot to `/repo`; `--base-url=https://x.com?foo=bar` is preserved intact through parseArgs.
 
 Codex-alignment Evidence: See CHANGELOG v0.4.3 "Codex scaffold alignment" section. Three bugs are inherited from codex-plugin-cc v1.0.4 (args split, state fail-open, single-template-for-both-modes); upstream PR-able. Two are GLM-specific (runReview key drift during `--base`/`--scope` adaptation; writeConfigFile merge in the GLM-only preset-config layer).
 
 CI Evidence: no CI pipeline yet (planned v0.5+); ref-bound verification is local-only.
 
 Rollback:
-- Bundle D3+ hotfix commit only: revert to `c8295d6`. All 9 Bundle D3+ fixes reappear; Bundle C + first-pass state still protects against the original 12 bugs.
-- Bundle C + Bundle D3+ together: revert to `df413dc`. All 16 post-df413dc bugs reappear; first-pass state still protects against the original 5.
-- Full unwind: revert to `d1fc595` (original v0.4.3). All 21 post-d1fc595 bugs reappear. Not expected to be needed.
+- Simplify-pass commit only: revert to `a7a5fb9`. Dead codex-scaffold exports + duplicated error formatting return (no behaviour change visible to users, so rolling back has no functional value — only relevant if a downstream tool depended on an export we deleted).
+- Bundle D3+ + simplify together: revert to `c8295d6`. All 9 Bundle D3+ fixes reappear; Bundle C + first-pass state still protects against the original 12 bugs.
+- Bundle C + Bundle D3+ + simplify together: revert to `df413dc`. All 16 post-df413dc bugs reappear; first-pass state still protects against the original 5.
+- Full unwind: revert to `d1fc595` (original v0.4.3). All 22 post-d1fc595 issues reappear. Not expected to be needed.
 - v0.4.1 / v0.4.2: not rolled back per Option B.

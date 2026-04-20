@@ -5,7 +5,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import { parseArgs, splitRawArgumentString } from "./lib/args.mjs";
-import { redactHomePath } from "./lib/fs.mjs";
+import { formatUserFacingError } from "./lib/fs.mjs";
 import {
   DEFAULT_CONTINUE_PROMPT,
   buildPersistentTaskThreadName,
@@ -27,7 +27,6 @@ import { loadPromptTemplate, interpolateTemplate } from "./lib/prompts.mjs";
 import {
   generateJobId,
   getConfig,
-  listJobs,
   setConfig,
   upsertJob,
   writeJobFile
@@ -40,7 +39,6 @@ import {
   resolveResultJob
 } from "./lib/job-control.mjs";
 import {
-  appendLogLine,
   createJobLogFile,
   createJobRecord,
   createProgressReporter,
@@ -172,9 +170,7 @@ async function buildSetupReport(cwd, actionsTaken = [], pingRequested = false) {
   try {
     effectiveConfig = resolveEffectiveConfig();
   } catch (error) {
-    // Redact $HOME so --json output doesn't leak the username into
-    // issue trackers / Slack / pasted logs.
-    configError = redactHomePath(error instanceof Error ? error.message : String(error));
+    configError = formatUserFacingError(error);
   }
 
   const glmAvailability = getGlmAvailability(cwd);
@@ -191,7 +187,7 @@ async function buildSetupReport(cwd, actionsTaken = [], pingRequested = false) {
   try {
     repoConfig = getConfig(workspaceRoot);
   } catch (error) {
-    stateError = redactHomePath(error instanceof Error ? error.message : String(error));
+    stateError = formatUserFacingError(error);
   }
 
   const hasApiKey = Boolean(effectiveConfig?.has_api_key);
@@ -481,7 +477,6 @@ async function runStatus(argv) {
   const { options, positionals } = parseCommandInput(argv, { booleanOptions: ["json", "all"] });
   const cwd = resolveCommandCwd(options);
   const [reference] = positionals;
-  const session_id = currentSessionId();
 
   if (reference) {
     const snapshot = buildSingleJobSnapshot(cwd, reference);
@@ -493,9 +488,11 @@ async function runStatus(argv) {
     return;
   }
 
+  // Session scoping is read from options.env[SESSION_ID_ENV] inside
+  // filterJobsForCurrentSession — no need to plumb session_id
+  // explicitly from here.
   const snapshot = buildStatusSnapshot(cwd, {
     all: Boolean(options.all),
-    session_id,
     env: process.env
   });
   outputCommandResult(
@@ -519,9 +516,12 @@ async function runCancel(argv) {
   const { options, positionals } = parseCommandInput(argv, { booleanOptions: ["json"] });
   const cwd = resolveCommandCwd(options);
   const [reference] = positionals;
-  const session_id = currentSessionId();
 
-  const { workspaceRoot, job } = resolveCancelableJob(cwd, reference, { session_id });
+  // Session scoping is read from env inside filterJobsForCurrentSession;
+  // pass the env explicitly so resolveCancelableJob sees the current
+  // Claude Code session, not just whatever happens to be on
+  // process.env.
+  const { workspaceRoot, job } = resolveCancelableJob(cwd, reference, { env: process.env });
   const cancelledJob = {
     ...job,
     status: "cancelled",
@@ -572,11 +572,11 @@ async function main() {
 // → exitCode=2). Matches Node's recommended direct-invocation check.
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   main().catch((error) => {
-    const message = error instanceof Error ? error.message : String(error);
-    // Redact $HOME before emitting so crash messages pasted into issues /
-    // logs / Slack don't leak the username. Debug info (file inside home)
-    // stays readable via the "~/..." form.
-    process.stderr.write(`${redactHomePath(message)}\n`);
+    // formatUserFacingError normalizes the throw (Error | string | other)
+    // AND redacts $HOME so crash messages pasted into issues / Slack /
+    // logs don't leak the username. Local debugging still sees the full
+    // path via ~/… form.
+    process.stderr.write(`${formatUserFacingError(error)}\n`);
     process.exitCode = 1;
   });
 }

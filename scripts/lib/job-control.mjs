@@ -1,6 +1,6 @@
 import fs from "node:fs";
 
-import { redactHomePath } from "./fs.mjs";
+import { formatUserFacingError } from "./fs.mjs";
 import { getSessionRuntimeStatus } from "./glm-client.mjs";
 import { getConfig, listJobs, readJobFile, resolveJobFile } from "./state.mjs";
 import { SESSION_ID_ENV } from "./tracked-jobs.mjs";
@@ -220,9 +220,7 @@ export function buildStatusSnapshot(cwd, options = {}) {
     config = getConfig(workspaceRoot);
     allJobs = listJobs(workspaceRoot);
   } catch (error) {
-    // Redact $HOME so --json output doesn't leak the username into
-    // issue trackers / Slack / pasted logs.
-    stateError = redactHomePath(error instanceof Error ? error.message : String(error));
+    stateError = formatUserFacingError(error);
   }
 
   const jobs = sortJobsNewestFirst(filterJobsForCurrentSession(allJobs, options));

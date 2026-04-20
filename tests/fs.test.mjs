@@ -3,7 +3,7 @@ import { test } from "node:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { readJsonFile, redactHomePath } from "../scripts/lib/fs.mjs";
+import { formatUserFacingError, readJsonFile, redactHomePath } from "../scripts/lib/fs.mjs";
 
 // Guards for Bundle D3+ additions to fs.mjs:
 // - Sub-MED: readJsonFile throws with file path on corrupt JSON
@@ -69,4 +69,24 @@ test("redactHomePath does NOT redact a prefix match that is not followed by '/' 
   // e.g. /Users/sky_zhang01foo should not be redacted to ~foo
   const tricky = `${home}foo/bar`;
   assert.equal(redactHomePath(tricky), tricky, "boundary violation — regex redacted a non-path prefix");
+});
+
+// Bundle E+ P2-1: formatUserFacingError centralizes the pattern
+// `error instanceof Error ? error.message : String(error)` + redaction
+// that used to be duplicated at 4 call sites (buildSetupReport ×2,
+// buildStatusSnapshot, main().catch).
+
+test("formatUserFacingError pulls .message from Error instances and redacts $HOME", () => {
+  const home = os.homedir();
+  const err = new Error(`Could not parse ${home}/.config/glm-plugin-cc/config.json: boom`);
+  assert.equal(
+    formatUserFacingError(err),
+    "Could not parse ~/.config/glm-plugin-cc/config.json: boom"
+  );
+});
+
+test("formatUserFacingError falls back to String() for non-Error throws", () => {
+  assert.equal(formatUserFacingError("oops"), "oops");
+  assert.equal(formatUserFacingError(42), "42");
+  assert.equal(formatUserFacingError({ toString: () => "object msg" }), "object msg");
 });
