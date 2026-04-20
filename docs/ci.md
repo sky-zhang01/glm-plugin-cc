@@ -41,7 +41,7 @@ Mirrors `scripts/ci/check-all.sh`:
    independent comment from the counterpart AI is present, the job
    prints an `ADVISORY` line. Advisory only — does not block merge.
 
-### `release.yml`
+### `release-gate.yml`
 
 Triggered when a tag `v*.*.*` is pushed. Does not publish; gates
 publication. Verifies:

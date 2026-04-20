@@ -23,13 +23,13 @@ Out of Scope
 - No config file schema changes (existing
   `~/.config/glm-plugin-cc/config.json` keeps working without re-setup).
 - No endpoint URL changes; no model default change.
-- No publish automation — the `release.yml` workflow gates tag quality
+- No publish automation — the `release-gate.yml` workflow gates tag quality
   but does NOT push to any registry or GitHub Release. Publication
   remains a manual operation.
 
 Planned Actions
 1. Tag `v0.4.3` on gitea primary.
-2. Push the tag; `.github/workflows/release.yml` runs the release gate
+2. Push the tag; `.github/workflows/release-gate.yml` runs the release gate
    (version parity across `package.json` / `plugin.json` /
    `marketplace.json` / tag; CHANGELOG entry present;
    `release_card.md Status: READY`).
@@ -75,7 +75,7 @@ modules + 3 top-level scripts + ESM import resolution.
 
 CI Evidence: this release ships the first real CI pipeline — see
 `CHANGELOG.md` under `## v0.4.3 › Added — CI pipeline`. `npm run
-ci:local` mirrors the server gate exactly. `release.yml` is
+ci:local` mirrors the server gate exactly. `release-gate.yml` is
 tag-triggered and verifies version parity + CHANGELOG entry +
 `release_card.md Status: READY` before any future tag lands. Branch
 protection on `main` is applied via
