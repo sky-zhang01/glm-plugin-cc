@@ -108,3 +108,39 @@ test("runReview source actually passes EXPECTED_REVIEW_KEYS (regression guard)",
     );
   }
 });
+
+// Regression guard for MED-3 / m-2: buildReviewSystemPrompt previously
+// had a fallback branch that emitted "verdict (ready|needs_fixes|blocked)"
+// when `safeReadSchema` returned null. That enum does not match the
+// shipped schema (`approve` | `needs-attention`) — a corrupt shipped
+// schema would silently produce reviews with a drifted vocabulary. Fix:
+// always load via readOutputSchema and drop the fallback string.
+test("no drifted verdict enum leaks from buildReviewSystemPrompt fallback (regression: MED-3)", () => {
+  const companion = fs.readFileSync(
+    path.join(repoRoot, "scripts", "glm-companion.mjs"),
+    "utf8"
+  );
+  assert.ok(
+    !companion.includes("ready|needs_fixes|blocked"),
+    "drifted fallback verdict enum still present in glm-companion.mjs; shipped schema uses approve|needs-attention"
+  );
+  assert.ok(
+    !/function\s+safeReadSchema\b/.test(companion),
+    "safeReadSchema wrapper still present — should have been removed so readOutputSchema can fail-closed on a corrupt shipped schema"
+  );
+});
+
+// Regression guard for MED-1: writeConfigFile previously merged through
+// `safeReadConfigOrNull` which swallowed corruption. The function itself
+// was left defined (dead) even after the fix, inviting accidental reuse.
+// Delete keeps the "dead code -> regression vector" door shut.
+test("no dead safeReadConfigOrNull lingering in preset-config.mjs (regression: MED-1)", () => {
+  const presetConfig = fs.readFileSync(
+    path.join(repoRoot, "scripts", "lib", "preset-config.mjs"),
+    "utf8"
+  );
+  assert.ok(
+    !/function\s+safeReadConfigOrNull\b/.test(presetConfig),
+    "safeReadConfigOrNull still defined — delete it so no future caller silently reintroduces M-A"
+  );
+});

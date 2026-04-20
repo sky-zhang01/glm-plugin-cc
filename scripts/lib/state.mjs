@@ -206,7 +206,17 @@ export function writeJobFile(cwd, jobId, payload) {
 }
 
 export function readJobFile(jobFile) {
-  return JSON.parse(fs.readFileSync(jobFile, "utf8"));
+  // Mirror loadState / readConfigFile fail-closed pattern: surface the file
+  // path and a recovery hint. Without this, a corrupt job file throws a
+  // bare `SyntaxError: Expected property name ...` with no clue which file
+  // to delete when the user hits `/glm:result <id>`.
+  try {
+    return JSON.parse(fs.readFileSync(jobFile, "utf8"));
+  } catch (error) {
+    throw new Error(
+      `Could not parse ${jobFile}: ${error.message}. Delete or fix the file to recover; its result will be lost.`
+    );
+  }
 }
 
 function removeJobFile(jobFile) {

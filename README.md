@@ -131,8 +131,8 @@ Picked to match codex CLI's default tier (`gpt-5.4`):
 
 This mirrors the codex-plugin-cc pattern of a single default (no
 per-command model split) — override per-invocation with `--model <name>`
-or globally via the `GLM_MODEL` env var. See 智谱 BigModel's text-model
-catalog for available names.
+or project-wide via `default_model` in the config file. See 智谱 BigModel's
+text-model catalog for available names.
 
 Commonly useful text models (ordered by generation, newest first):
 

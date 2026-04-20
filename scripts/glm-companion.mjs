@@ -154,10 +154,12 @@ function firstMeaningfulLine(text, fallback) {
 }
 
 function buildTargetLabel(target, focusText) {
-  const base = target?.base ? `base=${target.base}` : null;
-  const scope = target?.scope ? `scope=${target.scope}` : null;
+  // resolveReviewTarget returns { mode, label, baseRef, explicit } — no
+  // `base` / `scope`. The previous impl referenced target.base /
+  // target.scope which were always undefined, so the label silently fell
+  // through to "working tree" regardless of the actual review target.
   const focus = focusText ? `focus=${shorten(focusText, 60)}` : null;
-  return [base, scope, focus].filter(Boolean).join(" · ") || "working tree";
+  return [target?.label, focus].filter(Boolean).join(" · ") || "working tree";
 }
 
 async function buildSetupReport(cwd, actionsTaken = [], pingRequested = false) {
@@ -176,13 +178,27 @@ async function buildSetupReport(cwd, actionsTaken = [], pingRequested = false) {
   const authStatus = pingRequested
     ? await getGlmAuthStatus(cwd)
     : { ok: null, detail: "ping skipped (pass --ping to probe)" };
-  const repoConfig = getConfig(workspaceRoot);
+
+  // getConfig() reads state.json via loadState(); loadState now throws on
+  // corrupt (H-A fix). If /glm:setup crashes here, the user loses the
+  // recovery report and has no in-app path to fix state.json. Catch and
+  // surface as stateError so the rest of the report still renders.
+  let repoConfig = null;
+  let stateError = null;
+  try {
+    repoConfig = getConfig(workspaceRoot);
+  } catch (error) {
+    stateError = error instanceof Error ? error.message : String(error);
+  }
 
   const hasApiKey = Boolean(effectiveConfig?.has_api_key);
 
   const nextSteps = [];
   if (configError) {
     nextSteps.push(`Fix config file error: ${configError}`);
+  }
+  if (stateError) {
+    nextSteps.push(`Fix state file error: ${stateError}`);
   }
   if (!effectiveConfig?.preset_id) {
     nextSteps.push("Pick a preset: /glm:setup --preset coding-plan | pay-as-you-go | custom --base-url <url>");
@@ -198,13 +214,15 @@ async function buildSetupReport(cwd, actionsTaken = [], pingRequested = false) {
     ready: Boolean(effectiveConfig?.preset_id) &&
       hasApiKey &&
       glmAvailability.available &&
-      authStatus.ok !== false,
+      authStatus.ok !== false &&
+      !stateError,
     node: { detail: nodeDetail },
     npm: { detail: "not required for glm-plugin-cc (zero runtime deps)" },
     glm: { detail: glmAvailability.detail },
     auth: { detail: authStatus.detail },
     sessionRuntime: getSessionRuntimeStatus(process.env, cwd),
-    reviewGateEnabled: Boolean(repoConfig.stopReviewGate),
+    reviewGateEnabled: Boolean(repoConfig?.stopReviewGate),
+    state: { error: stateError },
     actionsTaken,
     nextSteps,
     config: {
@@ -266,18 +284,17 @@ async function runSetup(argv) {
   outputCommandResult({ command: "setup", report }, renderSetupReport(report), Boolean(options.json));
 }
 
-function safeReadSchema() {
-  try {
-    return readOutputSchema(REVIEW_SCHEMA_PATH);
-  } catch {
-    return null;
-  }
-}
-
 function buildReviewSystemPrompt({ adversarial, schema }) {
-  const schemaNote = schema
-    ? `Return ONE JSON object. Do NOT wrap in markdown fences. Schema:\n${JSON.stringify(schema, null, 2)}`
-    : "Return ONE JSON object with keys: verdict (ready|needs_fixes|blocked), summary, findings[].";
+  // Schema is shipped with the plugin and always required here. The
+  // previous code path wrapped the read in a safeRead wrapper and fell
+  // back to a hard-coded verdict enum that did NOT match the shipped
+  // schema's `approve` / `needs-attention` — silently shipping a drifted
+  // vocabulary to GLM whenever the shipped schema file was
+  // missing/corrupt. Now fail-closed: let the readOutputSchema error
+  // propagate so the user gets a clear "reinstall the plugin" path
+  // instead of quietly degraded reviews. See tests/template-contract.mjs
+  // for the structural regression guard.
+  const schemaNote = `Return ONE JSON object. Do NOT wrap in markdown fences. Schema:\n${JSON.stringify(schema, null, 2)}`;
   const modeNote = adversarial
     ? "Act as an adversarial reviewer. Prioritize defects, missing tests, silent failures, and reviewer blind spots over approval."
     : "Act as a balanced reviewer. Report real issues; do not manufacture any.";
@@ -322,7 +339,7 @@ async function runReview(argv, { adversarial }) {
     REVIEW_INPUT: reviewContext.content
   });
 
-  const schema = safeReadSchema();
+  const schema = readOutputSchema(REVIEW_SCHEMA_PATH);
   const systemPrompt = buildReviewSystemPrompt({ adversarial, schema });
 
   const jobId = generateJobId();
@@ -356,8 +373,8 @@ async function runReview(argv, { adversarial }) {
   const meta = {
     reviewLabel: adversarial ? "Adversarial Review" : "Review",
     targetLabel,
-    base: target.base,
-    scope: target.scope,
+    targetMode: target.mode,
+    baseRef: target.baseRef ?? null,
     focusText
   };
   const rendered = renderReviewResult(result, meta);

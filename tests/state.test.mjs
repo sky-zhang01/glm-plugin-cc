@@ -61,3 +61,21 @@ test("loadState: CORRUPT state.json throws (regression guard: H-A)", async () =>
     /Could not parse .*state\.json/
   );
 });
+
+test("readJobFile: CORRUPT job file throws with file path (regression guard: MED-2)", async () => {
+  makeTempPluginData();
+  const fakeRepo = fs.mkdtempSync(path.join(os.tmpdir(), "glm-state-cwd-"));
+  fs.mkdirSync(path.join(fakeRepo, ".git"), { recursive: true });
+  const mod = await freshModule();
+  // writeJobFile needs the state dir to exist; writeJobFile creates it.
+  const jobFile = mod.writeJobFile(fakeRepo, "job-broken", { id: "job-broken", status: "completed" });
+  fs.writeFileSync(jobFile, "{ not valid JSON", "utf8");
+
+  // Pre-fix: threw bare `SyntaxError: Expected property name or '}' in
+  // JSON at position 2` with NO filename — user running /glm:result
+  // <id> had no idea which file to delete.
+  assert.throws(
+    () => mod.readJobFile(jobFile),
+    (err) => err.message.includes(jobFile) && /Could not parse/.test(err.message)
+  );
+});

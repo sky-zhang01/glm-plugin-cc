@@ -47,6 +47,13 @@ function normalizeReviewFinding(finding, index) {
     Number.isInteger(source.line_end) && source.line_end > 0 && (!lineStart || source.line_end >= lineStart)
       ? source.line_end
       : lineStart;
+  // Schema requires confidence ∈ [0, 1]. Keep it when GLM returned a valid
+  // number; otherwise leave it null so renderers can flag the gap instead
+  // of silently presenting findings without any confidence signal.
+  const confidence =
+    typeof source.confidence === "number" && source.confidence >= 0 && source.confidence <= 1
+      ? source.confidence
+      : null;
 
   return {
     severity: typeof source.severity === "string" && source.severity.trim() ? source.severity.trim() : "low",
@@ -55,6 +62,7 @@ function normalizeReviewFinding(finding, index) {
     file: typeof source.file === "string" && source.file.trim() ? source.file.trim() : "unknown",
     line_start: lineStart,
     line_end: lineEnd,
+    confidence,
     recommendation: typeof source.recommendation === "string" ? source.recommendation.trim() : ""
   };
 }
@@ -188,6 +196,12 @@ export function renderSetupReport(report) {
     ""
   ];
 
+  if (report.state?.error) {
+    lines.push("State file:");
+    lines.push(`- error: ${report.state.error}`);
+    lines.push("");
+  }
+
   if (report.config) {
     lines.push("Endpoint config:");
     if (report.config.error) {
@@ -290,7 +304,13 @@ export function renderReviewResult(parsedResult, meta) {
     lines.push("Findings:");
     for (const finding of findings) {
       const lineSuffix = formatLineRange(finding);
-      lines.push(`- [${finding.severity}] ${finding.title} (${finding.file}${lineSuffix})`);
+      const confidenceSuffix =
+        typeof finding.confidence === "number"
+          ? ` · conf ${finding.confidence.toFixed(2)}`
+          : "";
+      lines.push(
+        `- [${finding.severity}${confidenceSuffix}] ${finding.title} (${finding.file}${lineSuffix})`
+      );
       lines.push(`  ${finding.body}`);
       if (finding.recommendation) {
         lines.push(`  Recommendation: ${finding.recommendation}`);

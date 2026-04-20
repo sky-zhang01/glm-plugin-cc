@@ -2,18 +2,21 @@
 
 ## v0.4.3 — 2026-04-20
 
-Bug-fix release. Six issues resolved across arg parsing, review prompt
-pipeline, state/config corruption handling, and template dispatch. The
-big one: pre-fix, every `/glm:review` and `/glm:adversarial-review`
-call shipped an EMPTY repository context to GLM — the prompt template
-used `{{REVIEW_INPUT}}` / `{{TARGET_LABEL}}` / `{{USER_FOCUS}}` /
-`{{REVIEW_COLLECTION_GUIDANCE}}` while the companion passed
-`FOCUS_INSTRUCTION` / `REVIEW_DIFF` / `REVIEW_BASE` / `REVIEW_SCOPE` /
-`ADVERSARIAL_MODE`; zero overlap, and `interpolateTemplate` silently
-substitutes `""` for unmatched placeholders. The review feature
-effectively never worked end-to-end.
+Bug-fix release. Thirteen issues resolved across two review passes —
+six in the first pass (arg parsing, review prompt pipeline, state/config
+corruption handling, template dispatch) and seven in the second pass
+(setup resilience, dead-code pruning, job-file error UX, shipped-schema
+fail-closed, finding confidence rendering, dead target metadata, doc
+drift). The headline fix: pre-fix, every `/glm:review` and
+`/glm:adversarial-review` call shipped an EMPTY repository context to
+GLM — the prompt template used `{{REVIEW_INPUT}}` / `{{TARGET_LABEL}}`
+/ `{{USER_FOCUS}}` / `{{REVIEW_COLLECTION_GUIDANCE}}` while the
+companion passed `FOCUS_INSTRUCTION` / `REVIEW_DIFF` / `REVIEW_BASE` /
+`REVIEW_SCOPE` / `ADVERSARIAL_MODE`; zero overlap, and
+`interpolateTemplate` silently substitutes `""` for unmatched
+placeholders. The review feature effectively never worked end-to-end.
 
-### Fixed
+### Fixed (first pass)
 
 - **`scripts/lib/args.mjs`** — `--key=value` now splits on the FIRST
   `=` only (using `indexOf`), not `split("=", 2)` which truncated
@@ -62,6 +65,62 @@ effectively never worked end-to-end.
   `null`. Now uses `readConfigFile` directly (throws on corrupt,
   returns `null` only on missing).
 
+### Fixed (second pass)
+
+Second-pass review found a real regression introduced by the first
+pass plus six pre-existing consistency gaps. All seven resolved
+without changing the config shape or public surface.
+
+- **`scripts/glm-companion.mjs` — `/glm:setup` survives corrupt
+  `state.json`** (regression from first-pass H-A). `buildSetupReport`
+  called `getConfig(workspaceRoot)` at line 179 without a try/catch;
+  after `loadState` became fail-closed, any corrupt `state.json`
+  crashed the exact command the user would run to recover. Now wraps
+  the read, exposes `report.state.error`, and adds a "Fix state file
+  error: …" step to `nextSteps`. Setup still renders end-to-end.
+- **`scripts/lib/preset-config.mjs` — delete dead
+  `safeReadConfigOrNull`**. The function was left defined (only
+  referenced in a comment after the first-pass fix), which kept the
+  regression vector for M-A open. Removed entirely.
+- **`scripts/lib/state.mjs` — `readJobFile` throws with file path**.
+  Pre-fix, a corrupt job file under `/glm:result <id>` produced a
+  bare `SyntaxError: Expected property name or '}' in JSON at
+  position 2` with no filename. Now mirrors the
+  `loadState` / `readConfigFile` pattern: `Could not parse
+  <path>: <reason>. Delete or fix the file to recover; its result
+  will be lost.` `readStoredJobOrNull` in `tracked-jobs.mjs` inherits
+  the improved message because it delegates to `readJobFile`.
+- **`scripts/glm-companion.mjs` — remove `safeReadSchema` wrapper
+  and the drifted fallback enum**. The shipped
+  `schemas/review-output.schema.json` requires
+  `verdict ∈ {approve, needs-attention}`, but when the schema file
+  was missing/corrupt, `buildReviewSystemPrompt` silently fell back
+  to a hard-coded "verdict (ready|needs_fixes|blocked)" hint —
+  shipping a completely different vocabulary to GLM. Now calls
+  `readOutputSchema(REVIEW_SCHEMA_PATH)` directly; a corrupt shipped
+  schema surfaces a clear reinstall-the-plugin error instead of
+  quietly degrading reviews.
+- **`scripts/lib/render.mjs` — `normalizeReviewFinding` retains
+  `confidence`**. The schema marks confidence `∈ [0, 1]` as
+  required; the normalizer dropped the field, so every rendered
+  finding lost the confidence signal. Now preserves valid numeric
+  values (null-out-of-range defaults to omission) and
+  `renderReviewResult` appends ` · conf 0.xx` to the severity
+  prefix — e.g. `[high · conf 0.95] ...`.
+- **`scripts/glm-companion.mjs` — drop dead `target.base` /
+  `target.scope` references**. `resolveReviewTarget` in `git.mjs`
+  returns `{ mode, label, baseRef, explicit }`; the companion read
+  `target.base` / `target.scope` which were always undefined, so
+  `buildTargetLabel` silently fell through to "working tree"
+  regardless of the actual review target. `buildTargetLabel` now
+  uses `target.label` directly, and job meta carries `targetMode` /
+  `baseRef` instead of the two always-undefined fields.
+- **`README.md` / `commands/review.md` — remove stale `GLM_MODEL`
+  env var references**. `GLM_MODEL` was dropped as an override in
+  v0.3.0 (see the v0.3.0 changelog entry), but two user-facing docs
+  still recommended it. Corrected to point at `default_model` in
+  the config file.
+
 ### Added
 
 - **`tests/args.test.mjs`** — Extended from 13 to 15 tests. New
@@ -78,8 +137,24 @@ effectively never worked end-to-end.
   must be declared, companion keys must be used by at least one
   template, and the `runReview` source must still contain all
   expected keys. Catches future drift between template and
-  companion at build time (via `npm test`), not runtime.
-- **Total**: 0 tests in v0.4.2 → 25 tests in v0.4.3 (all pass).
+  companion at build time (via `npm test`), not runtime. Second-pass
+  added 2 more structural tests: no drifted
+  `ready|needs_fixes|blocked` enum string in the companion, and no
+  lingering `safeReadConfigOrNull` definition.
+- **`tests/render.test.mjs`** (new) — 4 tests covering
+  `renderReviewResult` with confidence rendering, boundary values
+  (0 and 1), omission when GLM didn't supply a numeric confidence,
+  and the target-label contract (meta.targetLabel is authoritative,
+  no reliance on deleted `base` / `scope` fields).
+- **`tests/setup-resilience.test.mjs`** (new) — 1 integration test
+  that spawns `node scripts/glm-companion.mjs setup --json` with a
+  corrupt `state.json` pre-seeded and verifies: exit 0, report
+  rendered, `state.error` surfaced, `nextSteps` carries a fix
+  hint, `ready` is false.
+- **`tests/state.test.mjs`** — Extended with 1 new test for
+  `readJobFile` corrupt-file throw path (MED-2 regression guard).
+- **Total**: 0 tests in v0.4.2 → 25 tests first-pass → 32 tests
+  second-pass (all pass).
 
 ### Codex scaffold alignment
 
