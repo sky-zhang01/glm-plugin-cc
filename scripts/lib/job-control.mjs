@@ -28,21 +28,16 @@ function getJobTypeLabel(job) {
   if (typeof job.kindLabel === "string" && job.kindLabel) {
     return job.kindLabel;
   }
-  if (job.kind === "adversarial-review") {
-    return "adversarial-review";
-  }
-  if (job.jobClass === "review") {
-    return "review";
-  }
-  if (job.jobClass === "task") {
-    return "rescue";
-  }
-  if (job.kind === "review") {
-    return "review";
-  }
-  if (job.kind === "task") {
-    return "rescue";
-  }
+  // `kind` is authoritative (set by the companion at job creation —
+  // "review" / "adversarial-review" / "task" / "rescue"). Check it
+  // before the legacy `jobClass` field.
+  if (job.kind === "adversarial-review") return "adversarial-review";
+  if (job.kind === "review") return "review";
+  if (job.kind === "rescue") return "rescue";
+  if (job.kind === "task") return "task";
+  // Legacy jobClass fallback for older records.
+  if (job.jobClass === "review") return "review";
+  if (job.jobClass === "task") return "task";
   return "job";
 }
 

@@ -307,7 +307,10 @@ export function renderReviewResult(parsedResult, meta) {
     }
   }
 
-  appendReasoningSection(lines, meta.reasoningSummary);
+  // Prefer meta-supplied reasoning; fall back to whatever the parsed
+  // result carried (client extracts reasoning_content from the GLM
+  // response into result.reasoningSummary).
+  appendReasoningSection(lines, meta.reasoningSummary ?? parsedResult.reasoningSummary);
 
   return `${lines.join("\n").trimEnd()}\n`;
 }

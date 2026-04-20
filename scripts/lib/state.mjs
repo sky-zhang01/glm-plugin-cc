@@ -52,7 +52,20 @@ export function resolveJobsDir(cwd) {
 }
 
 export function ensureStateDir(cwd) {
-  fs.mkdirSync(resolveJobsDir(cwd), { recursive: true });
+  const stateDir = resolveStateDir(cwd);
+  const jobsDir = resolveJobsDir(cwd);
+  // Create with 0700 — review prompts, diffs, and GLM outputs may contain
+  // sensitive source code that should not be readable by other local users.
+  fs.mkdirSync(jobsDir, { recursive: true, mode: 0o700 });
+  // mkdirSync's mode is only applied when it creates the dir. If either
+  // dir already existed with looser perms, tighten them defensively.
+  for (const dir of [stateDir, jobsDir]) {
+    try {
+      fs.chmodSync(dir, 0o700);
+    } catch {
+      /* non-fatal */
+    }
+  }
 }
 
 export function loadState(cwd) {
@@ -111,7 +124,15 @@ export function saveState(cwd, state) {
     removeFileIfExists(job.logFile);
   }
 
-  fs.writeFileSync(resolveStateFile(cwd), `${JSON.stringify(nextState, null, 2)}\n`, "utf8");
+  const stateFile = resolveStateFile(cwd);
+  fs.writeFileSync(stateFile, `${JSON.stringify(nextState, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  // mode in writeFileSync only applies on create. Defensively chmod on
+  // existing files so older loose-perm state files get tightened.
+  try {
+    fs.chmodSync(stateFile, 0o600);
+  } catch {
+    /* non-fatal */
+  }
   return nextState;
 }
 
@@ -166,7 +187,12 @@ export function getConfig(cwd) {
 export function writeJobFile(cwd, jobId, payload) {
   ensureStateDir(cwd);
   const jobFile = resolveJobFile(cwd, jobId);
-  fs.writeFileSync(jobFile, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  fs.writeFileSync(jobFile, `${JSON.stringify(payload, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  try {
+    fs.chmodSync(jobFile, 0o600);
+  } catch {
+    /* non-fatal */
+  }
   return jobFile;
 }
 

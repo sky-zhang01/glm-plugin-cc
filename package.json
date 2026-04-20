@@ -1,6 +1,6 @@
 {
   "name": "@skylab/glm-plugin-cc",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "private": true,
   "type": "module",
   "description": "Claude Code plugin: GLM reviewer via 智谱 BigModel (OpenAI-compatible HTTP). Scaffold derived from openai/codex-plugin-cc (Apache-2.0).",
@@ -9,7 +9,7 @@
     "node": ">=18.18.0"
   },
   "scripts": {
-    "check": "node --check scripts/glm-companion.mjs && node --check scripts/session-lifecycle-hook.mjs && for f in scripts/lib/*.mjs; do node --check $f || exit 1; done",
+    "check": "node --check scripts/glm-companion.mjs && node --check scripts/session-lifecycle-hook.mjs && node --check scripts/check-imports.mjs && for f in scripts/lib/*.mjs; do node --check $f || exit 1; done && node scripts/check-imports.mjs",
     "test": "node --test tests/*.test.mjs"
   }
 }

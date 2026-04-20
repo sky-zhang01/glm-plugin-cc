@@ -1,0 +1,22 @@
+{
+  "name": "skylab-glm",
+  "owner": {
+    "name": "Sky Zhang"
+  },
+  "metadata": {
+    "description": "SkyLab marketplace exposing glm-plugin-cc for Claude Code (GLM reviewer/rescue via 智谱 BigModel OpenAI-compatible HTTP).",
+    "version": "0.3.4"
+  },
+  "plugins": [
+    {
+      "name": "glm",
+      "description": "Use 智谱 GLM models from Claude Code to review code or delegate tasks. Stateless HTTP via OpenAI-compatible endpoint. No Stop hook — orchestration lives in claude-dev-harness SEV /verify.",
+      "version": "0.3.4",
+      "author": {
+        "name": "Sky Zhang"
+      },
+      "homepage": "https://gitea.tokyo.skyzhang.net/SkyLab/glm-plugin-cc",
+      "source": "."
+    }
+  ]
+}

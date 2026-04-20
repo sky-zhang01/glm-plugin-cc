@@ -21,7 +21,7 @@ Raw slash-command arguments:
 First, always show the current state:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/glm-companion.mjs" setup --json $ARGUMENTS
+node "${CLAUDE_PLUGIN_ROOT}/scripts/glm-companion.mjs" setup --json "$ARGUMENTS"
 ```
 
 Inspect the JSON output. Branch on what it reports:

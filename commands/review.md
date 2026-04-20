@@ -25,7 +25,7 @@ GLM is stateless HTTP. All calls are synchronous foreground. There is no
 Run:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/glm-companion.mjs" review $ARGUMENTS
+node "${CLAUDE_PLUGIN_ROOT}/scripts/glm-companion.mjs" review "$ARGUMENTS"
 ```
 
 Return the command stdout verbatim. Do not paraphrase, summarize, or add

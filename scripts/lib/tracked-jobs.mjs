@@ -38,19 +38,28 @@ export function appendLogLine(logFile, message) {
   if (!logFile || !normalized) {
     return;
   }
-  fs.appendFileSync(logFile, `[${nowIso()}] ${normalized}\n`, "utf8");
+  fs.appendFileSync(logFile, `[${nowIso()}] ${normalized}\n`, { encoding: "utf8", mode: 0o600 });
 }
 
 export function appendLogBlock(logFile, title, body) {
   if (!logFile || !body) {
     return;
   }
-  fs.appendFileSync(logFile, `\n[${nowIso()}] ${title}\n${String(body).trimEnd()}\n`, "utf8");
+  fs.appendFileSync(logFile, `\n[${nowIso()}] ${title}\n${String(body).trimEnd()}\n`, {
+    encoding: "utf8",
+    mode: 0o600
+  });
 }
 
 export function createJobLogFile(workspaceRoot, jobId, title) {
   const logFile = resolveJobLogFile(workspaceRoot, jobId);
-  fs.writeFileSync(logFile, "", "utf8");
+  // 0600 — log may contain review prompts, diffs, and GLM output.
+  fs.writeFileSync(logFile, "", { encoding: "utf8", mode: 0o600 });
+  try {
+    fs.chmodSync(logFile, 0o600);
+  } catch {
+    /* non-fatal */
+  }
   if (title) {
     appendLogLine(logFile, `Starting ${title}.`);
   }
@@ -119,15 +128,41 @@ export function createProgressReporter({ stderr = false, logFile = null, onEvent
     return null;
   }
 
+  // Best-effort: progress logging failures (read-only log dir, disk full,
+  // fs quota, etc.) must NOT bubble up into the fetch lifecycle and get
+  // mis-reported as NETWORK_ERROR. Each side effect is isolated.
   return (eventOrMessage) => {
-    const event = normalizeProgressEvent(eventOrMessage);
+    let event;
+    try {
+      event = normalizeProgressEvent(eventOrMessage);
+    } catch {
+      return;
+    }
     const stderrMessage = event.stderrMessage ?? event.message;
     if (stderr && stderrMessage) {
-      process.stderr.write(`[glm] ${stderrMessage}\n`);
+      try {
+        process.stderr.write(`[glm] ${stderrMessage}\n`);
+      } catch {
+        /* non-fatal */
+      }
     }
-    appendLogLine(logFile, event.message);
-    appendLogBlock(logFile, event.logTitle, event.logBody);
-    onEvent?.(event);
+    try {
+      appendLogLine(logFile, event.message);
+    } catch {
+      /* non-fatal — log path unwritable */
+    }
+    try {
+      appendLogBlock(logFile, event.logTitle, event.logBody);
+    } catch {
+      /* non-fatal */
+    }
+    if (typeof onEvent === "function") {
+      try {
+        onEvent(event);
+      } catch {
+        /* non-fatal */
+      }
+    }
   };
 }
 

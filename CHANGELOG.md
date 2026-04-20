@@ -1,5 +1,107 @@
 # Changelog
 
+## v0.3.4 — 2026-04-20
+
+Install-path enablement + independent code review fixes. The Codex CLI
+was run over the full v0.3.3 repo as an adversarial review; 11 findings
+came back, 9 were verified and landed here (2 deferred with rationale).
+All findings treated this as a pre-install bar, not polish.
+
+### Added (marketplace-load path)
+
+- `.claude-plugin/marketplace.json` — root-as-marketplace entry that
+  exposes `glm` as a single plugin with `source: "."` so
+  `/plugin marketplace add` can load the repo. Name: `skylab-glm`.
+- `scripts/check-imports.mjs` — ESM import-resolution check for all 13
+  lib modules. Wired into `npm run check` so v0.3.3-class broken imports
+  fail loudly instead of passing `node --check`.
+
+### Fixed (HIGH — pre-install blockers)
+
+- **H1 / shell injection**: `$ARGUMENTS` now quoted as `"$ARGUMENTS"` in
+  `commands/{adversarial-review,cancel,review,setup,status}.md`. Previously
+  shell metachars in slash-command arguments could escape the `node` call
+  and execute arbitrary shell.
+- **H2 / broken SessionStart/End hook**: `scripts/session-lifecycle-hook.mjs`
+  was importing `./lib/app-server.mjs` and `./lib/broker-lifecycle.mjs` —
+  codex-plugin-cc scaffold residue that doesn't exist in this fork. Every
+  Claude Code session start/end crashed the hook. Rewrote the hook as a
+  stateless bookkeeping shim: append `GLM_COMPANION_SESSION_ID` env on
+  start, prune this session's local job records on end. No broker /
+  process-tree teardown needed (GLM is stateless HTTP; jobs run
+  synchronously in the companion process).
+- **H3 / silent fail-open on corrupt config**: v0.3.3 `resolveEffectiveConfig`
+  delegated to `safeReadConfigOrNull` which swallowed JSON parse errors,
+  unknown preset_id errors, and non-`https://` base_url errors — falling
+  back to the built-in BigModel endpoint. A corrupt `custom` preset config
+  would silently route review prompts + diffs to the default endpoint
+  instead of failing. Now `resolveEffectiveConfig` calls `readConfigFile`
+  directly (throws on corrupt config); missing file still returns null.
+  `sanitizeConfig` now rejects arrays (`typeof [] === "object"` used to
+  slip through).
+
+### Fixed (MEDIUM)
+
+- **M1 / URL echo in errors**: all error / status paths that mention the
+  base URL now pass it through `sanitizeUrlForDisplay` to strip
+  `user:pass@`, query string, and fragment before display. Defends
+  against accidentally pasted credentials in `ZAI_BASE_URL` or
+  `--base-url` being echoed to stdout / stored in job records.
+- **M2 / state/job/log file perms**: `ensureStateDir` now creates dirs
+  with mode 0700 (with defensive `chmodSync` for pre-existing dirs);
+  `writeJobFile`, `saveState`, `createJobLogFile`, `appendLogLine`, and
+  `appendLogBlock` now set mode 0600 + defensive chmod. Review prompts,
+  git diffs, and GLM outputs live in these files and should not be
+  world-readable on shared hosts.
+- **M4 / log write failure mis-reported as NETWORK_ERROR**: `createProgressReporter`
+  now isolates `appendLogLine` / `appendLogBlock` / `onEvent` exceptions
+  so a read-only log dir or full disk can't bubble up into the fetch
+  lifecycle and get mapped to NETWORK_ERROR.
+- **M5 / custom URL with query string**: `normalizeBaseUrl` rewritten
+  using `new URL()` so pathname stripping (`/chat/completions`) and
+  query / fragment preservation are structural instead of regex-based.
+  `applyPreset` similarly hardened.
+
+### Fixed (LOW)
+
+- **L1 / reasoningSummary dropped in success render**: `renderReviewResult`
+  success path now reads `meta.reasoningSummary ?? parsedResult.reasoningSummary`
+  (previously only the failure paths had the fallback).
+- **L2 / job kind mislabel**: `getJobTypeLabel` was mapping `kind === "task"`
+  and `jobClass === "task"` to `"rescue"`. Now the four real kinds
+  (review / adversarial-review / task / rescue) map to themselves; legacy
+  `jobClass` fallback preserved.
+
+### Added (defensive)
+
+- `failureShape` now uses `CONFIG_ERROR` when `resolveEndpoint` / `resolveModel`
+  throws due to a bad config file; `MODEL_REJECTED` is reserved for vision
+  deny-list rejections only.
+
+### Deferred (low-impact under current design)
+
+- **M3** (cancel not atomic vs later completion write): current cancel is
+  bookkeeping-only per the README / stateless-HTTP semantics. Worth
+  revisiting when / if background jobs or TeamCreate routing arrives.
+- Nothing else from the review was suppressed.
+
+### Install
+
+Local path (recommended — bypasses Cloudflare Access on the Gitea
+remote):
+
+```
+/plugin marketplace add /path/to/glm-plugin-cc
+/plugin install glm@skylab-glm
+```
+
+Or, after Cloudflare Access auth is established on the host:
+
+```
+/plugin marketplace add https://gitea.tokyo.skyzhang.net/SkyLab/glm-plugin-cc
+/plugin install glm@skylab-glm
+```
+
 ## v0.3.3 — 2026-04-20
 
 Simplify thinking default: v0.3.2's per-command split was

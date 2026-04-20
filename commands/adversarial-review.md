@@ -28,7 +28,7 @@ GLM is stateless HTTP; all calls are synchronous foreground. No
 Run:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/glm-companion.mjs" adversarial-review $ARGUMENTS
+node "${CLAUDE_PLUGIN_ROOT}/scripts/glm-companion.mjs" adversarial-review "$ARGUMENTS"
 ```
 
 Return the command stdout verbatim. Do not weaken the adversarial framing

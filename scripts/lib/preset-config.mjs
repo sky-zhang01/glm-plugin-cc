@@ -78,7 +78,8 @@ export function readConfigFile() {
 }
 
 function sanitizeConfig(input) {
-  if (!input || typeof input !== "object") {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    // Reject null / primitives / arrays — a config file must be a plain object.
     return null;
   }
   const presetId = typeof input.preset_id === "string" ? input.preset_id : null;
@@ -160,9 +161,18 @@ function safeReadConfigOrNull() {
 /**
  * Resolve effective config by merging builtin preset + user config.
  * Never reads API keys — only endpoint + model.
+ *
+ * Fail-closed: if the config file exists but is corrupt (unparseable
+ * JSON, invalid preset_id, non-https base_url, wrong shape), this
+ * THROWS. Callers must catch and surface the error to the user rather
+ * than silently falling through to the built-in fallback endpoint —
+ * otherwise a bad `custom` preset would silently route prompts and
+ * diffs to the default 智谱 BigModel endpoint.
+ *
+ * Missing config file is NOT an error — returns { source: "unconfigured" }.
  */
 export function resolveEffectiveConfig() {
-  const userConfig = safeReadConfigOrNull();
+  const userConfig = readConfigFile();
   const preset = userConfig?.preset_id ? BUILTIN_PRESETS[userConfig.preset_id] : null;
 
   const baseUrl =

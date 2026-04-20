@@ -1,27 +1,46 @@
-# Release Card — glm-plugin-cc v0.3.3
+# Release Card — glm-plugin-cc v0.3.4
 
 Status: READY
-Approval Mode: inline-session (user: "如果codex 就只是model_reasoning_effort = 'medium' 而没按task分是否开关thinking的话 我们也就默认都on就行了 用户需要可以自己手动关")
+Approval Mode: inline-session (user asked to prepare install + first run to the plugin; triggered codex independent review before install)
 
-Requested Scope: v0.3.3 simplify thinking default — collapse v0.3.2's per-command split into a single global `on` default that mirrors codex CLI's single `model_reasoning_effort = "medium"` default on `gpt-5.4`. Codex itself does not split reasoning per task, so our plugin shouldn't either. User can pass `--thinking off` on any command for light calls.
+Requested Scope: v0.3.4 = (1) enable `/plugin marketplace add` loading by adding `.claude-plugin/marketplace.json` (root-as-marketplace, `source: "."`, name `skylab-glm`); (2) ship all 9 verified findings from the codex full-repo review (3 HIGH, 4 MEDIUM, 2 LOW); (3) add an ESM import-resolution check to `npm run check` so v0.3.3-class broken imports fail loudly in CI.
 
-Out of Scope: API format / preset URLs (v0.3.0); default model (v0.3.1); generation ordering (v0.3.2); anything other than thinking-default unification.
+Out of Scope: Multi-provider fallback; background jobs; CI pipeline (v0.4+); cancel-vs-complete atomicity (M3 deferred with rationale); anything other than the codex findings + install manifest.
 
-Intended Ref: main @ new commit (post v0.3.2 18b8225) + tag v0.3.3 (annotated), remote gitea.tokyo.skyzhang.net/SkyLab/glm-plugin-cc.
+Intended Ref: main @ new commit (post v0.3.3 edc8f68) + tag v0.3.4 (annotated), remote gitea.tokyo.skyzhang.net/SkyLab/glm-plugin-cc.
 
-Planned Actions: (1) commit v0.3.3 changes on main; (2) push main via cloudflared access token header; (3) create + push tag v0.3.3.
+Planned Actions: (1) commit v0.3.4 on main; (2) push main via cloudflared access token header; (3) create + push tag v0.3.4; (4) after tag lands, proceed to local-path `/plugin marketplace add` validation.
 
-Scope Completion: COMPLETE — `scripts/glm-companion.mjs` runTask default changed `rescueMode` → `true` (both rescue and task now default on); runReview unchanged (already `true`); comments updated to "global default on — mirrors codex single medium default". `commands/task.md` description updated ("Thinking defaults ON"). `commands/review.md`, `adversarial-review.md`, `rescue.md`, `agents/glm-rescue.md` wording updated from per-command framing to "default on across all commands". `README.md` "Thinking / reasoning" section collapsed from per-command table to single-sentence explanation. `CHANGELOG.md` v0.3.3 entry explicitly calls out v0.3.2 over-engineering + documents the one functional change (task default on, was off). `plugin.json` + `package.json` bumped 0.3.2 → 0.3.3.
+Scope Completion: COMPLETE
+- `.claude-plugin/marketplace.json` NEW (15 lines)
+- `scripts/check-imports.mjs` NEW (50 lines, wired into `npm run check`)
+- `scripts/session-lifecycle-hook.mjs` rewritten (-50/+25, stateless-HTTP bookkeeping only)
+- `scripts/lib/preset-config.mjs`: `resolveEffectiveConfig` fail-closed (uses `readConfigFile` directly); `sanitizeConfig` rejects arrays
+- `scripts/lib/glm-client.mjs`: `normalizeBaseUrl` structural via `new URL()`; `sanitizeUrlForDisplay` NEW; all error / status paths pass URLs through sanitizer; runChatRequest `CONFIG_ERROR` branch added; `getGlmAvailability` and `getGlmAuthStatus` wrapped in try/catch for config errors
+- `scripts/lib/state.mjs`: `ensureStateDir` 0700 + chmod; `saveState` + `writeJobFile` 0600 + chmod
+- `scripts/lib/tracked-jobs.mjs`: `createJobLogFile` + `appendLogLine` + `appendLogBlock` 0600; `createProgressReporter` isolates callback exceptions
+- `scripts/lib/render.mjs`: `renderReviewResult` success path falls back to `parsedResult.reasoningSummary`
+- `scripts/lib/job-control.mjs`: `getJobTypeLabel` now maps `kind` authoritatively (review/adversarial-review/task/rescue → themselves)
+- 5 command files: `$ARGUMENTS` quoted
+- `package.json` check script + version bump
+- `.claude-plugin/plugin.json` version bump
+- CHANGELOG v0.3.4 entry (codex review + fixes + install path)
 
 Outstanding In-Scope Work: none
 
-Major Upgrade Review: N/A — patch version bump; zero new runtime deps; zero API shape change. Functional diff vs v0.3.2: `/glm:task` without explicit `--thinking` now defaults `on` (was `off`). Users who relied on the v0.3.2 `task` off-default should pass `--thinking off` explicitly going forward — one-line migration.
-Breaking Changes: none (additive — explicit `--thinking off` fully restores v0.3.2 `task` behavior)
-Repo Usage Audit: `grep -rn "rescueMode\|per-command default\|task default.*off"` across scripts/commands/agents/README confirms the per-command split narrative has been purged. parseThinkingFlag signature unchanged from v0.3.2 (still accepts defaultValue; call sites just always pass `true`). `rescueMode` variable still used for system-prompt selection inside runTask (unchanged) but no longer drives thinking default.
-Verification Plan: (executed) node --check all 15 .mjs files; grep audit confirms both runReview + runTask pass `true` as the parseThinkingFlag default; all five doc files (`review.md` / `adversarial-review.md` / `rescue.md` / `task.md` / `agents/glm-rescue.md`) carry the unified "default on across all commands" phrasing; README section is now 3 lines (was 14); explicit `--thinking off` override path unchanged + still parses correctly.
+Major Upgrade Review: N/A — patch version bump; zero new runtime deps. Functional behavior changes summarized:
+- Previously-broken Claude Code SessionStart / SessionEnd hook now actually runs (was crashing on import).
+- Corrupt user config.json now FAILS CLOSED (error returned) instead of silently falling through to the built-in BigModel default.
+- Shell-injection vector in 5 command files closed.
+Non-breaking for well-configured callers on v0.3.3.
+Breaking Changes: Callers who were (accidentally) depending on v0.3.3's fail-open on corrupt config will now see an error. This is a fix, not a regression; user instruction is `/glm:setup --preset ...` to rewrite the config.
+Repo Usage Audit: grepped for broker / app-server / `$ARGUMENTS` without quotes / `fs.mkdirSync` without mode / `fs.writeFileSync` without mode — all sites addressed. `find scripts -name '*.mjs' -exec grep -l "app-server\|broker" {} \;` returns empty. `grep -n 'glm-companion\.mjs.*\\\$ARGUMENTS' commands/*.md` shows all now have `"$ARGUMENTS"`.
+Verification Plan: executed — (1) `npm run check` passes all 15 .mjs files (syntax) + 13 lib modules (import resolution); (2) 7-scenario smoke test: preset write, 0700/0600 perms verified via `stat`, URL normalize strips `/chat/completions/`, URL sanitize strips `user:pass@?token=...` to host-only, corrupt config fails-closed via `config.error` surface, thinking flag bogus value rejected, vision model rejected, shell-metachar arguments routed as strings (no shell execution).
 
-Local Verification: node --check passed on all 15 .mjs files; grep -n "parseThinkingFlag(options.thinking" scripts/glm-companion.mjs returns two lines, both with `, true)` argument; grep for stale per-command narratives returns empty; README Thinking section reduced to single paragraph matching the single-default stance.
+Local Verification: all pass. File perm verified via `stat -f "%Sp"`: `drwx------` on state dir, `-rw-------` on config.json. URL sanitize verified: input `http://user:secret@bad.example/?token=abc` → error shows `http://bad.example/` only. Fail-closed verified: `echo "not valid json" > config.json` → `config.error: Could not parse ...`. ESM import check: `[check-imports] OK (13 modules)`.
 
-CI Evidence: no CI pipeline in v0.3.3 (planned v0.4+); ref-bound verification is local-only.
+Codex Review Provenance: Full-repo adversarial review dispatched via codex:codex-rescue subagent on v0.3.3 (commit edc8f68). 11 findings returned, all 11 independently re-verified by reading the cited `file:line`. 9 landed in this release, 2 deferred with rationale (M3 cancel atomicity — current stateless HTTP semantics; N1 import resolution — addressed with `scripts/check-imports.mjs`). No hallucinated findings detected.
 
-Rollback: delete tag v0.3.3; revert v0.3.3 commit; v0.3.2 state (per-command split, task default off) remains at its tag. Users who need task-off behavior can always pass `--thinking off` explicitly without rolling back.
+CI Evidence: no CI pipeline yet (planned v0.4+); ref-bound verification is local-only. `npm run check` now also does ESM import resolution — would catch H2-class regressions.
+
+Rollback: delete tag v0.3.4; revert v0.3.4 commit; v0.3.3 remains at its tag (but with known SessionStart/End crash bug + fail-open bug). Not recommended to roll back to v0.3.3 — use an older tag (v0.3.2 or earlier) if v0.3.4 is rejected.

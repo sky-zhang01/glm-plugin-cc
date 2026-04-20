@@ -41,10 +41,46 @@ function resolveApiKey() {
   return getEnv("ZAI_API_KEY") || getEnv("Z_AI_API_KEY") || getEnv("GLM_API_KEY");
 }
 
+/**
+ * Structurally strip `/chat/completions` (and any trailing slashes) from
+ * the pathname of a base URL, preserving scheme / host / port. Preserves
+ * query and fragment if present so callers who intentionally pass an
+ * API-version query string still get a sensible endpoint.
+ *
+ * Falls back to regex-based trimming if the input doesn't parse as a
+ * URL (shouldn't happen after https:// validation, but cheap insurance).
+ */
 function normalizeBaseUrl(url) {
-  return String(url || "")
-    .replace(/\/+$/, "")
-    .replace(/\/chat\/completions$/i, "");
+  const raw = String(url || "");
+  try {
+    const parsed = new URL(raw);
+    parsed.pathname = parsed.pathname
+      .replace(/\/chat\/completions\/?$/i, "")
+      .replace(/\/+$/, "");
+    return parsed.toString().replace(/\/+$/, "");
+  } catch {
+    return raw.replace(/\/+$/, "").replace(/\/chat\/completions$/i, "");
+  }
+}
+
+/**
+ * Strip userinfo + query + fragment from a URL before echoing it back in
+ * error / status output. Avoids leaking credentials that a user may have
+ * accidentally pasted into `ZAI_BASE_URL` or `--base-url`.
+ */
+function sanitizeUrlForDisplay(url) {
+  const raw = String(url || "");
+  try {
+    const parsed = new URL(raw);
+    parsed.username = "";
+    parsed.password = "";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    // Length-cap as a last-resort safety net.
+    return raw.length > 100 ? `${raw.slice(0, 100)}…` : raw;
+  }
 }
 
 function resolveBaseUrl() {
@@ -52,7 +88,7 @@ function resolveBaseUrl() {
   if (override) {
     if (!/^https:\/\//i.test(override)) {
       throw new Error(
-        `ZAI_BASE_URL must use https:// (got: ${override}). Plaintext endpoints would leak the API key.`
+        `ZAI_BASE_URL must use https:// (got: ${sanitizeUrlForDisplay(override)}). Plaintext endpoints would leak the API key.`
       );
     }
     return normalizeBaseUrl(override);
@@ -115,9 +151,11 @@ export function getGlmAvailability(cwd) {
     };
   }
   try {
+    const endpoint = resolveEndpoint();
+    const model = resolveModel();
     return {
       available: true,
-      detail: `endpoint=${resolveEndpoint()}, model=${resolveModel()}`
+      detail: `endpoint=${sanitizeUrlForDisplay(endpoint)}, model=${model}`
     };
   } catch (error) {
     return {
@@ -137,8 +175,14 @@ export async function getGlmAuthStatus(cwd, options = {}) {
   if (!availability.available) {
     return { ok: false, detail: availability.detail };
   }
-  const apiKey = resolveApiKey();
-  const endpoint = resolveEndpoint();
+  let apiKey, endpoint, probeModel;
+  try {
+    apiKey = resolveApiKey();
+    endpoint = resolveEndpoint();
+    probeModel = resolveModel(options);
+  } catch (error) {
+    return { ok: false, detail: error instanceof Error ? error.message : String(error) };
+  }
   const timeoutMs = resolveTimeoutMs({ timeoutMs: 15000 });
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -150,7 +194,7 @@ export async function getGlmAuthStatus(cwd, options = {}) {
         authorization: `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: resolveModel(options),
+        model: probeModel,
         max_tokens: 16,
         messages: [{ role: "user", content: "ping" }]
       }),
@@ -166,7 +210,7 @@ export async function getGlmAuthStatus(cwd, options = {}) {
       const body = await safeReadText(response);
       return { ok: false, detail: `HTTP ${response.status}: ${body.slice(0, 200)}` };
     }
-    return { ok: true, detail: `HTTP ${response.status} from ${endpoint}` };
+    return { ok: true, detail: `HTTP ${response.status} from ${sanitizeUrlForDisplay(endpoint)}` };
   } catch (error) {
     if (error?.name === "AbortError") {
       return { ok: false, detail: `Request timed out after ${timeoutMs} ms.` };
@@ -245,13 +289,17 @@ async function runChatRequest(cwd, options = {}) {
     return failureShape("Empty prompt.", "EMPTY_PROMPT");
   }
 
-  const apiKey = resolveApiKey();
-  const endpoint = resolveEndpoint();
-  let model;
+  let apiKey, endpoint, model;
   try {
+    apiKey = resolveApiKey();
+    endpoint = resolveEndpoint();
     model = resolveModel(options);
   } catch (error) {
-    return failureShape(error instanceof Error ? error.message : String(error), "MODEL_REJECTED");
+    const message = error instanceof Error ? error.message : String(error);
+    // Distinguish vision-model rejection from configuration errors so
+    // callers can react differently.
+    const errorCode = /vision model/i.test(message) ? "MODEL_REJECTED" : "CONFIG_ERROR";
+    return failureShape(message, errorCode);
   }
   const timeoutMs = resolveTimeoutMs(options);
   const systemPrompt = options.systemPrompt || null;
@@ -302,7 +350,7 @@ async function runChatRequest(cwd, options = {}) {
 
     if (response.status === 429) {
       return failureShape(
-        `Rate limited by ${endpoint}. Retry after quota reset.`,
+        `Rate limited by ${sanitizeUrlForDisplay(endpoint)}. Retry after quota reset.`,
         "RATE_LIMITED",
         { rawResponse: responseText }
       );
@@ -323,14 +371,14 @@ async function runChatRequest(cwd, options = {}) {
     }
     if (response.status === 404) {
       return failureShape(
-        `HTTP 404 from ${endpoint}. Endpoint wrong for this preset? Preset base_url must be OpenAI-compatible (\`/chat/completions\` is appended automatically).`,
+        `HTTP 404 from ${sanitizeUrlForDisplay(endpoint)}. Endpoint wrong for this preset? Preset base_url must be OpenAI-compatible (\`/chat/completions\` is appended automatically).`,
         "NOT_FOUND",
         { rawResponse: responseText }
       );
     }
     if (!response.ok) {
       return failureShape(
-        `HTTP ${response.status} from ${endpoint}: ${responseText.slice(0, 400)}`,
+        `HTTP ${response.status} from ${sanitizeUrlForDisplay(endpoint)}: ${responseText.slice(0, 400)}`,
         "HTTP_ERROR",
         { rawResponse: responseText }
       );

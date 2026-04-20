@@ -5,7 +5,7 @@ disable-model-invocation: true
 allowed-tools: Bash(node:*)
 ---
 
-!`node "${CLAUDE_PLUGIN_ROOT}/scripts/glm-companion.mjs" status $ARGUMENTS`
+!`node "${CLAUDE_PLUGIN_ROOT}/scripts/glm-companion.mjs" status "$ARGUMENTS"`
 
 GLM calls are stateless HTTP foreground — this command shows only local
 job records for history / audit. There is no server-side polling.
