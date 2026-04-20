@@ -112,8 +112,17 @@ function normalizeArgv(argv) {
 }
 
 function parseCommandInput(argv, config = {}) {
+  // `--cwd <path>` (alias `-C`) is valid on every subcommand so the
+  // companion can be invoked against a repo different from the caller's
+  // process cwd (e.g. scripted multi-worktree runs). Previously, only
+  // the alias was registered — the actual value option was not, so
+  // `--cwd /path` fell through to positionals and was silently ignored.
+  const valueOptions = Array.from(
+    new Set(["cwd", ...(config.valueOptions ?? [])])
+  );
   return parseArgs(normalizeArgv(argv), {
     ...config,
+    valueOptions,
     aliasMap: { C: "cwd", ...(config.aliasMap ?? {}) }
   });
 }

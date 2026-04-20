@@ -5,13 +5,13 @@
   },
   "metadata": {
     "description": "SkyLab marketplace exposing glm-plugin-cc for Claude Code (GLM reviewer/rescue via 智谱 BigModel OpenAI-compatible HTTP).",
-    "version": "0.4.2"
+    "version": "0.4.3"
   },
   "plugins": [
     {
       "name": "glm",
       "description": "Use 智谱 GLM models from Claude Code to review code or delegate tasks. Stateless HTTP via OpenAI-compatible endpoint. No Stop hook — orchestration lives in claude-dev-harness SEV /verify.",
-      "version": "0.4.2",
+      "version": "0.4.3",
       "author": {
         "name": "Sky Zhang"
       },

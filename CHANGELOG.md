@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.4.3 — 2026-04-20
+
+Bug fix: `--cwd <path>` / `-C <path>` was silently ignored on every
+subcommand. The CLI parser (`lib/args.mjs`) only honors long-form
+flags that are registered in `valueOptions`; `aliasMap` alone is not
+enough. The companion's `parseCommandInput` wrapper registered the
+alias (`C → cwd`) but never put `cwd` in `valueOptions`, so the token
+fell through to positionals and `resolveCommandCwd` always returned
+`process.cwd()`. Programmatic callers trying to target a different
+repo were silently operating on the wrong one (or failing "must run
+inside a git repository" if the caller's cwd wasn't a repo at all).
+
+In-session `/glm:review` from Claude Code was unaffected in practice
+because Claude Code's `Bash` tool inherits the session cwd, which is
+already the right repo. The bug bites scripted / out-of-session
+invocations.
+
+### Fixed
+
+- `scripts/glm-companion.mjs`: `parseCommandInput` now centrally
+  injects `"cwd"` into `valueOptions` for all subcommands. One
+  location, no need to edit each subcommand's parse config.
+
+### Added
+
+- `tests/args.test.mjs`: 13 tests covering `parseArgs` value/boolean
+  option forms, alias resolution, passthrough semantics, and a
+  regression guard for the "unknown flag → positionals" behavior
+  that was the source of this bug. Existing `npm test` previously
+  ran zero tests; now 13/13 pass.
+
+### Not changed
+
+- Companion script surfaces for setup / review / task / rescue /
+  status / result / cancel are unchanged on Claude-Code-invoked
+  paths; the workspace resolution already went through
+  `resolveCommandCwd(options)` correctly, the fix just makes the
+  `options.cwd` slot actually get populated when the flag is used.
+
 ## v0.4.2 — 2026-04-20
 
 Sync with upstream codex-plugin-cc v1.0.4 (released 2026-04-18). Of the
