@@ -397,6 +397,129 @@ codex CLI's own `~/.codex/auth.json`).
   gitea primary had three intermediate commits at `0.4.3`; the
   HEAD SHA identifies the exact code state.
 
+### CI infrastructure (Bundle G)
+
+First real CI pipeline for this repo. Before Bundle G, the workflow
+was "AI drafts a change → AI self-reviews → direct merge to main". The
+user's stated policy: *"以后任何pr不能再像现在这样自己觉得没问题了就
+直接提pr然后直接merge这肯定不行"*. Bundle G wires up the CI that
+makes that policy enforceable.
+
+Shape:
+
+- **Two hosts, one YAML** — `.github/workflows/` is read directly by
+  gitea `act_runner` (SkyLab/glm-plugin-cc primary) and by GitHub
+  Actions (sky-zhang01/glm-plugin-cc mirror). Same files, same gates,
+  no duplication.
+- **Three named identities on gitea** — `sky` (sole formal approver,
+  per `CODEOWNERS`), `claude-code`, `codex`. `sky` merges; the two AI
+  identities cross-review each other's PRs in the comment thread
+  (soft requirement surfaced as advisory in CI, not a hard blocker).
+
+Files added:
+
+- `.github/workflows/pr-check.yml` — every PR + push to `main` runs:
+  syntax check → `npm test` → path-leak guard → plugin manifest
+  validation → CHANGELOG update gate (PR only) → Co-Authored-By
+  trailer check (PR only). Mirrors `scripts/ci/check-all.sh` exactly
+  so the pre-push hook gives the same verdict locally.
+- `.github/workflows/ai-quality-gate.yml` — `static-invariants` job
+  runs `scripts/ci/check-ai-quality-gate.sh` (regression-pattern grep
+  invariants encoding every class of bug found in Bundles C / D3+ /
+  E+ / F); `cross-ai-review-advisory` job reads the PR comment thread
+  via API and prints an advisory when an AI-authored PR has no
+  independent comment from the counterpart AI. Advisory only — human
+  approver (sky) still decides.
+- `.github/workflows/release.yml` — tag-triggered
+  (`v*.*.*`): verifies `package.json` / `plugin.json` /
+  `marketplace.json` version parity with the tag, CHANGELOG entry
+  present, `release_card.md` is `Status: READY`. Does **not** publish
+  — publication stays manual.
+- `.github/PULL_REQUEST_TEMPLATE.md` — checklist mirroring the CI
+  gates (CHANGELOG / Co-Authored-By / path-leak / manifest parity /
+  cross-AI review).
+- `.github/dependabot.yml` — weekly `github-actions` bump PRs on the
+  GitHub mirror. No runtime npm deps to watch; dependabot ignored by
+  gitea.
+- `SECURITY.md` / `CONTRIBUTING.md` / `docs/ci.md` — governance +
+  developer-facing CI documentation. `docs/ci.md` is the single
+  reference for "what runs, where, why".
+- `scripts/ci/check-no-local-paths.sh` — blocks `/Users/...`,
+  `/home/...`, `10.x` / `192.168.x` / `172.16-31.x` IPs, MAC
+  addresses, and the private `*.tokyo.skyzhang.net` hostname in any
+  tracked file. CHANGELOG / release_card / docs/ci.md excluded as
+  documentation surfaces.
+- `scripts/ci/check-plugin-manifest.sh` — validates `.claude-plugin/
+  plugin.json` + `marketplace.json` JSON, enforces `source: "./"`
+  (not `.` — that's the v0.4.0 regression), and cross-checks version
+  parity between `plugin.json` / `marketplace.json` / nested plugin
+  entry.
+- `scripts/ci/check-ai-quality-gate.sh` — encodes Bundle C / D3+ /
+  E+ / F findings as grep invariants:
+  - `findLatestTaskThread` / `interruptAppServerTurn` /
+    `terminateProcessTree` / `formatResumeCommand` cannot come back
+  - `threadId` / `turnId` scaffolding cannot come back
+  - `safeReadConfigOrNull` cannot come back
+  - drifted verdict enum `ready|needs_fixes|blocked` cannot leak from
+    the review system prompt
+  - bare `error instanceof Error ? error.message : String(error)`
+    is banned outside `scripts/lib/fs.mjs` — all call sites must go
+    through `formatUserFacingError`
+  - stale `GLM_MODEL` env references cannot come back
+- `scripts/ci/check-changelog-updated.sh` — requires a CHANGELOG diff
+  whenever a PR touches `scripts/**`, `commands/**`, `schemas/**`,
+  `prompts/**`, or `.claude-plugin/**`.
+- `scripts/ci/check-coauthored-by.sh` — heuristic: if a commit
+  message references Bundle IDs, Claude Code, Codex, or `round-N`
+  review passes, the commit body must carry a `Co-Authored-By:`
+  trailer.
+- `scripts/ci/check-cross-ai-review.mjs` — node script that queries
+  PR comments via gitea/GitHub API and prints `OK` /
+  `ADVISORY` / `SKIP` based on whether the counterpart AI has
+  commented.
+- `scripts/ci/check-all.sh` — unified local CI entry, runs every
+  check in the same order as `pr-check.yml`.
+- `scripts/hooks/pre-push` + `scripts/install-hooks.sh` — local
+  pre-push hook that runs the full CI before any push. Installed via
+  `npm run hooks:install`. Emergency bypass: `git push --no-verify`.
+- `scripts/setup/configure-gitea-protection.sh` — idempotent
+  one-shot to configure gitea branch protection on `main`: block
+  direct push, require 1 approval from `sky`, dismiss stale
+  approvals, require `pr-check` + `static-invariants` status checks,
+  block on outdated branch.
+- `package.json` scripts: `ci:local` / `ci:local:fast` / `hooks:install`.
+
+Pre-existing leaks fixed as a side effect of wiring up
+`check-no-local-paths.sh`:
+
+- `.claude-plugin/plugin.json` + `marketplace.json` — `homepage` now
+  points at the public GitHub mirror (`github.com/sky-zhang01/
+  glm-plugin-cc`), not the private gitea URL. Plugin description
+  updated to say "external SEV harness" rather than naming the
+  internal harness repo.
+- `README.md` — three private-gitea references replaced:
+  `claude-dev-harness` links removed (repo is internal-only, no
+  public mirror); `/plugin marketplace add` install example uses the
+  GitHub URL.
+
+Error-message consistency (completes Bundle E+ P2-1):
+
+- All seven sites that still used the bare pattern
+  `error instanceof Error ? error.message : String(error)`
+  (`session-lifecycle-hook.mjs`, `glm-client.mjs` x4,
+  `tracked-jobs.mjs`, `check-imports.mjs`) now import
+  `formatUserFacingError` from `scripts/lib/fs.mjs` and delegate.
+  The `check-ai-quality-gate.sh` invariant enforces this going
+  forward.
+
+Deferred (intentional):
+
+- GitHub atomic sync from the old `v0.4.2` state up to the current
+  `v0.4.3` state. Blocked on user directive *"先不急 GitHub"*. The
+  public GitHub mirror still shows the `v0.4.2` release; gitea
+  primary is authoritative until the sync lands as its own release
+  card.
+
 ## v0.4.2 — 2026-04-20
 
 Sync with upstream codex-plugin-cc v1.0.4 (released 2026-04-18). Of the

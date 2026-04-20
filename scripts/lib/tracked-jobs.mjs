@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import process from "node:process";
 
+import { formatUserFacingError } from "./fs.mjs";
 import { readJobFile, resolveJobFile, resolveJobLogFile, upsertJob, writeJobFile } from "./state.mjs";
 
 export const SESSION_ID_ENV = "GLM_COMPANION_SESSION_ID";
@@ -192,7 +193,7 @@ export async function runTrackedJob(job, runner, options = {}) {
     appendLogBlock(options.logFile ?? job.logFile ?? null, "Final output", execution.rendered);
     return execution;
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorMessage = formatUserFacingError(error);
     // readStoredJobOrNull now throws (MED-2 fix) when the job file
     // exists but is corrupt. Don't let a secondary "Could not parse
     // <jobFile>" shadow the primary runner error — prefer the primary,

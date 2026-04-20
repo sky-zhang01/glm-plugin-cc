@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Git pre-push hook: runs the full local CI suite before any push.
+# Blocks push on any failure so gitea / GitHub never see a broken state.
+#
+# Install: bash scripts/install-hooks.sh
+# Bypass (emergency only): git push --no-verify
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+echo ""
+echo "pre-push: running local CI (bash scripts/ci/check-all.sh)…"
+echo "To bypass in an emergency: git push --no-verify"
+echo ""
+
+if ! bash scripts/ci/check-all.sh; then
+  echo ""
+  echo "✗ pre-push aborted — fix the failures above, then try again."
+  echo "  Run 'npm run ci:local' for faster iteration."
+  exit 1
+fi
+
+exit 0

@@ -6,11 +6,10 @@ backend via **OpenAI-compatible HTTP**. Scaffold derived from
 
 ## Why this plugin exists
 
-This plugin is one of the external reviewers feeding into
-[claude-dev-harness](https://gitea.tokyo.skyzhang.net/SkyLab/claude-dev-harness)'s
-SEV `/verify` Layer 3 orchestration. When the primary codex reviewer is
-rate-limited or unavailable, GLM is the secondary provider in the
-fallback chain.
+This plugin is one of the external reviewers feeding into an internal
+SEV harness's `/verify` Layer 3 orchestration. When the primary codex
+reviewer is rate-limited or unavailable, GLM is the secondary provider
+in the fallback chain.
 
 It does **not** replace GLM as a provider in the Claude Code CLI itself —
 it's a plugin that calls GLM over OpenAI-compatible HTTP from inside a
@@ -20,9 +19,10 @@ second opinion.
 Design constraints:
 
 - **Stateless HTTP.** No persistent sessions, no broker subprocess.
-- **No Stop hook.** Orchestration and Stop-gate logic live in the harness
-  (`completion-stop-guard.sh`), not in plugins. See
-  [claude-dev-harness docs/quality-loop-v3-boundary-crosswalk.md §4.4](https://gitea.tokyo.skyzhang.net/SkyLab/claude-dev-harness/src/branch/plan/quality-loop-v3/docs/quality-loop-v3-boundary-crosswalk.md).
+- **No Stop hook.** Orchestration and Stop-gate logic live in the SEV
+  harness (`completion-stop-guard.sh`), not in plugins. This separation
+  is documented in the internal harness's
+  `docs/quality-loop-v3-boundary-crosswalk.md §4.4`.
 - **Zero runtime npm deps.** Only Node stdlib (global `fetch` since 18.18).
 - **OpenAI-compatible schema.** Works with 智谱 BigModel's
   `https://open.bigmodel.cn/api/.../chat/completions` endpoints out of the box;
@@ -34,8 +34,8 @@ Design constraints:
 Add to your Claude Code plugin marketplace:
 
 ```
-/plugin marketplace add https://gitea.tokyo.skyzhang.net/SkyLab/glm-plugin-cc
-/plugin install glm@SkyLab/glm-plugin-cc
+/plugin marketplace add https://github.com/sky-zhang01/glm-plugin-cc
+/plugin install glm@sky-zhang01/glm-plugin-cc
 ```
 
 ## Auth — no CLI install, no OAuth

@@ -20,7 +20,7 @@
  * request field `{"type": "enabled" | "disabled"}`.
  */
 
-import { readJsonFile } from "./fs.mjs";
+import { formatUserFacingError, readJsonFile } from "./fs.mjs";
 import { assertNonVisionModel, DEFAULT_MODEL } from "./model-catalog.mjs";
 import { resolveApiKeyFromConfig, resolveEffectiveConfig } from "./preset-config.mjs";
 
@@ -144,10 +144,7 @@ export function getGlmAvailability(cwd) {
   try {
     key = resolveApiKey();
   } catch (error) {
-    return {
-      available: false,
-      detail: error instanceof Error ? error.message : String(error)
-    };
+    return { available: false, detail: formatUserFacingError(error) };
   }
   if (!key) {
     return {
@@ -163,10 +160,7 @@ export function getGlmAvailability(cwd) {
       detail: `endpoint=${sanitizeUrlForDisplay(endpoint)}, model=${model}`
     };
   } catch (error) {
-    return {
-      available: false,
-      detail: error instanceof Error ? error.message : String(error)
-    };
+    return { available: false, detail: formatUserFacingError(error) };
   }
 }
 
@@ -186,7 +180,7 @@ export async function getGlmAuthStatus(cwd, options = {}) {
     endpoint = resolveEndpoint();
     probeModel = resolveModel(options);
   } catch (error) {
-    return { ok: false, detail: error instanceof Error ? error.message : String(error) };
+    return { ok: false, detail: formatUserFacingError(error) };
   }
   const timeoutMs = resolveTimeoutMs({ timeoutMs: 15000 });
   const controller = new AbortController();
@@ -284,7 +278,7 @@ async function runChatRequest(cwd, options = {}) {
     endpoint = resolveEndpoint();
     model = resolveModel(options);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = formatUserFacingError(error);
     // Distinguish vision-model rejection from configuration errors so
     // callers can react differently.
     const errorCode = /vision model/i.test(message) ? "MODEL_REJECTED" : "CONFIG_ERROR";

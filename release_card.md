@@ -157,7 +157,7 @@ Local Verification: all pass. `npm run check` (13 lib modules + 3 top-level scri
 
 Codex-alignment Evidence: See CHANGELOG v0.4.3 "Codex scaffold alignment" section. Three bugs are inherited from codex-plugin-cc v1.0.4 (args split, state fail-open, single-template-for-both-modes); upstream PR-able. Two are GLM-specific (runReview key drift during `--base`/`--scope` adaptation; writeConfigFile merge in the GLM-only preset-config layer).
 
-CI Evidence: no CI pipeline yet (planned v0.5+); ref-bound verification is local-only.
+CI Evidence: **Bundle G now ships the first real CI pipeline for this repo** — see CHANGELOG v0.4.3 `### CI infrastructure (Bundle G)`. `npm run ci:local` exercises the identical gate the server runs: syntax → `npm test` (65/65 pass) → path-leak guard → plugin manifest validation → AI quality gate (static regression patterns) → CHANGELOG gate → Co-Authored-By check — all passing at HEAD. Server-side `.github/workflows/pr-check.yml` + `ai-quality-gate.yml` will re-run the same checks on the first PR pushed after branch protection is configured. `release.yml` is tag-triggered and verifies version parity across `package.json` + `plugin.json` + `marketplace.json` + CHANGELOG entry + `release_card.md Status: READY` before any future tag lands. Branch protection is applied via `bash scripts/setup/configure-gitea-protection.sh` (idempotent).
 
 Rollback:
 - Bundle F only: revert to `4604a42`. **Brings back the Bundle E+ runtime bug** (`/glm:status` with an active job crashes with `ReferenceError: formatResumeCommand is not defined`). Do NOT roll back Bundle F alone.
@@ -165,4 +165,5 @@ Rollback:
 - Bundle D3+ + E+ + F together: revert to `c8295d6`. All 9 Bundle D3+ fixes reappear; Bundle C + first-pass state still protects against the original 12 bugs.
 - Bundle C + D3+ + E+ + F together: revert to `df413dc`. All 16 post-df413dc bugs reappear; first-pass state still protects against the original 5.
 - Full unwind: revert to `d1fc595` (original v0.4.3). All 22 post-d1fc595 issues reappear. Not expected to be needed.
+- Bundle G alone: revert the Bundle G commit to remove the CI pipeline + governance + pre-push hook + the 7-site `formatUserFacingError` refactor + the homepage-URL fix. The code behaviour is unchanged (the refactor is semantically identical), but developers lose CI protection against future regressions.
 - v0.4.1 / v0.4.2: not rolled back per Option B.

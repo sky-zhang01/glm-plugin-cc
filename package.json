@@ -10,6 +10,9 @@
   },
   "scripts": {
     "check": "node --check scripts/glm-companion.mjs && node --check scripts/session-lifecycle-hook.mjs && node --check scripts/check-imports.mjs && for f in scripts/lib/*.mjs; do node --check $f || exit 1; done && node scripts/check-imports.mjs",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "ci:local": "bash scripts/ci/check-all.sh",
+    "ci:local:fast": "npm run check && npm test && bash scripts/ci/check-ai-quality-gate.sh",
+    "hooks:install": "bash scripts/install-hooks.sh"
   }
 }

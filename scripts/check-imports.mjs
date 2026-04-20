@@ -21,6 +21,8 @@
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
+import { formatUserFacingError } from "./lib/fs.mjs";
+
 const LIB_MODULES = [
   "args.mjs",
   "fs.mjs",
@@ -46,8 +48,7 @@ for (const name of LIB_MODULES) {
     await import(specifier);
   } catch (error) {
     failed += 1;
-    const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`[check-imports] FAIL ${name}: ${message}\n`);
+    process.stderr.write(`[check-imports] FAIL ${name}: ${formatUserFacingError(error)}\n`);
   }
 }
 

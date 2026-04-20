@@ -1,0 +1,57 @@
+name: PR Check
+
+# Runs on every pull request targeting main — both gitea (SkyLab/glm-plugin-cc)
+# and GitHub (sky-zhang01/glm-plugin-cc) use this identical workflow file.
+# Blocks merge if any step fails.
+#
+# Mirror of `npm run ci:local` so a developer who runs the pre-push hook has
+# the same verdict locally before push.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  pr-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Syntax check
+        run: npm run check
+
+      - name: Unit + integration tests
+        run: npm test
+
+      - name: Path-leak guard
+        run: bash scripts/ci/check-no-local-paths.sh
+
+      - name: Plugin manifest validation
+        run: bash scripts/ci/check-plugin-manifest.sh
+
+      - name: CHANGELOG update gate (PR only)
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin "${{ github.base_ref }}"
+          bash scripts/ci/check-changelog-updated.sh "origin/${{ github.base_ref }}"
+
+      - name: Co-Authored-By trailer (PR only)
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin "${{ github.base_ref }}"
+          bash scripts/ci/check-coauthored-by.sh "origin/${{ github.base_ref }}"

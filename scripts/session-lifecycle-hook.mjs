@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import process from "node:process";
 
+import { formatUserFacingError } from "./lib/fs.mjs";
 import { loadState, resolveStateFile, saveState } from "./lib/state.mjs";
 import { resolveWorkspaceRoot } from "./lib/workspace.mjs";
 
@@ -89,8 +90,6 @@ try {
   // Session lifecycle hooks must not block session start/end. Surface
   // errors to stderr but exit 0 so Claude Code doesn't treat the hook
   // as a hard failure.
-  process.stderr.write(
-    `[glm-session-hook] ${error instanceof Error ? error.message : String(error)}\n`
-  );
+  process.stderr.write(`[glm-session-hook] ${formatUserFacingError(error)}\n`);
   process.exit(0);
 }

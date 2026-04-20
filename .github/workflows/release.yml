@@ -1,0 +1,88 @@
+name: Release Gate
+
+# Runs when a version tag (v*.*.*) is pushed. Verifies:
+#   1. package.json / plugin.json / marketplace.json versions agree
+#      with the tag.
+#   2. CHANGELOG.md has a section for that version.
+#   3. release_card.md exists and is `Status: READY`.
+#
+# Does NOT publish. Publication (GitHub release draft, manifest push,
+# gitea release) stays a manual operation routed through
+# `scripts/github-release-create.sh` after this gate goes green.
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Derive version from tag
+        id: version
+        run: |
+          TAG="${GITHUB_REF_NAME:-}"
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Release tag  : $TAG"
+          echo "Version      : $VERSION"
+
+      - name: package.json version parity
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          PKG=$(node -p "require('./package.json').version")
+          if [[ "$PKG" != "$VERSION" ]]; then
+            echo "✗ package.json version ($PKG) ≠ tag version ($VERSION)"
+            exit 1
+          fi
+          echo "OK — package.json version matches tag."
+
+      - name: plugin.json / marketplace.json parity
+        run: bash scripts/ci/check-plugin-manifest.sh
+
+      - name: CHANGELOG entry present for this version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if ! grep -qE "^## v${VERSION}([[:space:]]|$)" CHANGELOG.md; then
+            echo "✗ CHANGELOG.md has no '## v${VERSION}' section."
+            echo "  Add the release notes before tagging."
+            exit 1
+          fi
+          echo "OK — CHANGELOG entry for v${VERSION} present."
+
+      - name: release_card.md is Status: READY
+        run: |
+          if [[ ! -f release_card.md ]]; then
+            echo "✗ release_card.md missing."
+            exit 1
+          fi
+          if ! grep -qE "^Status: READY" release_card.md; then
+            echo "✗ release_card.md not marked Status: READY."
+            exit 1
+          fi
+          echo "OK — release_card.md is READY."
+
+      - name: Final gate summary
+        run: |
+          echo ""
+          echo "════════════════════════════════════════════════════════════"
+          echo "  Release gate passed for ${GITHUB_REF_NAME}."
+          echo "  Next: manual GitHub release publication."
+          echo "════════════════════════════════════════════════════════════"
