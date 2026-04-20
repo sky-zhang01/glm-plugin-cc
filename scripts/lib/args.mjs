@@ -25,7 +25,13 @@ export function parseArgs(argv, config = {}) {
     }
 
     if (token.startsWith("--")) {
-      const [rawKey, inlineValue] = token.slice(2).split("=", 2);
+      // Split only on the FIRST '=' so value may itself contain '=' (URL
+      // query strings, base64, etc.). JS `split("=", 2)` returns the
+      // first two tokens and DROPS the rest — the pre-fix bug.
+      const flagPart = token.slice(2);
+      const eqIdx = flagPart.indexOf("=");
+      const rawKey = eqIdx < 0 ? flagPart : flagPart.slice(0, eqIdx);
+      const inlineValue = eqIdx < 0 ? undefined : flagPart.slice(eqIdx + 1);
       const key = aliasMap[rawKey] ?? rawKey;
 
       if (booleanOptions.has(key)) {

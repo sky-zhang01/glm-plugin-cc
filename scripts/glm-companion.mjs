@@ -304,13 +304,22 @@ async function runReview(argv, { adversarial }) {
   const target = resolveReviewTarget(cwd, { base: options.base, scope: options.scope });
   const reviewContext = collectReviewContext(cwd, target);
 
-  const promptTemplate = loadPromptTemplate(ROOT_DIR, "adversarial-review");
+  // Dispatch to the mode-specific template. Pre-fix, runReview always
+  // loaded `adversarial-review.md` regardless of mode, and passed keys
+  // (FOCUS_INSTRUCTION / REVIEW_DIFF / REVIEW_BASE / REVIEW_SCOPE /
+  // ADVERSARIAL_MODE) that the template did NOT declare — so every
+  // `{{TARGET_LABEL}}`, `{{USER_FOCUS}}`, `{{REVIEW_COLLECTION_GUIDANCE}}`,
+  // and `{{REVIEW_INPUT}}` silently interpolated to "" (interpolateTemplate
+  // replaces unmatched variables with empty string). Both modes shipped
+  // empty repository context to GLM.
+  const templateName = adversarial ? "adversarial-review" : "review";
+  const promptTemplate = loadPromptTemplate(ROOT_DIR, templateName);
   const interpolated = interpolateTemplate(promptTemplate, {
-    FOCUS_INSTRUCTION: focusText ? `Focus: ${focusText}` : "No additional focus — review the full diff.",
-    REVIEW_DIFF: reviewContext.diff || "(empty diff)",
-    REVIEW_BASE: target.base,
-    REVIEW_SCOPE: target.scope,
-    ADVERSARIAL_MODE: adversarial ? "ADVERSARIAL" : "BALANCED"
+    REVIEW_KIND: adversarial ? "Adversarial Review" : "Balanced Review",
+    TARGET_LABEL: target.label,
+    USER_FOCUS: focusText || "No extra focus provided.",
+    REVIEW_COLLECTION_GUIDANCE: reviewContext.collectionGuidance,
+    REVIEW_INPUT: reviewContext.content
   });
 
   const schema = safeReadSchema();

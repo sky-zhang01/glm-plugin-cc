@@ -1,41 +1,56 @@
-# Release Card — glm-plugin-cc v0.4.3 (cumulative v0.4.1 → v0.4.3)
+# Release Card — glm-plugin-cc v0.4.3 (cumulative v0.4.1 → v0.4.3 + post-review hotfixes)
 
 Status: READY
-Approval Mode: user confirmed Option B (keep v0.4.1 + v0.4.2 on GitHub, backfill gitea-first chain) in message "选项 B：保留 v0.4.1 + v0.4.2，补上 gitea-first 的缺失链 / 直接在gitea 更新 并把bug修改好 然后还要做好自己内部的review flow 但codex的先不要用了". v0.4.3 bug-fix scope authorized by that same message ("把bug修改好").
+Approval Mode: user confirmed Option B (keep v0.4.1 + v0.4.2 on GitHub, backfill gitea-first chain) in message "选项 B：保留 v0.4.1 + v0.4.2，补上 gitea-first 的缺失链 / 直接在gitea 更新 并把bug修改好 然后还要做好自己内部的review flow 但codex的先不要用了". Subsequent bug batch (5 more issues found by 3-agent full-project review) authorized inline: "继续保留v0.4.3的版本不要升版本号了 ... 版本的事儿不要纠结太多 直接开始改bug吧 改完后 继续重新扫一遍". Version number intentionally stays at 0.4.3 per user directive — public version sequence stays `0.4.2 → 0.4.3` without a skip.
 
-Process acknowledgement: v0.4.1 and v0.4.2 were pushed directly to GitHub without a release card and without explicit per-release user approval. That violated the gitea-first rule in `~/.claude/rules/conditional/git-workflow.md` and the user's earlier directive "以后如果要做修改 也是先在gitea上弄完 确认没问题了再push到GitHub". This card consolidates the v0.4.0 → v0.4.3 chain so the gitea-first evidence link is restored for every release in-scope, and commits for this work are unblocked only when the user authorizes the gitea push itself.
+Process acknowledgement: v0.4.1 and v0.4.2 were pushed directly to GitHub without a release card and without explicit per-release user approval. That violated the gitea-first rule in `~/.claude/rules/conditional/git-workflow.md` and the user's earlier directive "以后如果要做修改 也是先在gitea上弄完 确认没问题了再push到GitHub". This card consolidates v0.4.0 → v0.4.3 so the gitea-first evidence link is restored for every release in-scope, and commits for this work are unblocked only when the user authorizes the gitea push itself.
 
 Requested Scope:
-- v0.4.1 (already on GitHub): `.claude-plugin/marketplace.json` source field `"."` → `"./"` so Claude Code 2.1.x `/plugin marketplace add` no longer fails schema validation; `commands/setup.md` rewritten codex-parity terse (133 → 30 lines) so the model stops wrapping JSON stdout in Chinese prose; `commands/status.md` drops a preamble line codex `/codex:status` doesn't have.
-- v0.4.2 (already on GitHub): port codex-plugin-cc [PR #235](https://github.com/openai/codex-plugin-cc/pull/235) — remove `context: fork` from `commands/rescue.md`, add `Agent` tool to allowed-tools, route `/glm:rescue` via `Agent(subagent_type: "glm:glm-rescue")` instead of prose that let the model try `Skill(glm:rescue)` recursion. Five other v1.0.4 commits N/A (GLM has no session runtime; no `xhigh` effort level; `$ARGUMENTS` quoting + agent frontmatter `model:` already fixed in v0.3.4 / v0.1.x).
-- v0.4.3 (this release): `--cwd <path>` / `-C <path>` CLI flag was silently dropped on every subcommand because `parseCommandInput()` wrapper in `scripts/glm-companion.mjs` registered only the aliasMap (`C → cwd`), not the valueOption (`cwd`). `lib/args.mjs:48` treats long flags not in `valueOptions` as positionals, so `resolveCommandCwd(options)` always saw `options.cwd === undefined` and fell back to `process.cwd()`. Fix injects `"cwd"` centrally in `parseCommandInput`, one location; all six subcommands now accept `--cwd`. Bug was latent — in-session `/glm:review` works because Claude Code's Bash tool inherits session cwd; programmatic / out-of-session callers were affected.
+- **v0.4.1** (already on GitHub): marketplace source `"."` → `"./"` schema fix; `setup.md` trimmed 133 → 30 lines (codex-parity); `status.md` preamble dropped.
+- **v0.4.2** (already on GitHub): port codex-plugin-cc [PR #235](https://github.com/openai/codex-plugin-cc/pull/235) — `/glm:rescue` via `Agent` tool, remove `context: fork`, add Skill-recursion warning.
+- **v0.4.3 original commit** (`d1fc595` on gitea, not yet on GitHub): `--cwd` / `-C` flag honored on every subcommand via central `parseCommandInput` injection.
+- **v0.4.3 post-review hotfixes** (this batch, local commits on top of `d1fc595`, not yet on any remote): 5 issues found by the 3-agent full-project review (code-reviewer H-1/H-3/H-4/H-5 + silent-failure-hunter H-A/M-A):
+  - H-1/H-3: `runReview` interpolate keys ↔ `prompts/adversarial-review.md` template vars had **zero overlap**; every review call shipped empty context (`{{REVIEW_INPUT}}` etc. silently substituted with `""`). Fix: pass codex-parity keys (`REVIEW_KIND / TARGET_LABEL / USER_FOCUS / REVIEW_COLLECTION_GUIDANCE / REVIEW_INPUT`); all data sources already exist on `reviewContext` / `target`.
+  - H-4: `/glm:review` balanced and `/glm:adversarial-review` both loaded `prompts/adversarial-review.md`; balanced mode was adversarial in every substantive way. Fix: new `prompts/review.md` with balanced tone; template dispatched on `adversarial` flag.
+  - H-5: `args.mjs` `token.slice(2).split("=", 2)` truncated any inline value containing `=` (URL query strings, base64). Fix: switch to `indexOf("=")` + slice.
+  - H-A: `state.mjs loadState` silently returned `defaultState()` on corrupt `state.json`; `saveState` then overwrote the corrupt file with `{ jobs: [] }`, wiping history and leaking every on-disk job/log as an orphan. Fix: throw on corrupt (mirrors v0.3.4 `readConfigFile` fail-closed pattern); missing file still returns defaults.
+  - M-A: `preset-config.mjs writeConfigFile` called `safeReadConfigOrNull` during merge; corrupt config silently dropped `preset_id / base_url / default_model` to `null` on any key-rotation. Fix: use `readConfigFile` directly (throws on corrupt, null on missing).
 
-Out of Scope: GitHub force-push / tag rewrite on v0.4.1 or v0.4.2 (not reopened — Option B explicitly); CI pipeline (still v0.5+); cancel atomicity (M3 from v0.3.4, still deferred); `release_card.md` retroactive for v0.4.1 / v0.4.2 (this consolidated card covers the chain instead of recreating the per-release cards post-hoc).
+Out of Scope: GitHub force-push / tag rewrite on v0.4.1 or v0.4.2 (not reopened — Option B explicit); CI pipeline (still v0.5+); cancel atomicity (M3 from v0.3.4, still deferred); version bump to 0.4.4 (user directive: keep sequence continuous); security-auditor's findings (fabricated — `scripts/commands/` does not exist; reference files were never imported at runtime).
 
-Intended Ref: main @ new v0.4.3 commit on top of local head `e24159a` (v0.4.2), remote `gitea.tokyo.skyzhang.net/SkyLab/glm-plugin-cc` primary, `github.com/sky-zhang01/glm-plugin-cc` secondary. No tag yet — versions in `package.json` / `.claude-plugin/plugin.json` / `.claude-plugin/marketplace.json` are sufficient for Claude Code plugin cache invalidation.
+Intended Ref: gitea main @ HEAD after the post-review hotfix commit. Version stays `0.4.3`; HEAD SHA identifies the exact state. GitHub mirror will move from `0.4.2` to the consolidated `0.4.3` state in one atomic commit when the user authorizes the sync — no intermediate `0.4.3` state is ever shipped on GitHub, so the GitHub sequence stays `0.4.2 → 0.4.3` clean.
 
-Planned Actions:
-1. Local verification (done) — `npm run check` + `npm test` (13/13 pass, 0 fail).
-2. Internal review (done) — pr-review-toolkit:code-reviewer returned PASS with no ≥80 findings; two sub-threshold suggestions noted (1 nice-to-have wrapper test skipped; release_card update addressed by this file).
-3. User gitea push — blocked by Cloudflare Access (session `auth_status: "NONE"`). User authenticates in browser at `https://gitea.tokyo.skyzhang.net` once, then I run `git push origin main` from the local clone. Three existing local commits (`c17e71a` marketplace source fix, v0.4.1 `0e2928c`, v0.4.2 `e24159a`) + the pending v0.4.3 commit push together.
-4. GitHub sync — atomic commit via git trees API containing the v0.4.3 delta (5 files: `scripts/glm-companion.mjs`, `tests/args.test.mjs`, `package.json`, `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `CHANGELOG.md`). Blocked on explicit user approval per Option B directive. No force-push.
+Planned Actions (sequential, each step gated):
+1. ✅ Local verification — `npm run check` passes; `npm test` reports 25/25 passing (vs 13/13 pre-batch, vs 0 in v0.4.2).
+2. ✅ Internal review — 3 agents (pr-review-toolkit:code-reviewer / security-auditor / pr-review-toolkit:silent-failure-hunter) ran in parallel; cross-verified against source; security-auditor output ~95% fabricated (invented `scripts/commands/` files) and discarded; 5 real bugs confirmed and fixed in this batch.
+3. User gitea push — already unblocked (Tailscale off → SmartDNS returns LAN IP 10.81.37.5). Commit to be pushed: post-review-hotfix commit on top of `d1fc595`.
+4. Re-scan — 3 agents re-run against post-hotfix state to verify fixes hold and no new regressions surfaced.
+5. GitHub sync — blocked on user go-ahead. Will deliver v0.4.3 as a single atomic commit via git trees API, containing everything since the GitHub `0.4.2` head.
 
 Scope Completion: COMPLETE
-- `scripts/glm-companion.mjs` — `parseCommandInput()` now injects `"cwd"` into `valueOptions` (one 7-line edit, lines 114-128). No per-subcommand changes needed; the wrapper's central role means `runSetup` / `runReview` / `runTask` / `runRescue` / `runStatus` / `runResult` / `runCancel` all pick up the flag automatically.
-- `tests/args.test.mjs` — new file, first test in the repo. 13 native `node:test` cases: value option long form, inline form, alias resolution, positional fallthrough regression guard, boolean forms, passthrough (`--`), missing-value error, plus `splitRawArgumentString` whitespace / single-quote / double-quote / backslash-escape coverage.
-- `.claude-plugin/marketplace.json` / `.claude-plugin/plugin.json` / `package.json` — 0.4.2 → 0.4.3.
-- `CHANGELOG.md` — v0.4.3 entry (gitea-format with full historical chain; GitHub copy is abbreviated per "clean public changelog" rule, prepared but not yet pushed).
+- `scripts/lib/args.mjs` — `parseArgs` long-form flag now splits on first `=` only (H-5 fix); pre-existing `parseCommandInput` central `cwd` injection (v0.4.3 original).
+- `scripts/lib/state.mjs` — `loadState` fail-closed on corrupt (H-A fix).
+- `scripts/lib/preset-config.mjs` — `writeConfigFile` uses `readConfigFile` directly (M-A fix).
+- `scripts/glm-companion.mjs` — `runReview` dispatches template name on `adversarial` flag and passes codex-parity keys (H-1/H-3 + H-4 fix).
+- `prompts/review.md` — new balanced-tone template (H-4 fix).
+- `prompts/adversarial-review.md` — unchanged (template already correct; only the caller was wrong).
+- `tests/args.test.mjs` — extended to 15 tests (added 2 for H-5 inline value preservation).
+- `tests/preset-config.test.mjs` — 3 tests (first-run, key-rotation merge, corrupt throws).
+- `tests/state.test.mjs` — 3 tests (missing, valid, corrupt throws).
+- `tests/template-contract.test.mjs` — 4 structural tests pinning template-var ↔ companion-key contract; guards against future drift at test time rather than runtime.
+- `CHANGELOG.md` — v0.4.3 entry rewritten to cover the full bug set; codex-scaffold alignment noted (3 of 5 bugs inherited from upstream, 2 GLM-specific regressions).
+- `release_card.md` — this file, updated.
 
 Outstanding In-Scope Work: none.
 
-Major Upgrade Review: DONE (patch bump — v0.4.3 is a surgical bug fix in a 7-line wrapper; no API surface change, no config shape change, no endpoint URL change). Breaking Changes: none. Repo Usage Audit: `parseCommandInput` has 6 call sites in `glm-companion.mjs` (one per subcommand), all exercised by the existing command suite; the central fix means none of the call sites change behavior for correctly-formed invocations. `resolveCommandCwd(options)` has 8 call sites, all unchanged. Verification Plan: executed — empirical `node scripts/glm-companion.mjs status --cwd /Users/sky_zhang01/Project/Sky/glm-plugin-cc --json` from `/tmp` confirms `workspaceRoot` resolves to the passed `--cwd` (was `/private/tmp` pre-fix); `review --cwd /path --scope invalid_scope_to_stop_early` reaches scope validation instead of failing at git-repo check (confirming the repo-root was resolved via `--cwd`).
+Major Upgrade Review: DONE (patch-level in substance — all fixes are surgical and data-flow preserving; no API surface, config shape, endpoint URL, or schema changes). Breaking Changes: none for users with healthy state/config. Users with an already-corrupt `~/.config/glm-plugin-cc/config.json` or `state.json` who previously enjoyed silent masking will now see a clear error ("Could not parse …: delete or fix the file"); they can recover by deleting the file. This is the intended behavior change. Repo Usage Audit: `runReview` is the only caller of `loadPromptTemplate(_, "adversarial-review"|"review")`; `loadState` / `readConfigFile` callers propagate throw semantics cleanly up to the command boundary where it surfaces to the user. Verification Plan: executed — 25 automated tests pass (including regression guards for each of the 5 bugs); static template-contract test prevents future drift; empirical `--cwd` and `--base-url=…?foo=bar` scenarios manually run and verified.
 
-Local Verification: `npm run check` passes (13 modules import-resolution OK); `npm test` passes (13/13); empirical `--cwd` routing verified from a non-repo cwd.
+Local Verification: all pass. `npm run check` (13 lib modules + 3 top-level scripts + ESM import resolution) ✓. `npm test` 25/25 ✓. Manual: `/tmp` → `node glm-companion status --cwd /repo --json` resolves workspaceRoot to `/repo`; `--base-url=https://x.com?foo=bar` is preserved intact through parseArgs.
 
-Codex-alignment Evidence: `lib/glm-client.mjs:233` `getSessionRuntimeStatus(env, cwd)` and `lib/job-control.mjs:229` `buildStatusSnapshot` already accept a `workspaceRoot` parameter, matching the structural intent of codex-plugin-cc [PR #35](https://github.com/openai/codex-plugin-cc/pull/35) — the cwd-aware runtime reporting fix was already in place here; v0.4.3 addresses a *different* cwd correctness gap (CLI flag parsing, not runtime status reporting) that surfaced during review of the PR #35 applicability question.
+Codex-alignment Evidence: See CHANGELOG v0.4.3 "Codex scaffold alignment" section. Three bugs are inherited from codex-plugin-cc v1.0.4 (args split, state fail-open, single-template-for-both-modes); upstream PR-able. Two are GLM-specific (runReview key drift during `--base`/`--scope` adaptation; writeConfigFile merge in the GLM-only preset-config layer).
 
-CI Evidence: no CI pipeline yet (planned v0.5+); ref-bound verification is local-only. Before the gitea push, the plan is to re-run `npm run check` + `npm test` on the final commit HEAD and record the pass count here. After the GitHub mirror lands, tag `v0.4.3` may follow in a separate card if a GitHub Release is desired.
+CI Evidence: no CI pipeline yet (planned v0.5+); ref-bound verification is local-only.
 
 Rollback:
-- v0.4.3 only: revert the one commit; v0.4.2 at its hash `e24159a` remains canonical. No data migration needed — `parseCommandInput` behavior reverts to its pre-fix state, which is what every in-session `/glm:review` path already tolerates via session-cwd inheritance.
+- Post-review hotfix commit only: revert that one commit; `d1fc595` (original v0.4.3) remains canonical. All 5 bugs reappear (known acceptable if needed).
 - v0.4.1 / v0.4.2: not rolled back per Option B.

@@ -109,7 +109,12 @@ function sanitizeConfig(input) {
 }
 
 export function writeConfigFile(partial) {
-  const existing = safeReadConfigOrNull();
+  // Use readConfigFile (throws on corrupt, returns null on missing) — not
+  // safeReadConfigOrNull — so a corrupt config that the user is trying to
+  // fix with `/glm:setup --api-key <new>` does NOT silently drop their
+  // preset / base_url / default_model to null during the merge. Missing
+  // file (first-run) still works: returns null, merge fills from partial.
+  const existing = readConfigFile();
   const merged = {
     preset_id: partial.preset_id ?? existing?.preset_id ?? null,
     base_url: partial.base_url ?? existing?.base_url ?? null,

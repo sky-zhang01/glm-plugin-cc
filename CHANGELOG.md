@@ -2,34 +2,103 @@
 
 ## v0.4.3 — 2026-04-20
 
-Bug fix: `--cwd <path>` / `-C <path>` was silently ignored on every
-subcommand. The CLI parser (`lib/args.mjs`) only honors long-form
-flags that are registered in `valueOptions`; `aliasMap` alone is not
-enough. The companion's `parseCommandInput` wrapper registered the
-alias (`C → cwd`) but never put `cwd` in `valueOptions`, so the token
-fell through to positionals and `resolveCommandCwd` always returned
-`process.cwd()`. Programmatic callers trying to target a different
-repo were silently operating on the wrong one (or failing "must run
-inside a git repository" if the caller's cwd wasn't a repo at all).
-
-In-session `/glm:review` from Claude Code was unaffected in practice
-because Claude Code's `Bash` tool inherits the session cwd, which is
-already the right repo. The bug bites scripted / out-of-session
-invocations.
+Bug-fix release. Six issues resolved across arg parsing, review prompt
+pipeline, state/config corruption handling, and template dispatch. The
+big one: pre-fix, every `/glm:review` and `/glm:adversarial-review`
+call shipped an EMPTY repository context to GLM — the prompt template
+used `{{REVIEW_INPUT}}` / `{{TARGET_LABEL}}` / `{{USER_FOCUS}}` /
+`{{REVIEW_COLLECTION_GUIDANCE}}` while the companion passed
+`FOCUS_INSTRUCTION` / `REVIEW_DIFF` / `REVIEW_BASE` / `REVIEW_SCOPE` /
+`ADVERSARIAL_MODE`; zero overlap, and `interpolateTemplate` silently
+substitutes `""` for unmatched placeholders. The review feature
+effectively never worked end-to-end.
 
 ### Fixed
 
-- `scripts/glm-companion.mjs`: `parseCommandInput` now centrally
-  injects `"cwd"` into `valueOptions` for all subcommands. One
-  location, no need to edit each subcommand's parse config.
+- **`scripts/lib/args.mjs`** — `--key=value` now splits on the FIRST
+  `=` only (using `indexOf`), not `split("=", 2)` which truncated
+  everything after the second `=`. Values containing `=` (URL query
+  strings, base64, etc.) are now preserved intact. Example:
+  `--base-url=https://open.bigmodel.cn/api/coding/paas/v4?foo=bar`
+  pre-fix resolved to `https://open.bigmodel.cn/api/coding/paas/v4?foo`
+  and silently dropped `=bar`.
+- **`scripts/lib/args.mjs` (earlier in this release)** — `--cwd <path>`
+  and `-C <path>` were silently ignored on every subcommand. The
+  companion's `parseCommandInput` wrapper registered the alias
+  (`C → cwd`) but never put `cwd` in `valueOptions`, so the long-form
+  token fell through to positionals and `resolveCommandCwd` always
+  returned `process.cwd()`. Programmatic / out-of-session callers
+  could not target a different repo. In-session `/glm:review` from
+  Claude Code was unaffected because Claude's `Bash` tool inherits
+  the session cwd.
+- **`scripts/glm-companion.mjs` — review prompt key mismatch** —
+  `runReview` now passes `REVIEW_KIND` / `TARGET_LABEL` / `USER_FOCUS`
+  / `REVIEW_COLLECTION_GUIDANCE` / `REVIEW_INPUT`, matching the
+  template's declared variables. Data sources: `target.label`,
+  `reviewContext.collectionGuidance`, `reviewContext.content` —
+  all already produced by `collectReviewContext` in `lib/git.mjs`.
+- **`scripts/glm-companion.mjs` — template dispatch** — `/glm:review`
+  (balanced) now loads `prompts/review.md`; `/glm:adversarial-review`
+  continues to load `prompts/adversarial-review.md`. Pre-fix, both
+  loaded the adversarial template regardless of mode, so balanced
+  mode was adversarial in every substantive way.
+- **`prompts/review.md` (new)** — Balanced-tone counterpart to the
+  adversarial template. Same structured-output contract, same
+  grounding rules, but an honest (not skeptical-by-default)
+  operating stance.
+- **`scripts/lib/state.mjs` — `loadState` fail-closed** — Pre-fix,
+  a corrupt `state.json` silently returned `defaultState()` (empty
+  jobs). The next `saveState` would overwrite the corrupt file with
+  `{ jobs: [] }`, wiping job history AND leaking every on-disk job
+  and log file as an orphan (the "orphan cleanup" loop compared
+  against an empty `previousJobs`). Mirrors the v0.3.4
+  `readConfigFile` fix: missing file → `defaultState()` (first-run),
+  corrupt file → throws with a recovery hint.
+- **`scripts/lib/preset-config.mjs` — `writeConfigFile` fail-closed
+  on merge** — Pre-fix, `writeConfigFile` called
+  `safeReadConfigOrNull` which swallowed parse errors and returned
+  `null`; rotating the API key on top of a corrupt config silently
+  dropped the user's `preset_id` / `base_url` / `default_model` to
+  `null`. Now uses `readConfigFile` directly (throws on corrupt,
+  returns `null` only on missing).
 
 ### Added
 
-- `tests/args.test.mjs`: 13 tests covering `parseArgs` value/boolean
-  option forms, alias resolution, passthrough semantics, and a
-  regression guard for the "unknown flag → positionals" behavior
-  that was the source of this bug. Existing `npm test` previously
-  ran zero tests; now 13/13 pass.
+- **`tests/args.test.mjs`** — Extended from 13 to 15 tests. New
+  regression guard for the `split("=", 2)` truncation bug and
+  inline-empty-value edge case.
+- **`tests/preset-config.test.mjs`** — 3 tests covering first-run,
+  valid-merge (key rotation preserves other fields), and corrupt
+  config (throws).
+- **`tests/state.test.mjs`** — 3 tests covering missing state
+  file (returns defaults), valid state roundtrip, and corrupt
+  state (throws).
+- **`tests/template-contract.test.mjs`** — 4 structural tests
+  pinning the review prompt contract: both templates' `{{VARS}}`
+  must be declared, companion keys must be used by at least one
+  template, and the `runReview` source must still contain all
+  expected keys. Catches future drift between template and
+  companion at build time (via `npm test`), not runtime.
+- **Total**: 0 tests in v0.4.2 → 25 tests in v0.4.3 (all pass).
+
+### Codex scaffold alignment
+
+Three of the five root-cause bugs are inherited directly from the
+codex-plugin-cc scaffold (v1.0.4) and still exist there:
+
+- `args.mjs:28` identical `split("=", 2)` — affects codex too
+- `state.mjs loadState / saveState` identical fail-open + orphan —
+  affects codex too
+- Single-template-for-both-review-modes — codex also ships
+  `prompts/adversarial-review.md` only; no balanced counterpart
+
+GLM has now diverged on these three toward fail-closed behavior.
+The other two (template key mismatch in `runReview`, corrupt
+`writeConfigFile` merge) are GLM-specific regressions introduced
+during the `--base`/`--scope` flag adaptation and the `preset-config`
+feature respectively; codex's `runReview` correctly passes matching
+keys, and codex does not have a `preset-config` layer (delegates to
+codex CLI's own `~/.codex/auth.json`).
 
 ### Not changed
 
@@ -38,6 +107,11 @@ invocations.
   paths; the workspace resolution already went through
   `resolveCommandCwd(options)` correctly, the fix just makes the
   `options.cwd` slot actually get populated when the flag is used.
+- Version number stays `0.4.3` — GitHub mirror was at `0.4.2` when
+  these fixes were developed; pushing this state keeps the public
+  version sequence `0.4.2 → 0.4.3` without a skip. The internal
+  gitea primary had three intermediate commits at `0.4.3`; the
+  HEAD SHA identifies the exact code state.
 
 ## v0.4.2 — 2026-04-20
 

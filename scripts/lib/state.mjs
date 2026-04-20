@@ -74,6 +74,13 @@ export function loadState(cwd) {
     return defaultState();
   }
 
+  // Fail-CLOSED on corrupt state.json. Pre-fix, a JSON parse failure silently
+  // returned defaultState(), so the next saveState would overwrite the
+  // corrupt file with `{ jobs: [] }` — wiping the user's job history and
+  // leaking every on-disk job/log file as an orphan (since the "orphan
+  // cleanup" loop compared against the empty previousJobs). Mirrors the
+  // v0.3.4 readConfigFile fail-closed fix: missing is OK (first-run),
+  // corrupt is a visible error the user can recover from.
   try {
     const parsed = JSON.parse(fs.readFileSync(stateFile, "utf8"));
     return {
@@ -85,8 +92,10 @@ export function loadState(cwd) {
       },
       jobs: Array.isArray(parsed.jobs) ? parsed.jobs : []
     };
-  } catch {
-    return defaultState();
+  } catch (error) {
+    throw new Error(
+      `Could not parse ${stateFile}: ${error.message}. Delete or fix the file to recover. Any jobs listed only there will be lost.`
+    );
   }
 }
 

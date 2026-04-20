@@ -18,6 +18,24 @@ test("parseArgs: value option inline form --key=value", () => {
   assert.deepEqual(positionals, []);
 });
 
+test("parseArgs: inline value preserves '=' in value (regression: H-5)", () => {
+  // Pre-fix: split("=", 2) truncated at the FIRST '=' and DROPPED the tail.
+  // --base-url=https://x.com/path?foo=bar used to parse to "https://x.com/path?foo".
+  const { options } = parseArgs(
+    ["--base-url=https://open.bigmodel.cn/api/coding/paas/v4?foo=bar&baz=qux"],
+    { valueOptions: ["base-url"] }
+  );
+  assert.equal(
+    options["base-url"],
+    "https://open.bigmodel.cn/api/coding/paas/v4?foo=bar&baz=qux"
+  );
+});
+
+test("parseArgs: inline value with empty string", () => {
+  const { options } = parseArgs(["--cwd="], { valueOptions: ["cwd"] });
+  assert.equal(options.cwd, "");
+});
+
 test("parseArgs: alias resolves to canonical key for value option", () => {
   const { options } = parseArgs(["-C", "/some/path"], {
     valueOptions: ["cwd"],
