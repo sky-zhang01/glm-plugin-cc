@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.4.2 — 2026-04-20
+
+Sync with upstream codex-plugin-cc v1.0.4 (released 2026-04-18). Of the
+six commits between v1.0.3 and v1.0.4, five are not applicable to this
+fork (GLM has no session runtime / no `xhigh` effort level / the
+`$ARGUMENTS`-quoting and agent-frontmatter `model:` fixes already
+landed here in v0.3.4 / v0.1.x). One — [codex-plugin-cc
+#235](https://github.com/openai/codex-plugin-cc/pull/235) "route
+/codex:rescue through the Agent tool to stop Skill recursion" — is a
+direct structural parallel and is ported here.
+
+### Changed
+
+- `commands/rescue.md`:
+  - Dropped `context: fork` frontmatter so the command runs inline in
+    the parent session where the `Agent` tool is in scope.
+  - Added `Agent` to `allowed-tools`.
+  - Rewrote the routing prose to explicitly invoke
+    `Agent(subagent_type: "glm:glm-rescue")` and warn against
+    `Skill(glm:glm-rescue)` / `Skill(glm:rescue)` — the latter
+    re-enters this command and hangs the session.
+
+### Not changed
+
+- Companion scripts, config shape, preset URLs, model defaults, auth
+  — all unchanged. Existing `~/.config/glm-plugin-cc/config.json`
+  keeps working without re-setup.
+
 ## v0.4.1 — 2026-04-20
 
 Command-UX fix: `/glm:setup` and `/glm:status` were producing verbose

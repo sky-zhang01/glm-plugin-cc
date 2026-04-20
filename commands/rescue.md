@@ -1,11 +1,11 @@
 ---
 description: Delegate investigation, fix, or rescue work to the GLM rescue subagent
 argument-hint: "[--model <model>] [--system <system-prompt>] [--thinking on|off] [what GLM should investigate, solve, or continue]"
-context: fork
-allowed-tools: Bash(node:*), AskUserQuestion
+allowed-tools: Bash(node:*), AskUserQuestion, Agent
 ---
 
-Route this request to the `glm:glm-rescue` subagent.
+Invoke the `glm:glm-rescue` subagent via the `Agent` tool (`subagent_type: "glm:glm-rescue"`), forwarding the raw user request as the prompt.
+`glm:glm-rescue` is a subagent, not a skill — do not call `Skill(glm:glm-rescue)` (no such skill) or `Skill(glm:rescue)` (that re-enters this command and hangs the session). The command runs inline so the `Agent` tool stays in scope; forked general-purpose subagents do not expose it.
 The final user-visible response must be the GLM companion stdout verbatim.
 
 Raw user request:
