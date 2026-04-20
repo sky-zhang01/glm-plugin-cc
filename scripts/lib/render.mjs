@@ -190,15 +190,13 @@ export function renderSetupReport(report) {
 
   if (report.config) {
     lines.push("Endpoint config:");
-    if (report.config.env_override) {
-      lines.push(`- env override: ${report.config.env_override} (takes precedence over config file)`);
-    }
     if (report.config.error) {
       lines.push(`- error: ${report.config.error}`);
     } else if (report.config.preset_id) {
       lines.push(`- preset: ${report.config.preset_display} (${report.config.preset_id})`);
       lines.push(`- base_url: ${report.config.base_url ?? "(not set)"}`);
       lines.push(`- default_model: ${report.config.default_model ?? "(not set)"}`);
+      lines.push(`- api_key: ${report.config.has_api_key ? "stored" : "(not set — run /glm:setup --api-key <key>)"}`);
       if (report.config.updated_at_utc) {
         lines.push(`- written_at: ${report.config.updated_at_utc}`);
       }

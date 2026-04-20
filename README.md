@@ -41,37 +41,46 @@ Add to your Claude Code plugin marketplace:
 ## Auth — no CLI install, no OAuth
 
 GLM is API-key based. There is no `glm login` OAuth and no external CLI
-to install — the plugin itself is the runtime. Configuration has two
-independent parts:
+to install — the plugin itself is the runtime. Both the endpoint
+preset and the API key persist to `~/.config/glm-plugin-cc/config.json`
+(dir 0700 / file 0600), mirroring the codex CLI pattern
+(`~/.codex/auth.json`).
 
-1. **Endpoint preset** (persisted to `~/.config/glm-plugin-cc/config.json`,
-   dir 0700 / file 0600; all OpenAI-compatible):
+1. **Endpoint preset** (all OpenAI-compatible):
    - `coding-plan` — `https://open.bigmodel.cn/api/coding/paas/v4`
      (智谱 BigModel subscription pricing, **recommended**)
    - `pay-as-you-go` — `https://open.bigmodel.cn/api/paas/v4`
      (智谱 BigModel metered)
    - `custom` — bring-your-own OpenAI-compatible URL (e.g. 海外 Z.AI:
      `https://api.z.ai/api/paas/v4`, or a self-hosted endpoint)
-2. **API key** — always read from the `ZAI_API_KEY` environment variable.
-   Never written to disk.
+2. **API key** — persisted to the same config file (field `api_key`,
+   file mode 0600). Set / rotate via `/glm:setup --api-key <key>` or
+   the interactive paste flow. There is no environment-variable
+   fallback (`/glm:setup` is the single entry point, matching
+   `codex login --api-key <key>`).
 
 ### First-time setup
 
-Run `/glm:setup` in Claude Code. It prompts you via `AskUserQuestion` to
-pick a preset. Or pass one directly:
+In Claude Code, run:
 
 ```
-/glm:setup --preset coding-plan
-/glm:setup --preset pay-as-you-go
-/glm:setup --preset custom --base-url https://your-endpoint.example.com/openai
+/glm:setup
 ```
 
-Then export your API key in your shell (add to `.zshrc` / `.bashrc` for
-persistence):
+`AskUserQuestion` prompts for the preset, then the plugin asks you to
+paste the API key in your next message. The key is stored at
+`~/.config/glm-plugin-cc/config.json` with file mode 0600.
+
+Or pass everything at once:
+
+```
+/glm:setup --preset coding-plan --api-key sk-...
+```
+
+Or from a terminal (keeps the key out of Claude's session logs):
 
 ```bash
-# Get from https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys
-export ZAI_API_KEY="..."
+node "$CLAUDE_PLUGIN_ROOT/scripts/glm-companion.mjs" setup --preset coding-plan --api-key "YOUR_KEY"
 ```
 
 Verify with a minimal network probe:
@@ -80,16 +89,18 @@ Verify with a minimal network probe:
 /glm:setup --ping
 ```
 
-### Env overrides
+### Rotating or removing the key
+
+- Rotate: `/glm:setup --api-key <new-key>` (preset preserved).
+- Remove: delete `~/.config/glm-plugin-cc/config.json` and re-run setup.
+
+### Optional env overrides
 
 | Env var | Effect |
 |---|---|
-| `ZAI_API_KEY` (also `Z_AI_API_KEY`, `GLM_API_KEY`) | required; no disk fallback |
-| `ZAI_BASE_URL` | overrides config-file preset (must be `https://`, OpenAI-compatible) |
-| `GLM_MODEL` | overrides config-file `default_model` |
 | `GLM_TIMEOUT_MS` | per-request timeout (default 900000 = 15 min) |
 
-Priority: CLI flag > env var > config file > built-in default
+Priority for model + endpoint: CLI flag > config file > built-in default
 (`https://open.bigmodel.cn/api/paas/v4`, `glm-5.1`).
 
 ## Commands

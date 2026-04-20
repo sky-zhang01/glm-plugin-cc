@@ -1,5 +1,89 @@
 # Changelog
 
+## v0.4.0 — 2026-04-20
+
+**Breaking auth change**: API key now persists to
+`~/.config/glm-plugin-cc/config.json` (mode 0600) via `/glm:setup`
+instead of reading from the `ZAI_API_KEY` environment variable.
+Mirrors codex CLI's `~/.codex/auth.json` pattern (confirmed by [Issue
+openai/codex#5212](https://github.com/openai/codex/issues/5212) closed
+as "not planned" — codex rejected env-var-only mode, keeps auth.json
+the single source).
+
+Earlier releases (v0.1.0 → v0.3.4) advertised "API key never on disk"
+as a red line. That rule was stricter than codex itself and created a
+worse UX: users had to export `ZAI_API_KEY` in their shell rc before
+anything worked. v0.4.0 accepts the same trade-off codex does —
+on-disk + 0600 + user-home dir — for a one-step install experience.
+
+### Changed
+
+- `scripts/lib/preset-config.mjs`:
+  - Config schema gains an `api_key` string field (max 512 chars,
+    trimmed). `sanitizeConfig` validates length; arrays / non-objects
+    still rejected.
+  - New `resolveApiKeyFromConfig()` — separate function so the raw
+    key only enters memory when the HTTP client explicitly needs it
+    (keeps it out of `resolveEffectiveConfig` returns, which feeds
+    setup reports and job records).
+  - New `persistApiKey(key)` — writes `api_key` only, preserves
+    preset / base_url / default_model.
+  - Removed `api_key_env` from built-in preset definitions (was
+    unused cosmetic metadata pointing at `ZAI_API_KEY`).
+- `scripts/lib/glm-client.mjs`:
+  - `resolveApiKey()` now reads from config file only; the env-var
+    chain (`ZAI_API_KEY` / `Z_AI_API_KEY` / `GLM_API_KEY`) is
+    **removed**.
+  - `resolveBaseUrl()` no longer honors `ZAI_BASE_URL` override;
+    base URL comes from the preset or its overrides in config.json.
+  - `resolveModel()` no longer honors `GLM_MODEL` override; use
+    `--model` or update `default_model` in config.json.
+  - `GLM_TIMEOUT_MS` is retained (operational, not credential).
+  - Auth-failure error messages now point users at `/glm:setup
+    --api-key <key>` for key rotation.
+- `scripts/glm-companion.mjs`:
+  - `runSetup` accepts `--api-key <key>`; persists via
+    `persistApiKey()`. Report says "stored api_key to ... (0600)" —
+    never echoes the key value.
+  - Setup report exposes `config.has_api_key: boolean` (not the key
+    itself) so `--json` consumers can check without risking leaks.
+- `scripts/lib/render.mjs`:
+  - Setup report now shows `api_key: stored` or `api_key: (not set
+    — run /glm:setup --api-key <key>)` in the human-readable block.
+- `commands/setup.md`: Fully rewritten for the Claude-native paste
+  flow — preset via `AskUserQuestion`, then natural-language prompt
+  for the key. Extraction / anti-echo rules explicit. Shell-only
+  path documented as alternative for users who want the key out of
+  Claude session logs.
+- `commands/rescue.md`, `agents/glm-rescue.md`: "no API key" guidance
+  updated from env-var to `/glm:setup`.
+- `README.md`: Auth section rewritten. Env override table trimmed
+  (only `GLM_TIMEOUT_MS` remains).
+
+### Migration for v0.3.x users
+
+1. Upgrade the plugin to v0.4.0.
+2. Run `/glm:setup --api-key <your-existing-key>` (you can copy the
+   value from your `$ZAI_API_KEY` env var: `echo $ZAI_API_KEY` in a
+   terminal, then paste).
+3. `unset ZAI_API_KEY` in your shell rc (optional — it's now ignored).
+
+No config auto-migration. The preset IDs / URLs / model defaults are
+unchanged, so an existing `config.json` keeps working for
+preset+base_url+default_model; only the key is now read from there.
+
+### Security notes
+
+- File mode 0600 on the config file (already in place since v0.3.4).
+- `api_key` never appears in setup report output, job records,
+  rendered review output, or error messages. Only a boolean
+  `has_api_key` indicates presence.
+- Length-validated to 1–512 chars to avoid oversized strings drifting
+  into memory.
+- Raw key still never transits through HTTPS logs — the sanitizer on
+  endpoint URLs remains in place, and the `Authorization: Bearer`
+  header is set at fetch time only.
+
 ## v0.3.4 — 2026-04-20
 
 Install-path enablement + independent code review fixes. The Codex CLI

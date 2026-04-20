@@ -31,7 +31,7 @@ Operating rules:
 - `--system` overrides the default rescue system prompt.
 - Do not ask the subagent to inspect files, monitor progress, or poll
   status/result; that's the user's next step if needed.
-- If `/glm:setup` reports GLM unavailable, stop and tell the user to set
-  `ZAI_API_KEY`.
+- If `/glm:setup` reports GLM unavailable, stop and tell the user to
+  run `/glm:setup` (to pick a preset and paste their API key).
 - If the user did not supply a request, ask what GLM should investigate
   or fix.

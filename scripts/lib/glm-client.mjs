@@ -11,7 +11,9 @@
  *   pay-as-you-go preset: https://open.bigmodel.cn/api/paas/v4
  *   custom preset:        user-supplied https://... (e.g. 海外 api.z.ai/api/paas/v4)
  *
- * Auth: `Authorization: Bearer ${ZAI_API_KEY}` header (OpenAI-compatible).
+ * Auth: `Authorization: Bearer <api_key>` header (OpenAI-compatible).
+ *   API key is persisted to ~/.config/glm-plugin-cc/config.json (0600)
+ *   by `/glm:setup`, mirroring codex's `~/.codex/auth.json` pattern.
  *
  * Thinking: OFF by default (matches codex `--effort unset`). Opt-in via
  * `thinking: true` (or CLI `--thinking on`). GLM uses the `thinking`
@@ -20,7 +22,7 @@
 
 import { readJsonFile } from "./fs.mjs";
 import { assertNonVisionModel, DEFAULT_MODEL } from "./model-catalog.mjs";
-import { resolveEffectiveConfig } from "./preset-config.mjs";
+import { resolveApiKeyFromConfig, resolveEffectiveConfig } from "./preset-config.mjs";
 
 const FALLBACK_BASE_URL = "https://open.bigmodel.cn/api/paas/v4";
 const DEFAULT_MAX_TOKENS = 8192;
@@ -37,8 +39,15 @@ function getEnv(name) {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
 }
 
+/**
+ * API key is stored on disk in `~/.config/glm-plugin-cc/config.json`
+ * (mode 0600), written by `/glm:setup` — same pattern as the codex CLI
+ * `~/.codex/auth.json`. There is intentionally NO environment-variable
+ * fallback: the setup command is the single entry point for configuring
+ * credentials, matching `codex login --api-key <key>`.
+ */
 function resolveApiKey() {
-  return getEnv("ZAI_API_KEY") || getEnv("Z_AI_API_KEY") || getEnv("GLM_API_KEY");
+  return resolveApiKeyFromConfig();
 }
 
 /**
@@ -66,7 +75,7 @@ function normalizeBaseUrl(url) {
 /**
  * Strip userinfo + query + fragment from a URL before echoing it back in
  * error / status output. Avoids leaking credentials that a user may have
- * accidentally pasted into `ZAI_BASE_URL` or `--base-url`.
+ * accidentally pasted into `--base-url`.
  */
 function sanitizeUrlForDisplay(url) {
   const raw = String(url || "");
@@ -84,15 +93,6 @@ function sanitizeUrlForDisplay(url) {
 }
 
 function resolveBaseUrl() {
-  const override = getEnv("ZAI_BASE_URL");
-  if (override) {
-    if (!/^https:\/\//i.test(override)) {
-      throw new Error(
-        `ZAI_BASE_URL must use https:// (got: ${sanitizeUrlForDisplay(override)}). Plaintext endpoints would leak the API key.`
-      );
-    }
-    return normalizeBaseUrl(override);
-  }
   const config = resolveEffectiveConfig();
   if (config.base_url) {
     return normalizeBaseUrl(config.base_url);
@@ -105,17 +105,12 @@ function resolveEndpoint() {
 }
 
 function resolveModel(options = {}) {
-  let model = null;
+  let model;
   if (options.model) {
     model = options.model;
   } else {
-    const envModel = getEnv("GLM_MODEL");
-    if (envModel) {
-      model = envModel;
-    } else {
-      const config = resolveEffectiveConfig();
-      model = config.default_model || DEFAULT_MODEL;
-    }
+    const config = resolveEffectiveConfig();
+    model = config.default_model || DEFAULT_MODEL;
   }
   // Guard against accidentally routing vision models through text-only commands.
   assertNonVisionModel(model);
@@ -127,6 +122,8 @@ export function resolveConfigSummary() {
 }
 
 function resolveTimeoutMs(options = {}) {
+  // Timeout is operational, not credential — env var override kept for
+  // power users who need to extend the 15-minute ceiling on slow networks.
   const raw = options.timeoutMs || getEnv("GLM_TIMEOUT_MS");
   const parsed = raw ? Number.parseInt(String(raw), 10) : NaN;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_TIMEOUT_MS;
@@ -143,11 +140,19 @@ export function getGlmAvailability(cwd) {
       detail: "Node.js >=18.18 required (global fetch missing)."
     };
   }
-  const key = resolveApiKey();
+  let key;
+  try {
+    key = resolveApiKey();
+  } catch (error) {
+    return {
+      available: false,
+      detail: error instanceof Error ? error.message : String(error)
+    };
+  }
   if (!key) {
     return {
       available: false,
-      detail: "ZAI_API_KEY (or Z_AI_API_KEY / GLM_API_KEY) environment variable not set."
+      detail: "No API key configured. Run /glm:setup and paste your key when prompted."
     };
   }
   try {
@@ -201,7 +206,7 @@ export async function getGlmAuthStatus(cwd, options = {}) {
       signal: controller.signal
     });
     if (response.status === 401 || response.status === 403) {
-      return { ok: false, detail: `Auth failed (HTTP ${response.status}). Check ZAI_API_KEY.` };
+      return { ok: false, detail: `Auth failed (HTTP ${response.status}). Re-run /glm:setup --api-key <key> to refresh the stored key.` };
     }
     if (response.status === 429) {
       return { ok: false, detail: "Rate limited (HTTP 429). API key is valid but quota exhausted." };
@@ -357,7 +362,7 @@ async function runChatRequest(cwd, options = {}) {
     }
     if (response.status === 401 || response.status === 403) {
       return failureShape(
-        `Auth failed (HTTP ${response.status}). ZAI_API_KEY may be invalid or lack permission for ${model}.`,
+        `Auth failed (HTTP ${response.status}). Stored api_key may be invalid or lack permission for ${model}. Re-run /glm:setup --api-key <key> to refresh.`,
         "AUTH_FAILED",
         { rawResponse: responseText }
       );

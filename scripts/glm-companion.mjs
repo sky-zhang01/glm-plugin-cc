@@ -19,6 +19,7 @@ import { collectReviewContext, ensureGitRepository, resolveReviewTarget } from "
 import {
   applyPreset,
   listPresets,
+  persistApiKey,
   resolveEffectiveConfig
 } from "./lib/preset-config.mjs";
 import { loadPromptTemplate, interpolateTemplate } from "./lib/prompts.mjs";
@@ -63,7 +64,7 @@ function printUsage() {
   console.log(
     [
       "Usage:",
-      "  node scripts/glm-companion.mjs setup [--ping] [--enable-review-gate|--disable-review-gate] [--json]",
+      "  node scripts/glm-companion.mjs setup [--preset ...] [--api-key <key>] [--ping] [--enable-review-gate|--disable-review-gate] [--json]",
       "  node scripts/glm-companion.mjs review [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--json] [focus text]",
       "  node scripts/glm-companion.mjs adversarial-review [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--json] [focus text]",
       "  node scripts/glm-companion.mjs task [--system <text>] [--model <model>] [--thinking on|off] [--json] [prompt]",
@@ -168,22 +169,25 @@ async function buildSetupReport(cwd, actionsTaken = [], pingRequested = false) {
     : { ok: null, detail: "ping skipped (pass --ping to probe)" };
   const repoConfig = getConfig(workspaceRoot);
 
+  const hasApiKey = Boolean(effectiveConfig?.has_api_key);
+
   const nextSteps = [];
   if (configError) {
     nextSteps.push(`Fix config file error: ${configError}`);
   }
-  if (!effectiveConfig?.preset_id && !process.env.ZAI_BASE_URL) {
+  if (!effectiveConfig?.preset_id) {
     nextSteps.push("Pick a preset: /glm:setup --preset coding-plan | pay-as-you-go | custom --base-url <url>");
   }
-  if (!glmAvailability.available) {
-    nextSteps.push("Set ZAI_API_KEY in your shell (e.g. export ZAI_API_KEY='...')");
+  if (!hasApiKey) {
+    nextSteps.push("Set API key: /glm:setup --api-key <your-key> (or paste it in the interactive prompt)");
   }
   if (glmAvailability.available && pingRequested && authStatus.ok === false) {
     nextSteps.push(`Auth probe failed: ${authStatus.detail}`);
   }
 
   return {
-    ready: Boolean(effectiveConfig?.preset_id || process.env.ZAI_BASE_URL) &&
+    ready: Boolean(effectiveConfig?.preset_id) &&
+      hasApiKey &&
       glmAvailability.available &&
       authStatus.ok !== false,
     node: { detail: nodeDetail },
@@ -200,8 +204,9 @@ async function buildSetupReport(cwd, actionsTaken = [], pingRequested = false) {
       preset_display: effectiveConfig?.preset_display ?? null,
       base_url: effectiveConfig?.base_url ?? null,
       default_model: effectiveConfig?.default_model ?? null,
+      // Boolean only — never emit the raw key in any output.
+      has_api_key: hasApiKey,
       updated_at_utc: effectiveConfig?.updated_at_utc ?? null,
-      env_override: process.env.ZAI_BASE_URL ? "ZAI_BASE_URL" : null,
       error: configError
     },
     presets: listPresets()
@@ -210,7 +215,7 @@ async function buildSetupReport(cwd, actionsTaken = [], pingRequested = false) {
 
 async function runSetup(argv) {
   const { options } = parseCommandInput(argv, {
-    valueOptions: ["preset", "base-url", "default-model"],
+    valueOptions: ["preset", "base-url", "default-model", "api-key"],
     booleanOptions: ["json", "ping", "enable-review-gate", "disable-review-gate"]
   });
   const cwd = resolveCommandCwd(options);
@@ -230,6 +235,13 @@ async function runSetup(argv) {
     actionsTaken.push(
       `wrote ${result.path}: preset=${result.config.preset_id}, base_url=${result.config.base_url ?? "(null)"}, default_model=${result.config.default_model ?? "(null)"}`
     );
+  }
+
+  if (options["api-key"] != null && options["api-key"] !== "") {
+    const result = persistApiKey(options["api-key"]);
+    // NEVER log the raw key. Actions-taken line reports persistence but
+    // not the value.
+    actionsTaken.push(`stored api_key to ${result.path} (0600)`);
   }
 
   if (options["enable-review-gate"]) {
