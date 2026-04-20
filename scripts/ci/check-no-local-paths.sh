@@ -39,9 +39,14 @@ declare -a LABELS=(
 # - This script itself (contains the patterns by design).
 # - Lock files, node_modules, dist, coverage, tool-results — standard
 #   test / CI artifact dirs that a developer might leave behind.
-# - CHANGELOG is allowed to mention "10.81.37.5" etc. in the free-form
-#   commentary about network debugging history; enforce NOTHING on it.
-#   Same for release_card.md.
+# - CHANGELOG / release_card — free-form narrative about debugging
+#   history; not a code surface that leaks into runtime.
+# - docs/ci.md — internal CI documentation; naming the runner host
+#   on purpose.
+# - CONTRIBUTING.md — developer-facing clone instructions must name
+#   the authoritative gitea host on Sky's network.
+# - scripts/setup/configure-gitea-protection.sh — the whole script's
+#   job is to talk to the gitea host; the URL is intentional.
 EXCLUDE_GLOBS=(
   ':(exclude)scripts/ci/check-no-local-paths.sh'
   ':(exclude)node_modules/**'
@@ -52,6 +57,8 @@ EXCLUDE_GLOBS=(
   ':(exclude)CHANGELOG.md'
   ':(exclude)release_card.md'
   ':(exclude)docs/ci.md'
+  ':(exclude)CONTRIBUTING.md'
+  ':(exclude)scripts/setup/configure-gitea-protection.sh'
 )
 
 VIOLATIONS=0
