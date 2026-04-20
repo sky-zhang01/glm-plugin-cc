@@ -1,15 +1,14 @@
 name: AI Quality Gate
 
-# Static regression guard against every class of bug that the
-# multi-round reviews (round-1 → Bundle F) actually caught. Encodes the
-# fix as a grep invariant so the same bug cannot silently come back in
-# a future AI pass.
+# Static regression guard against every class of bug that the v0.4.3
+# review passes actually caught. Encodes each fix as a grep invariant
+# so the same bug cannot silently come back in a future AI pass.
 #
 # Also runs an advisory cross-AI-review probe: if the PR author is one
 # AI identity, we look for independent review commentary from the other
 # AI identity in the PR comment thread. This is advisory (does not
 # block merge); it just surfaces "this PR has no independent AI review
-# yet" in the PR check output so the human approver (sky) knows.
+# yet" in the PR check output so the maintainer knows.
 
 on:
   pull_request:

@@ -1,5 +1,5 @@
 {
-  "description": "Session lifecycle hook only. Stop-gate lives in claude-dev-harness, not in this plugin.",
+  "description": "Session lifecycle hook only. Stop-gate orchestration lives in the external SEV harness, not in this plugin.",
   "hooks": {
     "SessionStart": [
       {

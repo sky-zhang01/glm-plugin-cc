@@ -1,34 +1,49 @@
 #!/usr/bin/env bash
 # One-shot / idempotent configuration of gitea branch protection for
-# `main` on SkyLab/glm-plugin-cc. Safe to re-run: GETs current state,
-# then POSTs (create) or PATCHes (update) to match the intended spec.
+# the private-primary repo hosting this plugin. Safe to re-run: GETs
+# current state, then POSTs (create) or PATCHes (update) to match the
+# intended spec.
 #
-# Usage: bash scripts/setup/configure-gitea-protection.sh
+# Usage:
+#   GITEA_HOST=https://your-gitea-host \
+#   GITEA_OWNER=your-org \
+#   GITEA_REPO=glm-plugin-cc \
+#   bash scripts/setup/configure-gitea-protection.sh
 #
-# Env overrides:
-#   GITEA_HOST       default https://gitea.tokyo.skyzhang.net
-#   GITEA_OWNER      default SkyLab
+# Required env:
+#   GITEA_HOST       gitea base URL (e.g. https://gitea.example.com)
+#   GITEA_OWNER      org or user that owns the repo
+# Optional env:
 #   GITEA_REPO       default glm-plugin-cc
 #   GITEA_BRANCH     default main
-#   GITEA_TOKEN_FILE default ${HOME}/.claude/secrets/gitea-claude-code.pat
+#   GITEA_TOKEN_FILE default ${HOME}/.claude/secrets/gitea-approver.pat,
+#                    falls back to gitea-claude-code.pat
 #
-# This script uses the sky PAT (not the claude-code PAT) — branch
-# protection changes are authoritative config, and the approver
-# identity must match the single formal reviewer.
+# Prefer a PAT owned by the single formal approver; fall back to a
+# CI PAT when the approver PAT isn't available locally.
 set -euo pipefail
 
-GITEA_HOST="${GITEA_HOST:-https://gitea.tokyo.skyzhang.net}"
-GITEA_OWNER="${GITEA_OWNER:-SkyLab}"
+if [[ -z "${GITEA_HOST:-}" ]]; then
+  echo "✗ GITEA_HOST not set. Export your gitea base URL and re-run."
+  exit 1
+fi
+if [[ -z "${GITEA_OWNER:-}" ]]; then
+  echo "✗ GITEA_OWNER not set. Export the org / user that owns the repo."
+  exit 1
+fi
+
 GITEA_REPO="${GITEA_REPO:-glm-plugin-cc}"
 GITEA_BRANCH="${GITEA_BRANCH:-main}"
-GITEA_TOKEN_FILE="${GITEA_TOKEN_FILE:-${HOME}/.claude/secrets/gitea-sky.pat}"
+GITEA_TOKEN_FILE="${GITEA_TOKEN_FILE:-${HOME}/.claude/secrets/gitea-approver.pat}"
+GITEA_APPROVER="${GITEA_APPROVER:-${GITEA_OWNER}}"
 
 if [[ ! -r "$GITEA_TOKEN_FILE" ]]; then
-  # Fall back to the claude-code PAT if sky PAT file doesn't exist —
-  # with a warning, so the human operator knows the approver context.
+  # Fall back to a generic gitea PAT if the approver PAT file doesn't
+  # exist — with a warning, so the human operator knows the identity
+  # context.
   ALT="${HOME}/.claude/secrets/gitea-claude-code.pat"
   if [[ -r "$ALT" ]]; then
-    echo "⚠ sky PAT not found at $GITEA_TOKEN_FILE; falling back to $ALT."
+    echo "⚠ approver PAT not found at $GITEA_TOKEN_FILE; falling back to $ALT."
     GITEA_TOKEN_FILE="$ALT"
   else
     echo "✗ No gitea PAT found. Set GITEA_TOKEN_FILE or create $GITEA_TOKEN_FILE."
@@ -52,7 +67,7 @@ read -r -d '' PROTECTION_BODY <<JSON || true
   "enable_merge_whitelist": false,
   "required_approvals": 1,
   "enable_approvals_whitelist": true,
-  "approvals_whitelist_usernames": ["sky"],
+  "approvals_whitelist_usernames": ["${GITEA_APPROVER}"],
   "dismiss_stale_approvals": true,
   "block_on_rejected_reviews": true,
   "block_on_outdated_branch": true,
@@ -103,7 +118,7 @@ echo "OK — protection applied (HTTP ${code})."
 echo ""
 echo "Summary:"
 echo "  - direct push to ${GITEA_BRANCH}: BLOCKED"
-echo "  - required approvals            : 1 (sky)"
+echo "  - required approvals            : 1 (${GITEA_APPROVER})"
 echo "  - dismiss stale approvals       : yes"
 echo "  - status checks                 : pr-check, static-invariants"
 echo "  - block on outdated branch      : yes"

@@ -37,8 +37,9 @@ COMMITS=$(git log --format="%H" "$BASE_REF..HEAD")
 MISSING=0
 for sha in $COMMITS; do
   body=$(git log -1 --format="%B" "$sha")
-  # Heuristic: looks AI-drafted if the message mentions Bundle IDs we
-  # only use in AI passes, or explicit tool names.
+  # Heuristic: looks AI-drafted if the message mentions tool / agent
+  # names we only use in AI-assisted passes. The literal "Bundle X"
+  # marker still triggers because older internal commits used it.
   if echo "$body" | grep -qEi '(Bundle [A-Z][0-9]?\+?|Claude Code|claude\.md|Codex|\(round-[0-9]+|pr-review-toolkit)'; then
     if ! echo "$body" | grep -qE '^Co-Authored-By:'; then
       short=$(git log -1 --format="%h %s" "$sha")

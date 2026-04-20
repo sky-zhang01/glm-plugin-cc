@@ -2,523 +2,240 @@
 
 ## v0.4.3 — 2026-04-20
 
-Bug-fix release. **Twenty-two issues fixed + two simplify passes**
-across **three review passes plus two cleanup passes** — six in the
-first pass (arg parsing, review prompt pipeline, state/config
-corruption handling, template dispatch), seven in the second pass
-(setup resilience, dead-code pruning, job-file error UX,
-shipped-schema fail-closed, finding confidence rendering, dead target
-metadata, doc drift), nine in the third pass (symmetric status
-resilience, generic fs fail-closed, error-shadow fix, home-path
-redaction, test-coverage backfill), and two final cleanup passes
-pruning dead codex-scaffold functions, a bogus `"Resume thread: null"`
-output branch, duplicated error-formatting boilerplate, an empty
-"GLM Session ID" table column, the thread/turn concept scaffolding
-throughout, and a ReferenceError Bundle E+ introduced in
-`pushJobDetails`. Version stays at 0.4.3 per user directive to keep
-the public sequence `0.4.2 → 0.4.3` continuous — the passes are
-recorded here as separate "Fixed (N pass)" / "Simplified (N pass)"
-subsections so readers can diff them individually. The headline fix: pre-fix, every `/glm:review` and
+Bug-fix and hardening release. Multiple rounds of static + AI-assisted
+code review over the v0.4.2 scaffold-parity work surfaced 22 issues;
+all fixed in this release. Adds the first real CI pipeline and grows
+the automated test suite from 0 to 65 tests.
+
+The headline fix: pre-v0.4.3, every `/glm:review` and
 `/glm:adversarial-review` call shipped an EMPTY repository context to
-GLM — the prompt template used `{{REVIEW_INPUT}}` / `{{TARGET_LABEL}}`
-/ `{{USER_FOCUS}}` / `{{REVIEW_COLLECTION_GUIDANCE}}` while the
-companion passed `FOCUS_INSTRUCTION` / `REVIEW_DIFF` / `REVIEW_BASE` /
-`REVIEW_SCOPE` / `ADVERSARIAL_MODE`; zero overlap, and
+GLM. The prompt template used `{{REVIEW_INPUT}}` / `{{TARGET_LABEL}}`
+/ `{{USER_FOCUS}}` / `{{REVIEW_COLLECTION_GUIDANCE}}`, while the
+companion passed `FOCUS_INSTRUCTION` / `REVIEW_DIFF` / `REVIEW_BASE`
+/ `REVIEW_SCOPE` / `ADVERSARIAL_MODE` — zero overlap, and
 `interpolateTemplate` silently substitutes `""` for unmatched
 placeholders. The review feature effectively never worked end-to-end.
 
-### Fixed (first pass)
+### Fixed — review pipeline
 
-- **`scripts/lib/args.mjs`** — `--key=value` now splits on the FIRST
-  `=` only (using `indexOf`), not `split("=", 2)` which truncated
-  everything after the second `=`. Values containing `=` (URL query
-  strings, base64, etc.) are now preserved intact. Example:
+- Review prompt pipeline — companion keys now align with template
+  variables so diff, target label, focus, and collection guidance
+  actually reach GLM (`scripts/glm-companion.mjs runReview`).
+- Template dispatch — `/glm:review` (balanced) now loads
+  `prompts/review.md`; `/glm:adversarial-review` continues to load
+  `prompts/adversarial-review.md`. Pre-fix, both loaded the
+  adversarial template regardless of mode, so balanced mode was
+  adversarial in every substantive way.
+- `prompts/review.md` (new) — balanced-tone counterpart to the
+  adversarial template. Same structured-output contract, but an
+  honest (not skeptical-by-default) operating stance.
+- Shipped review schema fail-closed — `/glm:review` no longer
+  silently falls back to a drifted verdict enum when the shipped
+  schema can't load; surfaces a clear reinstall-the-plugin error
+  instead.
+- Finding `confidence` preserved — review-finding confidence score
+  is shown inline (`[high · conf 0.95] ...`) with boundary +
+  out-of-range guards.
+- Target-label metadata — drifted `target.base` / `target.scope`
+  fields removed; `target.label` is authoritative.
+
+### Fixed — CLI + argument parsing
+
+- `args.mjs` `--key=value` split — values containing `=` (URL query
+  strings, base64, etc.) were silently truncated by
+  `split("=", 2)`. Switched to `indexOf("=")` + slice. Example:
   `--base-url=https://open.bigmodel.cn/api/coding/paas/v4?foo=bar`
-  pre-fix resolved to `https://open.bigmodel.cn/api/coding/paas/v4?foo`
-  and silently dropped `=bar`.
-- **`scripts/lib/args.mjs` (earlier in this release)** — `--cwd <path>`
-  and `-C <path>` were silently ignored on every subcommand. The
-  companion's `parseCommandInput` wrapper registered the alias
-  (`C → cwd`) but never put `cwd` in `valueOptions`, so the long-form
-  token fell through to positionals and `resolveCommandCwd` always
-  returned `process.cwd()`. Programmatic / out-of-session callers
-  could not target a different repo. In-session `/glm:review` from
-  Claude Code was unaffected because Claude's `Bash` tool inherits
-  the session cwd.
-- **`scripts/glm-companion.mjs` — review prompt key mismatch** —
-  `runReview` now passes `REVIEW_KIND` / `TARGET_LABEL` / `USER_FOCUS`
-  / `REVIEW_COLLECTION_GUIDANCE` / `REVIEW_INPUT`, matching the
-  template's declared variables. Data sources: `target.label`,
-  `reviewContext.collectionGuidance`, `reviewContext.content` —
-  all already produced by `collectReviewContext` in `lib/git.mjs`.
-- **`scripts/glm-companion.mjs` — template dispatch** — `/glm:review`
-  (balanced) now loads `prompts/review.md`; `/glm:adversarial-review`
-  continues to load `prompts/adversarial-review.md`. Pre-fix, both
-  loaded the adversarial template regardless of mode, so balanced
-  mode was adversarial in every substantive way.
-- **`prompts/review.md` (new)** — Balanced-tone counterpart to the
-  adversarial template. Same structured-output contract, same
-  grounding rules, but an honest (not skeptical-by-default)
-  operating stance.
-- **`scripts/lib/state.mjs` — `loadState` fail-closed** — Pre-fix,
-  a corrupt `state.json` silently returned `defaultState()` (empty
-  jobs). The next `saveState` would overwrite the corrupt file with
-  `{ jobs: [] }`, wiping job history AND leaking every on-disk job
-  and log file as an orphan (the "orphan cleanup" loop compared
-  against an empty `previousJobs`). Mirrors the v0.3.4
-  `readConfigFile` fix: missing file → `defaultState()` (first-run),
-  corrupt file → throws with a recovery hint.
-- **`scripts/lib/preset-config.mjs` — `writeConfigFile` fail-closed
-  on merge** — Pre-fix, `writeConfigFile` called
-  `safeReadConfigOrNull` which swallowed parse errors and returned
-  `null`; rotating the API key on top of a corrupt config silently
-  dropped the user's `preset_id` / `base_url` / `default_model` to
-  `null`. Now uses `readConfigFile` directly (throws on corrupt,
-  returns `null` only on missing).
+  pre-fix resolved to `...?foo` and dropped `=bar`.
+- `args.mjs` `--cwd` / `-C` flag — silently ignored on every
+  subcommand because `cwd` wasn't registered in `valueOptions`;
+  the long-form token fell through to positionals and
+  `resolveCommandCwd` always returned `process.cwd()`. Fixed in
+  `parseCommandInput` alias wiring.
 
-### Fixed (second pass)
+### Fixed — corrupt-state resilience
 
-Second-pass review found a real regression introduced by the first
-pass plus six pre-existing consistency gaps. All seven resolved
-without changing the config shape or public surface.
+- `state.mjs loadState` fail-closed — pre-fix, a corrupt
+  `state.json` silently returned an empty job list; the next
+  `saveState` overwrote the file with `{ jobs: [] }`, wiping job
+  history and leaking every on-disk job + log file as an orphan.
+  Now throws with filename + recovery hint; missing file still
+  returns defaults.
+- `preset-config.mjs writeConfigFile` fail-closed on merge —
+  pre-fix, rotating the API key on top of a corrupt config silently
+  dropped `preset_id` / `base_url` / `default_model` to null. Now
+  uses `readConfigFile` directly (throws on corrupt, null only on
+  missing).
+- `/glm:setup` survives corrupt `state.json` — unwrapped config
+  read in `buildSetupReport` crashed the exact command the user
+  would run to recover. Now wraps the read, exposes
+  `report.state.error`, and adds a fix-state-file step to
+  `nextSteps`.
+- `/glm:status` survives corrupt `state.json` — symmetric fix in
+  `buildStatusSnapshot`; wraps `getConfig` / `listJobs`, surfaces
+  `snapshot.stateError`, emits a State file block in the rendered
+  report.
+- `/glm:result` surfaces a clean corrupt-job-file error —
+  `readJobFile` now throws with the file path and a "Delete or fix
+  the file to recover" hint, replacing a bare `SyntaxError`
+  stacktrace.
+- Generic JSON fail-closed helper — new `readJsonFile` in
+  `scripts/lib/fs.mjs`; all on-disk JSON reads (state, config, job
+  files, shipped schema) now throw with the file path on corrupt
+  content. `readStoredJobOrNull` in `tracked-jobs.mjs` inherits
+  the improved message through delegation.
 
-- **`scripts/glm-companion.mjs` — `/glm:setup` survives corrupt
-  `state.json`** (regression from first-pass H-A). `buildSetupReport`
-  called `getConfig(workspaceRoot)` at line 179 without a try/catch;
-  after `loadState` became fail-closed, any corrupt `state.json`
-  crashed the exact command the user would run to recover. Now wraps
-  the read, exposes `report.state.error`, and adds a "Fix state file
-  error: …" step to `nextSteps`. Setup still renders end-to-end.
-- **`scripts/lib/preset-config.mjs` — delete dead
-  `safeReadConfigOrNull`**. The function was left defined (only
-  referenced in a comment after the first-pass fix), which kept the
-  regression vector for M-A open. Removed entirely.
-- **`scripts/lib/state.mjs` — `readJobFile` throws with file path**.
-  Pre-fix, a corrupt job file under `/glm:result <id>` produced a
-  bare `SyntaxError: Expected property name or '}' in JSON at
-  position 2` with no filename. Now mirrors the
-  `loadState` / `readConfigFile` pattern: `Could not parse
-  <path>: <reason>. Delete or fix the file to recover; its result
-  will be lost.` `readStoredJobOrNull` in `tracked-jobs.mjs` inherits
-  the improved message because it delegates to `readJobFile`.
-- **`scripts/glm-companion.mjs` — remove `safeReadSchema` wrapper
-  and the drifted fallback enum**. The shipped
-  `schemas/review-output.schema.json` requires
-  `verdict ∈ {approve, needs-attention}`, but when the schema file
-  was missing/corrupt, `buildReviewSystemPrompt` silently fell back
-  to a hard-coded "verdict (ready|needs_fixes|blocked)" hint —
-  shipping a completely different vocabulary to GLM. Now calls
-  `readOutputSchema(REVIEW_SCHEMA_PATH)` directly; a corrupt shipped
-  schema surfaces a clear reinstall-the-plugin error instead of
-  quietly degrading reviews.
-- **`scripts/lib/render.mjs` — `normalizeReviewFinding` retains
-  `confidence`**. The schema marks confidence `∈ [0, 1]` as
-  required; the normalizer dropped the field, so every rendered
-  finding lost the confidence signal. Now preserves valid numeric
-  values (null-out-of-range defaults to omission) and
-  `renderReviewResult` appends ` · conf 0.xx` to the severity
-  prefix — e.g. `[high · conf 0.95] ...`.
-- **`scripts/glm-companion.mjs` — drop dead `target.base` /
-  `target.scope` references**. `resolveReviewTarget` in `git.mjs`
-  returns `{ mode, label, baseRef, explicit }`; the companion read
-  `target.base` / `target.scope` which were always undefined, so
-  `buildTargetLabel` silently fell through to "working tree"
-  regardless of the actual review target. `buildTargetLabel` now
-  uses `target.label` directly, and job meta carries `targetMode` /
-  `baseRef` instead of the two always-undefined fields.
-- **`README.md` / `commands/review.md` — remove stale `GLM_MODEL`
-  env var references**. `GLM_MODEL` was dropped as an override in
-  v0.3.0 (see the v0.3.0 changelog entry), but two user-facing docs
-  still recommended it. Corrected to point at `default_model` in
-  the config file.
+### Fixed — error surface
 
-### Fixed (third pass)
+- Error-message consistency — all user-facing error emissions go
+  through `formatUserFacingError` in `fs.mjs`, which pulls
+  `.message` from `Error` instances, falls back to `String()` for
+  non-Error throws, and redacts the user's home directory prefix
+  (`/Users/<name>/...` → `~/...`) before output. Local debug still
+  sees full paths (redaction runs at emission, not at throw).
+- Primary-error preservation in job runner — a secondary
+  "could not parse job file" error no longer shadows the primary
+  runner failure; both are surfaced with the primary leading.
+- Stale `GLM_MODEL` environment-variable references in `README.md`
+  and `commands/review.md` replaced with `default_model` config
+  pointer (env override was removed in v0.3.0).
 
-Third-pass review (`pr-review-toolkit:code-reviewer` +
-`pr-review-toolkit:silent-failure-hunter` +
-`pr-review-toolkit:pr-test-analyzer`, each running heterogeneous
-verification paths per the multi-agent protocol; the in-house
-`security-auditor` agent was retired after two rounds of fabricated
-output) flagged a mix of real issues and test-coverage gaps. All nine
-resolved without changing public API or config shape.
+### Fixed — dead scaffolding removed
 
-- **`scripts/lib/job-control.mjs` — `/glm:status` survives corrupt
-  `state.json`** (symmetric to the second-pass I-1 fix for `/glm:setup`).
-  `buildStatusSnapshot` called `getConfig(workspaceRoot)` and
-  `listJobs(workspaceRoot)` unwrapped; after `loadState` became
-  fail-closed, `/glm:status` crashed with a stacktrace instead of
-  showing the recovery hint. Now wraps both reads, surfaces
-  `snapshot.stateError`, and `renderStatusReport` emits a "State file:
-  error: … / job list unavailable until state file is fixed." block.
-- **`scripts/lib/fs.mjs` — `readJsonFile` fail-closed with file path**
-  (second-pass MED-3 sub-finding). The generic helper was still bare
-  `JSON.parse(fs.readFileSync(...))`, so any caller (including
-  `readOutputSchema` for the shipped review schema) threw a bare
-  `SyntaxError` with no filename. Now mirrors the
-  `loadState` / `readConfigFile` / `readJobFile` pattern — `Could not
-  parse <path>: … Delete or fix the file to recover.`
-- **`scripts/lib/tracked-jobs.mjs` — `runTrackedJob` catch no longer
-  shadows the primary runner error** (second-pass NEW-1 follow-up).
-  Pre-fix, `readStoredJobOrNull` could throw (MED-2 fix) and mask the
-  original runner exception. Post-fix, the read is wrapped; the primary
-  error propagates to `main().catch`, the secondary persist warning is
-  folded into `errorMessage` for diagnostic completeness, and
-  persistence failures never swallow the user-visible error.
-- **`scripts/lib/fs.mjs` — `redactHomePath` utility + wired into every
-  user-visible error surface** (second-pass Side-2 follow-up). Absolute
-  home paths (e.g. `/Users/<name>/.local/state/...`) no longer leak into
-  stderr crash lines or `--json` `state.error` / `config.error` fields;
-  they're rewritten to `~/...` before emission. Local debug still sees
-  the full path because redaction runs at the emission point, not the
-  throw site. Boundary tests lock in that `/Users/<name>foo/bar` (no
-  path separator) stays untouched.
-- **`scripts/glm-companion.mjs` — direct-invocation guard around
-  `main().catch`** (GAP-4 enabler). Importing the module used to fire
-  `main()` with the test runner's argv and set `exitCode = 2`; this
-  blocked `buildTargetLabel` (and future helpers) from being unit
-  tested in-process. Guard pattern matches Node's recommended check
-  (`fileURLToPath(import.meta.url) === process.argv[1]`).
-- **`scripts/glm-companion.mjs` — `export` on `buildTargetLabel`** for
-  direct unit testing (GAP-4). Function body unchanged.
-- **`tests/render.test.mjs` — confidence boundary handling** (GAP-3
-  backfill). Adds explicit guards for `> 1`, `< 0`, `NaN`, numeric
-  strings ("0.95" — intentionally NOT coerced, to keep schema
-  contract honest), and `null`. All five cases must omit the
-  ` · conf 0.xx` suffix rather than render a misleading value.
-- **CHANGELOG / release_card test-count typo**: second-pass section
-  said "32 tests second-pass"; actual was 33. Corrected.
+GLM is stateless HTTP — there is no thread / session / turn concept
+to model. This release removes the dead codex-plugin-cc carryovers
+that pretended otherwise:
 
-### Simplified (final cleanup pass)
+- `findLatestTaskThread`, `interruptAppServerTurn`,
+  `terminateProcessTree` — always returned null / no-op shapes on
+  GLM; ~70 LOC with zero call sites. Deleted.
+- `formatResumeCommand` / `"Resume thread: null"` output branch —
+  literal null leaked into user-visible output when a legacy job
+  record happened to carry a non-null `threadId`. Deleted. A
+  stale caller in `pushJobDetails` would have thrown
+  `ReferenceError: formatResumeCommand is not defined` on any
+  active-job `/glm:status`; caught in the final cleanup pass +
+  covered by new renderer tests.
+- `threadId` / `turnId` fields — removed from
+  `normalizeProgressEvent`, `createJobProgressUpdater`,
+  `runTrackedJob`, and three `glm-client.mjs` response shapes.
+- `appendActiveJobsTable` "GLM Session ID" column — always empty
+  on GLM. Table trimmed 7 → 6 columns.
+- `buildPersistentTaskThreadName` renamed to `buildTaskTitle` (it
+  never built a thread name — it built a short job title from the
+  first line of the prompt).
+- `scripts/glm-companion.mjs` — removed two unused imports
+  (`listJobs`, `appendLogLine`) and dead `session_id` option
+  plumbing that the receiving functions never read.
+- `scripts/lib/state.mjs resolveStateDir` — dead catch branch
+  that re-assigned a value it already held replaced with a no-op
+  comment; behavior identical.
+- `safeReadConfigOrNull` helper — unreferenced after the
+  corrupt-merge fix; deleted with a structural test guard.
 
-After the three hotfix passes landed, a review-only simplify scan by
-`pr-review-toolkit:code-simplifier` flagged a handful of opportunities
-that had accumulated as scar tissue. Applied in two sub-passes: first
-the four P1 items plus two P2 helper extractions (Bundle E+), then a
-follow-up pass (Bundle F) that caught a ReferenceError Bundle E+ had
-introduced and finished the thread / resume scaffolding removal the
-simplify pass had only half-completed.
+### Added — test suite (0 → 65 tests)
 
-- **`scripts/lib/render.mjs` — deleted the `"Resume thread: null"`
-  output branch**. `renderStoredJobResult` declared
-  `const resumeCommand = null; // GLM is stateless` and then
-  interpolated that null into four conditional emissions
-  (`"Resume thread: ${resumeCommand}"`) guarded by `threadId`. Any
-  legacy job record that happened to carry a non-null `threadId` would
-  have rendered literal `"Resume thread: null"` to the user.
-  `formatResumeCommand` helper (always returns null) deleted with it.
-  (Note: the first simplify commit deleted the helper but missed a
-  second call site in `pushJobDetails` — see the follow-up bug fix
-  below.)
-- **`scripts/glm-companion.mjs` — removed two unused imports**
-  (`listJobs` from `state.mjs`, `appendLogLine` from
-  `tracked-jobs.mjs`). `npm run check` validates.
-- **`scripts/lib/glm-client.mjs` + `scripts/lib/process.mjs` — deleted
-  three codex-scaffold carryovers that GLM does not use**:
-  `findLatestTaskThread` (always returned null — GLM is stateless),
-  `interruptAppServerTurn` (always returned the "nothing to interrupt"
-  shape), and `terminateProcessTree` (+ its private helper
-  `looksLikeMissingProcessMessage`). All three were exported but
-  zero call sites existed; the last one was only needed by codex's
-  persistent-subprocess model. ~70 LOC removed.
-- **`scripts/lib/state.mjs` — simplified `resolveStateDir` dead catch
-  branch**. The catch body re-assigned `canonicalWorkspaceRoot` to
-  the value it already held; replaced with a no-op comment. Behaviour
-  identical.
-- **`scripts/lib/fs.mjs` — new `formatUserFacingError(error)` helper**
-  (P2-1). Centralizes the pattern
-  `redactHomePath(error instanceof Error ? error.message : String(error))`
-  that used to be duplicated verbatim at four call sites
-  (`buildSetupReport` ×2, `buildStatusSnapshot`, `main().catch`).
-  Callers now read `configError = formatUserFacingError(error)`.
-- **`scripts/glm-companion.mjs` — removed dead `session_id` option
-  plumbing** (P2-5). `runStatus` and `runCancel` each fetched
-  `session_id` via `currentSessionId()` and passed it through as an
-  option to `buildStatusSnapshot` / `resolveCancelableJob`, but the
-  receiving functions read session scoping from `options.env` via
-  `filterJobsForCurrentSession → getCurrentSessionId`, never
-  `options.session_id`. `runCancel` now passes `{ env: process.env }`.
-  (Note: this is code-intent cleanup, not a functional fix —
-  `getCurrentSessionId` already falls back to `process.env` if
-  `options.env` is missing, so both callers worked either way.)
+The v0.4.2 baseline had 0 automated tests; this release ships 65,
+all passing under `node --test`. Coverage areas:
 
-### Simplified (Bundle F — thread / resume scaffolding removed)
+- `tests/args.test.mjs` — flag parsing regression guards (incl.
+  `split("=", 2)` truncation + inline-empty-value edge case).
+- `tests/state.test.mjs` — corrupt / missing / valid state
+  round-trips + corrupt job file path.
+- `tests/preset-config.test.mjs` — first-run, valid-merge (key
+  rotation preserves other fields), corrupt-config throw.
+- `tests/template-contract.test.mjs` — structural test pinning
+  the review prompt contract; catches template / companion drift
+  at `npm test` time, not runtime. Includes guards for no drifted
+  verdict-enum strings and no lingering `safeReadConfigOrNull`
+  definition.
+- `tests/render.test.mjs` — review-result rendering with
+  confidence boundary + out-of-range + omission + target-label
+  contract guards.
+- `tests/setup-resilience.test.mjs` /
+  `tests/status-resilience.test.mjs` /
+  `tests/result-propagation.test.mjs` — subprocess integration
+  tests for corrupt-state resilience on the three main commands.
+- `tests/fs.test.mjs` — `readJsonFile` + `redactHomePath` +
+  `formatUserFacingError` helper suite, including the boundary
+  case where a path like `/Users/<name>foo/bar` without a path
+  separator stays untouched.
+- `tests/schema-load.test.mjs` — shipped schema load + corrupt
+  fixture + missing fixture.
+- `tests/target-label.test.mjs` — target-label contract + drift
+  guards.
+- `tests/job-render.test.mjs` — job-status renderers walking
+  running / finished / stored / cancelled job records; exercises
+  the exact `pushJobDetails` path that a missed call site almost
+  shipped a `ReferenceError` into.
 
-Bundle E+ ran in review-only mode and the execution missed a live
-call site, introducing a ReferenceError. Bundle F fixes that and
-takes the opportunity to delete all remaining thread / resume
-scaffolding — every field was null-valued or always-empty in GLM
-because the bigmodel API is stateless HTTP.
+### Added — CI pipeline
 
-- **🚨 ReferenceError fix**: `scripts/lib/render.mjs:142` was still
-  calling `formatResumeCommand(job)` after Bundle E+ deleted the
-  function. Existing tests missed it because the for-loop in
-  `pushJobDetails` never entered with a real job during testing.
-  Any user running `/glm:status <job-id>` or `/glm:status` with an
-  active job would have hit `ReferenceError: formatResumeCommand is
-  not defined`. Fix: removed the call + the two "Resume thread: …" /
-  "GLM thread ref: …" output lines from `pushJobDetails`.
-- **`scripts/lib/render.mjs` — deleted the "GLM Session ID" column**
-  from `appendActiveJobsTable`. Header said "GLM Session ID" but the
-  cell read `job.threadId ?? ""` — always empty for GLM. Column
-  dropped entirely (7 columns → 6) so `/glm:status` no longer shows
-  a permanently empty column.
-- **`scripts/lib/render.mjs` — simplified `renderStoredJobResult`**.
-  The Bundle D3+ version kept a `threadRefSuffix` that only fired if
-  a legacy threadId happened to be stored; now the function just
-  returns rendered / raw output without any thread-ref scaffolding.
-- **`scripts/lib/tracked-jobs.mjs` — removed `threadId` / `turnId`
-  from the progress-event pipeline**: `normalizeProgressEvent` no
-  longer normalizes the two fields, `createJobProgressUpdater` no
-  longer tracks `lastThreadId` / `lastTurnId` (the tracking was
-  always a no-op because the normalized values were always null),
-  `runTrackedJob` no longer writes `threadId`/`turnId` into
-  `writeJobFile` / `upsertJob` payloads.
-- **`scripts/lib/glm-client.mjs` — removed `threadId: null` /
-  `turnId: null` from three response shapes** (successful JSON
-  result, successful raw result, `failureShape`). These fields were
-  hard-coded null to "match the codex scaffold shape" but every
-  GLM consumer read them as null anyway.
-- **`scripts/lib/glm-client.mjs` — renamed
-  `buildPersistentTaskThreadName` → `buildTaskTitle`**, and
-  `TASK_THREAD_PREFIX` → `TASK_TITLE_PREFIX`. The function never
-  built a "persistent thread name" — it built a short job title
-  from the first line of the prompt. Name now matches behaviour.
-- **`scripts/lib/glm-client.mjs` — module docstring rewrite**:
-  dropped the "keep the function surface aligned with the
-  codex-plugin-cc scaffold" framing. GLM is stateless HTTP — stating
-  the positive fact is clearer than a historical alignment note.
+First real CI for this repo. Gates every PR and release against the
+regression patterns found during this release's review passes.
 
-### Added
+- `.github/workflows/pr-check.yml` — syntax check, full test suite,
+  path-leak guard, plugin manifest validation, CHANGELOG +
+  Co-Authored-By checks on PRs.
+- `.github/workflows/ai-quality-gate.yml` — `static-invariants`
+  job encodes each class of bug fixed in this release as a grep
+  invariant; a `cross-ai-review-advisory` job probes the PR
+  comment thread when an AI identity authors a PR and prints an
+  advisory if no counterpart AI has reviewed.
+- `.github/workflows/release.yml` — tag-triggered; verifies
+  `package.json` / `plugin.json` / `marketplace.json` version
+  parity with the tag, CHANGELOG entry present, release card
+  `Status: READY`. Does NOT publish.
+- `scripts/ci/check-*.sh` / `scripts/ci/check-cross-ai-review.mjs`
+  — the individual gates; identical locally
+  (`npm run ci:local`) and in workflow.
+- `scripts/hooks/pre-push` + `scripts/install-hooks.sh` — local
+  pre-push hook that mirrors the server gate.
+  `npm run hooks:install` to wire up.
+- Branch-protection setup helper —
+  `scripts/setup/configure-gitea-protection.sh` (idempotent).
+- Governance: `.github/PULL_REQUEST_TEMPLATE.md`,
+  `.github/dependabot.yml` (weekly GitHub Actions bumps on the
+  mirror), `CONTRIBUTING.md`, `docs/ci.md`.
 
-- **`tests/args.test.mjs`** — Extended from 13 to 15 tests. New
-  regression guard for the `split("=", 2)` truncation bug and
-  inline-empty-value edge case.
-- **`tests/preset-config.test.mjs`** — 3 tests covering first-run,
-  valid-merge (key rotation preserves other fields), and corrupt
-  config (throws).
-- **`tests/state.test.mjs`** — 3 tests covering missing state
-  file (returns defaults), valid state roundtrip, and corrupt
-  state (throws).
-- **`tests/template-contract.test.mjs`** — 4 structural tests
-  pinning the review prompt contract: both templates' `{{VARS}}`
-  must be declared, companion keys must be used by at least one
-  template, and the `runReview` source must still contain all
-  expected keys. Catches future drift between template and
-  companion at build time (via `npm test`), not runtime. Second-pass
-  added 2 more structural tests: no drifted
-  `ready|needs_fixes|blocked` enum string in the companion, and no
-  lingering `safeReadConfigOrNull` definition.
-- **`tests/render.test.mjs`** (new) — 4 tests covering
-  `renderReviewResult` with confidence rendering, boundary values
-  (0 and 1), omission when GLM didn't supply a numeric confidence,
-  and the target-label contract (meta.targetLabel is authoritative,
-  no reliance on deleted `base` / `scope` fields).
-- **`tests/setup-resilience.test.mjs`** (new) — 1 integration test
-  that spawns `node scripts/glm-companion.mjs setup --json` with a
-  corrupt `state.json` pre-seeded and verifies: exit 0, report
-  rendered, `state.error` surfaced, `nextSteps` carries a fix
-  hint, `ready` is false.
-- **`tests/state.test.mjs`** — Extended with 1 new test for
-  `readJobFile` corrupt-file throw path (MED-2 regression guard).
-- **`tests/status-resilience.test.mjs`** (third pass, new) — 1
-  subprocess test for Side-1: `/glm:status --json` with corrupt
-  `state.json` pre-seeded; asserts exit 0, `snapshot.stateError`
-  surfaced, empty job lists, response shape intact.
-- **`tests/result-propagation.test.mjs`** (third pass, new, GAP-2
-  backfill) — 1 subprocess test: `/glm:result <id>` against a corrupt
-  job file; asserts exit 1, clean single-line stderr with file path
-  and "Delete or fix the file" hint, no stacktrace leakage, no raw
-  `SyntaxError: Expected property name` text.
-- **`tests/schema-load.test.mjs`** (third pass, new, GAP-1 backfill)
-  — 3 tests for `readOutputSchema`: shipped schema loads successfully
-  and still has the expected verdict enum (`approve` |
-  `needs-attention`) + `confidence` in finding required fields;
-  corrupt fixture schema fails closed with filename; missing fixture
-  emits ENOENT clearly.
-- **`tests/target-label.test.mjs`** (third pass, new, GAP-4
-  backfill) — 5 unit tests for `buildTargetLabel`: uses `target.label`
-  when no focus; appends focus; shortens long focus; falls through
-  to "working tree" on empty; never reads `target.base` /
-  `target.scope` (drift guard — deliberately populates those as noise
-  to catch a regression).
-- **`tests/fs.test.mjs`** (third pass, new) — 8 tests covering
-  `readJsonFile` (valid / corrupt with path / ENOENT) and
-  `redactHomePath` (replaces `$HOME` prefix, handles multiple
-  occurrences, leaves non-home paths alone, safe on
-  non-string/empty inputs, does NOT redact a prefix match without a
-  `/` boundary).
-- **`tests/render.test.mjs`** — Extended from 4 to 9 tests; added
-  the 5 GAP-3 confidence-boundary tests.
-- **`tests/fs.test.mjs`** — Extended with 2 tests for the new
-  `formatUserFacingError` helper (pulls `.message` from Error
-  instances + redacts $HOME; falls back to `String()` for
-  non-Error throws).
-- **`tests/job-render.test.mjs`** (Bundle F, new) — 7 tests for
-  the four renderers that walk job records
-  (`renderJobStatusReport`, `renderStatusReport` with running /
-  finished / recent slots, `renderStoredJobResult` with and without
-  legacy threadId, `renderCancelReport`). These exercise the exact
-  path that Bundle E+ broke (`pushJobDetails` calling the deleted
-  `formatResumeCommand`) so the same class of regression fails
-  loudly next time.
-- **Total**: 0 tests in v0.4.2 → 25 first-pass → 33 second-pass
-  → 56 third-pass → 58 after Bundle E+ → 65 after Bundle F
-  (all pass).
+### Fixed — metadata hygiene
 
-### Codex scaffold alignment
+- `.claude-plugin/plugin.json` + `marketplace.json` — `homepage`
+  now points at the public GitHub mirror.
+- `README.md` — install example uses the public URL; references
+  to an internal orchestrator repo were removed (the harness that
+  consumes this plugin is not open-source).
+- Marketplace description trimmed of organization-specific framing.
 
-Three of the five root-cause bugs are inherited directly from the
-codex-plugin-cc scaffold (v1.0.4) and still exist there:
+### Changed — behavior
 
-- `args.mjs:28` identical `split("=", 2)` — affects codex too
-- `state.mjs loadState / saveState` identical fail-open + orphan —
-  affects codex too
-- Single-template-for-both-review-modes — codex also ships
-  `prompts/adversarial-review.md` only; no balanced counterpart
-
-GLM has now diverged on these three toward fail-closed behavior.
-The other two (template key mismatch in `runReview`, corrupt
-`writeConfigFile` merge) are GLM-specific regressions introduced
-during the `--base`/`--scope` flag adaptation and the `preset-config`
-feature respectively; codex's `runReview` correctly passes matching
-keys, and codex does not have a `preset-config` layer (delegates to
-codex CLI's own `~/.codex/auth.json`).
+- Users with an already-corrupt `~/.config/glm-plugin-cc/config.json`
+  or `state.json` who previously enjoyed silent masking will now
+  see a clear error ("Could not parse …: delete or fix the file").
+  Recovery: delete the file. Intended behavior change.
 
 ### Not changed
 
-- Companion script surfaces for setup / review / task / rescue /
-  status / result / cancel are unchanged on Claude-Code-invoked
-  paths; the workspace resolution already went through
-  `resolveCommandCwd(options)` correctly, the fix just makes the
-  `options.cwd` slot actually get populated when the flag is used.
-- Version number stays `0.4.3` — GitHub mirror was at `0.4.2` when
-  these fixes were developed; pushing this state keeps the public
-  version sequence `0.4.2 → 0.4.3` without a skip. The internal
-  gitea primary had three intermediate commits at `0.4.3`; the
-  HEAD SHA identifies the exact code state.
+- Command surfaces (`/glm:setup` / `/glm:review` /
+  `/glm:adversarial-review` / `/glm:task` / `/glm:rescue` /
+  `/glm:status` / `/glm:result` / `/glm:cancel`) are unchanged on
+  Claude-Code-invoked paths.
 
-### CI infrastructure (Bundle G)
+### Scaffold alignment note
 
-First real CI pipeline for this repo. Before Bundle G, the workflow
-was "AI drafts a change → AI self-reviews → direct merge to main". The
-user's stated policy: *"以后任何pr不能再像现在这样自己觉得没问题了就
-直接提pr然后直接merge这肯定不行"*. Bundle G wires up the CI that
-makes that policy enforceable.
+Three of the root-cause bugs are inherited directly from the
+`openai/codex-plugin-cc` v1.0.4 scaffold and may still affect that
+plugin:
 
-Shape:
+- `args.mjs` identical `split("=", 2)` pattern.
+- `state.mjs loadState` / `saveState` identical fail-open + orphan.
+- Single-template-for-both-review-modes — codex ships only
+  `prompts/adversarial-review.md`, no balanced counterpart.
 
-- **Two hosts, one YAML** — `.github/workflows/` is read directly by
-  gitea `act_runner` (SkyLab/glm-plugin-cc primary) and by GitHub
-  Actions (sky-zhang01/glm-plugin-cc mirror). Same files, same gates,
-  no duplication.
-- **Three named identities on gitea** — `sky` (sole formal approver,
-  per `CODEOWNERS`), `claude-code`, `codex`. `sky` merges; the two AI
-  identities cross-review each other's PRs in the comment thread
-  (soft requirement surfaced as advisory in CI, not a hard blocker).
-
-Files added:
-
-- `.github/workflows/pr-check.yml` — every PR + push to `main` runs:
-  syntax check → `npm test` → path-leak guard → plugin manifest
-  validation → CHANGELOG update gate (PR only) → Co-Authored-By
-  trailer check (PR only). Mirrors `scripts/ci/check-all.sh` exactly
-  so the pre-push hook gives the same verdict locally.
-- `.github/workflows/ai-quality-gate.yml` — `static-invariants` job
-  runs `scripts/ci/check-ai-quality-gate.sh` (regression-pattern grep
-  invariants encoding every class of bug found in Bundles C / D3+ /
-  E+ / F); `cross-ai-review-advisory` job reads the PR comment thread
-  via API and prints an advisory when an AI-authored PR has no
-  independent comment from the counterpart AI. Advisory only — human
-  approver (sky) still decides.
-- `.github/workflows/release.yml` — tag-triggered
-  (`v*.*.*`): verifies `package.json` / `plugin.json` /
-  `marketplace.json` version parity with the tag, CHANGELOG entry
-  present, `release_card.md` is `Status: READY`. Does **not** publish
-  — publication stays manual.
-- `.github/PULL_REQUEST_TEMPLATE.md` — checklist mirroring the CI
-  gates (CHANGELOG / Co-Authored-By / path-leak / manifest parity /
-  cross-AI review).
-- `.github/dependabot.yml` — weekly `github-actions` bump PRs on the
-  GitHub mirror. No runtime npm deps to watch; dependabot ignored by
-  gitea.
-- `SECURITY.md` / `CONTRIBUTING.md` / `docs/ci.md` — governance +
-  developer-facing CI documentation. `docs/ci.md` is the single
-  reference for "what runs, where, why".
-- `scripts/ci/check-no-local-paths.sh` — blocks `/Users/...`,
-  `/home/...`, `10.x` / `192.168.x` / `172.16-31.x` IPs, MAC
-  addresses, and the private `*.tokyo.skyzhang.net` hostname in any
-  tracked file. CHANGELOG / release_card / docs/ci.md excluded as
-  documentation surfaces.
-- `scripts/ci/check-plugin-manifest.sh` — validates `.claude-plugin/
-  plugin.json` + `marketplace.json` JSON, enforces `source: "./"`
-  (not `.` — that's the v0.4.0 regression), and cross-checks version
-  parity between `plugin.json` / `marketplace.json` / nested plugin
-  entry.
-- `scripts/ci/check-ai-quality-gate.sh` — encodes Bundle C / D3+ /
-  E+ / F findings as grep invariants:
-  - `findLatestTaskThread` / `interruptAppServerTurn` /
-    `terminateProcessTree` / `formatResumeCommand` cannot come back
-  - `threadId` / `turnId` scaffolding cannot come back
-  - `safeReadConfigOrNull` cannot come back
-  - drifted verdict enum `ready|needs_fixes|blocked` cannot leak from
-    the review system prompt
-  - bare `error instanceof Error ? error.message : String(error)`
-    is banned outside `scripts/lib/fs.mjs` — all call sites must go
-    through `formatUserFacingError`
-  - stale `GLM_MODEL` env references cannot come back
-- `scripts/ci/check-changelog-updated.sh` — requires a CHANGELOG diff
-  whenever a PR touches `scripts/**`, `commands/**`, `schemas/**`,
-  `prompts/**`, or `.claude-plugin/**`.
-- `scripts/ci/check-coauthored-by.sh` — heuristic: if a commit
-  message references Bundle IDs, Claude Code, Codex, or `round-N`
-  review passes, the commit body must carry a `Co-Authored-By:`
-  trailer.
-- `scripts/ci/check-cross-ai-review.mjs` — node script that queries
-  PR comments via gitea/GitHub API and prints `OK` /
-  `ADVISORY` / `SKIP` based on whether the counterpart AI has
-  commented.
-- `scripts/ci/check-all.sh` — unified local CI entry, runs every
-  check in the same order as `pr-check.yml`.
-- `scripts/hooks/pre-push` + `scripts/install-hooks.sh` — local
-  pre-push hook that runs the full CI before any push. Installed via
-  `npm run hooks:install`. Emergency bypass: `git push --no-verify`.
-- `scripts/setup/configure-gitea-protection.sh` — idempotent
-  one-shot to configure gitea branch protection on `main`: block
-  direct push, require 1 approval from `sky`, dismiss stale
-  approvals, require `pr-check` + `static-invariants` status checks,
-  block on outdated branch.
-- `package.json` scripts: `ci:local` / `ci:local:fast` / `hooks:install`.
-
-Pre-existing leaks fixed as a side effect of wiring up
-`check-no-local-paths.sh`:
-
-- `.claude-plugin/plugin.json` + `marketplace.json` — `homepage` now
-  points at the public GitHub mirror (`github.com/sky-zhang01/
-  glm-plugin-cc`), not the private gitea URL. Plugin description
-  updated to say "external SEV harness" rather than naming the
-  internal harness repo.
-- `README.md` — three private-gitea references replaced:
-  `claude-dev-harness` links removed (repo is internal-only, no
-  public mirror); `/plugin marketplace add` install example uses the
-  GitHub URL.
-
-Error-message consistency (completes Bundle E+ P2-1):
-
-- All seven sites that still used the bare pattern
-  `error instanceof Error ? error.message : String(error)`
-  (`session-lifecycle-hook.mjs`, `glm-client.mjs` x4,
-  `tracked-jobs.mjs`, `check-imports.mjs`) now import
-  `formatUserFacingError` from `scripts/lib/fs.mjs` and delegate.
-  The `check-ai-quality-gate.sh` invariant enforces this going
-  forward.
-
-Deferred (intentional):
-
-- GitHub atomic sync from the old `v0.4.2` state up to the current
-  `v0.4.3` state. Blocked on user directive *"先不急 GitHub"*. The
-  public GitHub mirror still shows the `v0.4.2` release; gitea
-  primary is authoritative until the sync lands as its own release
-  card.
+GLM has diverged on these toward fail-closed behavior. The other
+fixes (template key mismatch in `runReview`, corrupt
+`writeConfigFile` merge) are GLM-specific regressions introduced
+during the `--base` / `--scope` flag adaptation and the
+`preset-config` feature.
 
 ## v0.4.2 — 2026-04-20
 
@@ -666,16 +383,16 @@ preset+base_url+default_model; only the key is now read from there.
 
 ## v0.3.4 — 2026-04-20
 
-Install-path enablement + independent code review fixes. The Codex CLI
-was run over the full v0.3.3 repo as an adversarial review; 11 findings
-came back, 9 were verified and landed here (2 deferred with rationale).
+Install-path enablement + independent code review fixes. An
+independent adversarial review over the full v0.3.3 repo surfaced 11
+findings; 9 were verified and landed here (2 deferred with rationale).
 All findings treated this as a pre-install bar, not polish.
 
 ### Added (marketplace-load path)
 
 - `.claude-plugin/marketplace.json` — root-as-marketplace entry that
   exposes `glm` as a single plugin with `source: "."` so
-  `/plugin marketplace add` can load the repo. Name: `skylab-glm`.
+  `/plugin marketplace add` can load the repo.
 - `scripts/check-imports.mjs` — ESM import-resolution check for all 13
   lib modules. Wired into `npm run check` so v0.3.3-class broken imports
   fail loudly instead of passing `node --check`.
@@ -751,19 +468,9 @@ All findings treated this as a pre-install bar, not polish.
 
 ### Install
 
-Local path (recommended — bypasses Cloudflare Access on the Gitea
-remote):
-
 ```
-/plugin marketplace add /path/to/glm-plugin-cc
-/plugin install glm@skylab-glm
-```
-
-Or, after Cloudflare Access auth is established on the host:
-
-```
-/plugin marketplace add https://gitea.tokyo.skyzhang.net/SkyLab/glm-plugin-cc
-/plugin install glm@skylab-glm
+/plugin marketplace add https://github.com/sky-zhang01/glm-plugin-cc
+/plugin install glm@sky-zhang01/glm-plugin-cc
 ```
 
 ## v0.3.3 — 2026-04-20
@@ -1008,18 +715,18 @@ configuration; behavior for existing env-only users is unchanged.
 
 ## v0.1.1 — 2026-04-20
 
-Post-review fixes from internal sev-verifier + security-auditor passes.
+Post-review fixes from internal review passes.
 
-- Add missing `commands/task.md` (sev-verifier finding: `/glm:task` was
-  documented + dispatched but no slash-command frontmatter existed; Claude
-  Code wouldn't register it).
-- Enforce `https://` on `ZAI_BASE_URL` env override (security-auditor T5
-  HIGH: plaintext endpoint would leak API key). Override now throws if
-  scheme is not https.
+- Add missing `commands/task.md`: `/glm:task` was documented +
+  dispatched but no slash-command frontmatter existed; Claude Code
+  wouldn't register it.
+- Enforce `https://` on `ZAI_BASE_URL` env override: plaintext
+  endpoint would leak API key. Override now throws if scheme is not
+  https.
 - Validate job IDs and enforce path containment in
-  `scripts/lib/state.mjs:resolveJobFile` / `resolveJobLogFile`
-  (security-auditor T4: defense-in-depth against path traversal via
-  malicious `--job-id ../../etc/passwd`). Pattern:
+  `scripts/lib/state.mjs:resolveJobFile` / `resolveJobLogFile`:
+  defense-in-depth against path traversal via malicious
+  `--job-id ../../etc/passwd`. Pattern:
   `/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/`, max 128 chars; resolved path must
   stay inside jobs dir.
 
@@ -1036,9 +743,9 @@ Initial release.
   Handles 429 / 401 / 403 / 400 / timeout / network errors explicitly.
 - Session-lifecycle hook retained from codex-plugin-cc scaffold for
   job-state bookkeeping.
-- Stop-review-gate hook **omitted** by design: Claude-dev-harness
-  `completion-stop-guard.sh` is the single Stop gate for the SEV
-  quality loop.
+- Stop-review-gate hook **omitted** by design: the SEV `/verify`
+  layer is the single Stop gate for the broader orchestration, not
+  this plugin.
 - Zero runtime npm dependencies. Node >=18.18 required (for global
   `fetch`).
 - Derived scaffold from `openai/codex-plugin-cc` (Apache-2.0);

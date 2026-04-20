@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
 # AI Quality Gate — static pattern checks that encode the findings from
-# the v0.4.3 hotfix passes (Bundle C / D3+ / E+ / F) so the same class
-# of regression cannot silently reappear.
+# the v0.4.3 review passes so the same class of regression cannot
+# silently reappear in a future AI-drafted change.
 #
 # Each check is a greppable invariant:
-#   1. No dead codex-scaffold exports (deleted in Bundle E+)
-#   2. No threadId / turnId scaffolding (deleted in Bundle F)
-#   3. No safeReadConfigOrNull re-appearance (deleted in Bundle C MED-1)
+#   1. No dead codex-scaffold exports (thread / broker / subprocess
+#      functions that only made sense for the codex-plugin-cc runtime)
+#   2. No threadId / turnId scaffolding (GLM is stateless HTTP)
+#   3. No safeReadConfigOrNull re-appearance (fail-open wrapper
+#      deleted after the corrupt-merge fix)
 #   4. No drifted verdict enum `ready|needs_fixes|blocked` outside
-#      comments (deleted in Bundle C MED-3)
+#      comments (the shipped schema uses `approve|needs-attention`)
 #   5. No bare `error instanceof Error ? ...` outside the
-#      formatUserFacingError helper (Bundle E+ P2-1 centralization)
-#   6. No call to formatResumeCommand (deleted, Bundle E+/F)
+#      formatUserFacingError helper (single-site redaction contract)
+#   6. No call to formatResumeCommand (deleted; GLM has no thread
+#      concept to resume)
 #
 # Usage: bash scripts/ci/check-ai-quality-gate.sh
 # Exit 0 on clean, exit 1 on any violation.
@@ -42,40 +45,40 @@ check() {
   fi
 }
 
-# 1. Dead codex-scaffold exports (deleted in Bundle E+).
-check "findLatestTaskThread revived (deleted Bundle E+)" \
+# 1. Dead codex-scaffold exports.
+check "findLatestTaskThread revived — GLM is stateless, this function always returned null" \
   '^\s*export\s+(async\s+)?function\s+findLatestTaskThread\b'
-check "interruptAppServerTurn revived (deleted Bundle E+)" \
+check "interruptAppServerTurn revived — GLM has no app-server, this was a no-op shape" \
   '^\s*export\s+(async\s+)?function\s+interruptAppServerTurn\b'
-check "terminateProcessTree revived (deleted Bundle E+)" \
+check "terminateProcessTree revived — GLM runs synchronously in-process, no subprocess tree" \
   '^\s*export\s+function\s+terminateProcessTree\b'
-check "formatResumeCommand revived (deleted Bundle E+)" \
+check "formatResumeCommand revived — GLM has no thread to resume" \
   '\bformatResumeCommand\s*\('
 
-# 2. threadId / turnId scaffolding (deleted in Bundle F).
-# We allow the tombstone comment on line ~435 of render.mjs but block
-# any real reading/writing of the fields. Grep for the JS access
-# patterns — `.threadId` on a real variable, not in a //-comment.
-check "threadId / turnId scaffolding revived (deleted Bundle F)" \
+# 2. threadId / turnId scaffolding.
+# Allow any tombstone comment on the render.mjs column drop but block
+# real reading/writing of the fields in live code.
+check "threadId / turnId scaffolding revived — GLM response shapes don't carry threads" \
   '^\s*(threadId|turnId)\s*:\s*(execution|normalized|source|value|null|storedJob|job)'
-check "threadId/turnId field read in live code (deleted Bundle F)" \
+check "threadId/turnId field read in live code — GLM jobs have no thread identity" \
   '(\bjob|\bstoredJob|\bexecution|\bnormalized)\.(threadId|turnId)\b'
-check "TASK_THREAD_PREFIX revived (renamed to TASK_TITLE_PREFIX in Bundle F)" \
+check "TASK_THREAD_PREFIX revived — renamed to TASK_TITLE_PREFIX (it builds a job title, not a thread name)" \
   '\bTASK_THREAD_PREFIX\b'
 
-# 3. safeReadConfigOrNull (deleted Bundle C MED-1).
-check "safeReadConfigOrNull revived (deleted Bundle C MED-1)" \
+# 3. safeReadConfigOrNull — the fail-open wrapper that dropped user
+#    config fields on any corruption during writeConfigFile merge.
+check "safeReadConfigOrNull revived — corrupt config must surface clearly, not silently merge-over" \
   '^\s*function\s+safeReadConfigOrNull\b'
 
-# 4. Drifted verdict enum (deleted Bundle C MED-3).
-# Allow inside comments — only flag as actual string literal.
-check "drifted verdict enum (Bundle C MED-3) — use approve|needs-attention per shipped schema" \
+# 4. Drifted verdict enum — the shipped review schema uses
+#    `approve | needs-attention`, not `ready|needs_fixes|blocked`.
+check "drifted verdict enum — use approve|needs-attention per shipped schema" \
   '"verdict \(ready\|needs_fixes\|blocked\)"'
 
-# 5. Bare error-message extraction outside the helper.
-# formatUserFacingError lives in scripts/lib/fs.mjs and is the single
-# allowed site. Any other file repeating the pattern should use the
-# helper instead.
+# 5. Bare error-message extraction outside the single helper site.
+#    formatUserFacingError in scripts/lib/fs.mjs pulls .message from
+#    Error instances, falls back to String(), and redacts $HOME. Every
+#    call site should delegate to it for consistent, redacted output.
 BARE_ERROR_HITS=$(grep -rEn --include='*.mjs' \
   '\berror instanceof Error \? error\.message : String\(error\)' scripts/ 2>/dev/null \
   | grep -v 'scripts/lib/fs.mjs' || true)
@@ -86,10 +89,12 @@ if [[ -n "$BARE_ERROR_HITS" ]]; then
   VIOLATIONS=$((VIOLATIONS + 1))
 fi
 
-# 6. Stale GLM_MODEL env-var doc references (removed Bundle C m-1).
+# 6. Stale `GLM_MODEL` env-var doc references — the override was
+#    dropped in v0.3.0; `default_model` in the config file is the
+#    source of truth.
 STALE_GLM_MODEL=$(grep -rEn 'GLM_MODEL env var' README.md commands/ 2>/dev/null || true)
 if [[ -n "$STALE_GLM_MODEL" ]]; then
-  echo "✗ Stale GLM_MODEL env var reference (Bundle C m-1 removed this override):"
+  echo "✗ Stale GLM_MODEL env var reference (the override was removed in v0.3.0; use default_model):"
   echo "$STALE_GLM_MODEL" | sed 's/^/    /'
   echo
   VIOLATIONS=$((VIOLATIONS + 1))
@@ -97,8 +102,8 @@ fi
 
 if [[ $VIOLATIONS -gt 0 ]]; then
   echo "FAIL — $VIOLATIONS AI-quality-gate pattern(s) violated."
-  echo "Each pattern encodes a finding from the v0.4.3 hotfix passes."
-  echo "See CHANGELOG.md § 'Fixed/Simplified' for the corresponding Bundle entry."
+  echo "Each pattern encodes a finding from the v0.4.3 review passes."
+  echo "See CHANGELOG.md § Fixed for the corresponding entry."
   exit 1
 fi
 

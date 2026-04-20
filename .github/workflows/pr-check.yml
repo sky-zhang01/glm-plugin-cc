@@ -1,8 +1,8 @@
 name: PR Check
 
-# Runs on every pull request targeting main — both gitea (SkyLab/glm-plugin-cc)
-# and GitHub (sky-zhang01/glm-plugin-cc) use this identical workflow file.
-# Blocks merge if any step fails.
+# Runs on every pull request targeting main — both the private primary
+# repo and the GitHub public mirror (sky-zhang01/glm-plugin-cc) use this
+# identical workflow file. Blocks merge if any step fails.
 #
 # Mirror of `npm run ci:local` so a developer who runs the pre-push hook has
 # the same verdict locally before push.

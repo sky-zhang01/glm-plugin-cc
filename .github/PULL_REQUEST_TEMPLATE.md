@@ -36,8 +36,8 @@
 
 When this PR is authored by one AI identity, it is expected that the
 *other* AI identity has posted an independent, challenging review in
-the comment thread before the human approver (sky) merges. The
-`ai-quality-gate` workflow surfaces this as advisory — sky may still
-merge without it, but should note the reason.
+the comment thread before the maintainer merges. The
+`ai-quality-gate` workflow surfaces this as advisory — the maintainer
+may still merge without it, but should note the reason.
 
-- [ ] Human (sky): cross-AI review present, or explicitly waived
+- [ ] Maintainer: cross-AI review present, or explicitly waived

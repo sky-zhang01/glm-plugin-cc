@@ -2,9 +2,10 @@
 
 Thanks for taking the time to contribute.
 
-This repo is a Claude Code plugin maintained by a solo human (sky) and
-two AI identities (`claude-code` via Claude Code CLI, `codex` via
-Codex CLI). The workflow below is tuned for that team shape.
+This repo is a Claude Code plugin maintained by a solo maintainer
+working with two AI identities (`claude-code` via Claude Code CLI,
+`codex` via Codex CLI). The workflow below is tuned for that team
+shape.
 
 ## Prerequisites
 
@@ -15,7 +16,7 @@ Codex CLI). The workflow below is tuned for that team shape.
 ## Set up locally
 
 ```bash
-git clone https://gitea.tokyo.skyzhang.net/SkyLab/glm-plugin-cc.git
+git clone https://github.com/sky-zhang01/glm-plugin-cc.git
 cd glm-plugin-cc
 npm install   # no runtime deps, but installs dev tooling if any
 npm run hooks:install   # symlinks the pre-push hook into .git/hooks
@@ -75,15 +76,16 @@ checklist the CI replicates.
 
 When a PR is authored by one AI (`claude-code`), the other AI
 (`codex`) is expected to post an independent, challenging review in
-the comment thread before the human approver (`sky`) merges, and vice
-versa. This is a *soft* requirement: the `ai-quality-gate` workflow
-surfaces it as advisory, and `sky` may still merge with an explicit
-waiver in the PR comment. The goal is that two AI identities always
-cross-check each other's work before it lands on `main`.
+the comment thread before the maintainer merges, and vice versa.
+This is a *soft* requirement: the `ai-quality-gate` workflow
+surfaces it as advisory, and the maintainer may still merge with an
+explicit waiver in the PR comment. The goal is that two AI
+identities always cross-check each other's work before it lands on
+`main`.
 
 ### Approver
 
-`sky` is the only formal approver. `CODEOWNERS` encodes this.
+The repo maintainer is the only formal approver. See `CODEOWNERS`.
 
 ## Release process
 

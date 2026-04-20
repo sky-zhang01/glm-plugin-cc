@@ -1,7 +1,6 @@
 # CI System
 
 > Source of truth for what runs on every PR and tag, and why.
-> Last updated: 2026-04-21 (Bundle G rollout).
 
 ## Runtime
 
@@ -9,12 +8,12 @@ Two hosts share the same workflow files under `.github/workflows/`.
 
 | Host | Role | Runner |
 |------|------|--------|
-| gitea — `SkyLab/glm-plugin-cc` | primary repo | self-hosted `act_runner` on TrueNAS; reads `.github/workflows/` directly |
+| private primary | primary repo | self-hosted runner; reads `.github/workflows/` directly |
 | GitHub — `sky-zhang01/glm-plugin-cc` | public mirror | GitHub-hosted `ubuntu-latest` |
 
-There is no duplication. `act_runner` on gitea consumes the same
-YAML, so the PR-check / AI-quality-gate / release gates stay in
-parity across both hosts.
+There is no duplication. The self-hosted primary-repo runner consumes
+the same YAML as GitHub Actions, so the PR-check / AI-quality-gate /
+release gates stay in parity across both hosts.
 
 ## Workflow files
 
@@ -33,8 +32,9 @@ Mirrors `scripts/ci/check-all.sh`:
 ### `ai-quality-gate.yml`
 
 1. **static-invariants** — `bash scripts/ci/check-ai-quality-gate.sh`.
-   Each bug fixed during Bundles C / D3+ / E+ / F is encoded as a grep
-   invariant so a future AI pass cannot silently re-introduce it.
+   Each class of bug fixed during the v0.4.3 review passes is encoded
+   as a grep invariant so a future AI pass cannot silently re-introduce
+   it.
 2. **cross-ai-review-advisory** *(PR only, `continue-on-error`)* — node
    script `scripts/ci/check-cross-ai-review.mjs` pulls the PR comment
    thread via API; if the PR author is `claude-code` / `codex` and no
@@ -73,7 +73,7 @@ time when you are certain of what you are pushing.
 
 - Require PR — direct push to `main` rejected
 - Require `pr-check` + `ai-quality-gate/static-invariants` to pass
-- Require approval from `sky` (CODEOWNERS)
+- Require approval from the maintainer (see CODEOWNERS)
 - Dismiss stale approvals on new commits
 
 Configure / re-apply with:
@@ -113,7 +113,7 @@ scripts/setup/
   back silently. See `scripts/ci/check-ai-quality-gate.sh` for the
   current rule list.
 - **Cross-AI review as advisory, not blocker** — the human approver
-  (`sky`) retains the final call; the CI only surfaces when an AI PR
+  retains the final call; the CI only surfaces when an AI PR
   lands without counterpart review.
 - **Release gate separate from release action** — a release tag must
   pass the gate, but the publication itself stays manual to avoid
