@@ -1,5 +1,37 @@
 # Changelog
 
+## v0.4.1 — 2026-04-20
+
+Command-UX fix: `/glm:setup` and `/glm:status` were producing verbose
+Chinese-prose wrappers around the companion JSON output (the model
+added pre-picker narration, post-persist bulleted summaries, and
+reformatted Case-D state as a Markdown list). Codex-plugin-cc's
+equivalents just render stdout and move on. This release aligns with
+that: the command markdown now explicitly instructs the model to
+present stdout verbatim and adds no commentary.
+
+Also fixed the `.claude-plugin/marketplace.json` schema error that
+made `/plugin marketplace add https://github.com/sky-zhang01/glm-plugin-cc`
+fail on Claude Code 2.1.x: `"source": "."` was rejected as `Invalid
+input`; now uses `"./"` (matches `planning-with-files` and
+`everything-claude-code` conventions).
+
+### Changed
+
+- `commands/setup.md`: rewritten codex-parity terse (~35 lines vs 133).
+  Explicit "present stdout verbatim — no commentary / bullet summary /
+  Chinese restatement" rule so the model stops wrapping the JSON
+  report in extra prose.
+- `commands/status.md`: removed the "GLM calls are stateless HTTP
+  foreground …" preamble that codex `/codex:status` doesn't have.
+- `.claude-plugin/marketplace.json`: `source: "."` → `source: "./"`.
+
+### Not changed
+
+- No companion script changes; no auth / config shape changes; no
+  endpoint URL changes. Existing `~/.config/glm-plugin-cc/config.json`
+  keeps working without re-setup.
+
 ## v0.4.0 — 2026-04-20
 
 **Breaking auth change**: API key now persists to

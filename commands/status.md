@@ -7,9 +7,6 @@ allowed-tools: Bash(node:*)
 
 !`node "${CLAUDE_PLUGIN_ROOT}/scripts/glm-companion.mjs" status "$ARGUMENTS"`
 
-GLM calls are stateless HTTP foreground — this command shows only local
-job records for history / audit. There is no server-side polling.
-
 If the user did not pass a job ID:
 - Render the command output as a compact Markdown table of recent jobs.
 - Preserve job id, kind, status, duration, and summary.
