@@ -14,6 +14,12 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to validate (e.g. v0.4.3)'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -35,8 +41,10 @@ jobs:
 
       - name: Derive version from tag
         id: version
+        env:
+          DISPATCH_TAG: ${{ inputs.tag }}
         run: |
-          TAG="${GITHUB_REF_NAME:-}"
+          TAG="${DISPATCH_TAG:-$GITHUB_REF_NAME}"
           VERSION="${TAG#v}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
