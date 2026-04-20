@@ -1,9 +1,9 @@
 /**
  * GLM OpenAI-compatible client.
  *
- * GLM is stateless HTTP — no broker, no persistent sessions, no thread resume.
- * We keep the function surface aligned with the codex-plugin-cc scaffold so
- * the companion / render / job-control code can call us uniformly.
+ * GLM is stateless HTTP — no broker, no persistent sessions, no thread
+ * resume, no server-side turn state. Every request is an independent
+ * POST.
  *
  * Endpoint: ${base_url}/chat/completions
  *   base_url defaults to https://open.bigmodel.cn/api/paas/v4
@@ -30,7 +30,7 @@ const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000; // 15 min aligned with codex review g
 
 export const DEFAULT_CONTINUE_PROMPT =
   "Continue from the previous turn. Identify the next highest-value step and complete it.";
-export const TASK_THREAD_PREFIX = "GLM Companion Task";
+export const TASK_TITLE_PREFIX = "GLM Companion Task";
 
 const SERVICE_NAME = "claude_code_glm_plugin";
 
@@ -240,21 +240,21 @@ export function getSessionRuntimeStatus(env = process.env, cwd = process.cwd()) 
 }
 
 /**
- * Persistent task name is not applicable for GLM. Returned value is purely
- * cosmetic so the job record still has a title.
+ * Build a short human-readable title for a task job, derived from the
+ * first line of the prompt. Stored as `job.title` so `/glm:status`
+ * shows something more useful than the job id.
  */
-export function buildPersistentTaskThreadName(prompt) {
+export function buildTaskTitle(prompt) {
   const firstLine = String(prompt ?? "").split(/\r?\n/)[0].trim();
   const suffix = firstLine.length > 40 ? `${firstLine.slice(0, 40)}…` : firstLine || "(no prompt)";
-  return `${TASK_THREAD_PREFIX} · ${suffix}`;
+  return `${TASK_TITLE_PREFIX} · ${suffix}`;
 }
 
 /**
  * Send a review request. `prompt` is the full review prompt (the harness or
  * the command renderer composes it — we do not synthesize prompts here).
  *
- * Returns the same shape codex.runAppServerReview returns:
- *   { rawOutput, parsed, parseError, failureMessage, threadId, turnId, errorCode }
+ * Returns: { rawOutput, parsed, parseError, failureMessage, errorCode, reasoningSummary }
  */
 export async function runGlmReview(cwd, options = {}) {
   return runChatRequest(cwd, { ...options, expectJson: true });
@@ -404,8 +404,6 @@ async function runChatRequest(cwd, options = {}) {
 
     if (options.expectJson) {
       return parseStructuredOutput(rawOutput, {
-        threadId: null,
-        turnId: null,
         errorCode: null,
         reasoningSummary
       });
@@ -416,8 +414,6 @@ async function runChatRequest(cwd, options = {}) {
       parsed: null,
       parseError: null,
       failureMessage: null,
-      threadId: null,
-      turnId: null,
       errorCode: null,
       reasoningSummary
     };
@@ -484,8 +480,6 @@ function failureShape(message, errorCode, extra = {}) {
     parsed: null,
     parseError: null,
     failureMessage: message,
-    threadId: null,
-    turnId: null,
     errorCode,
     reasoningSummary: null,
     ...extra

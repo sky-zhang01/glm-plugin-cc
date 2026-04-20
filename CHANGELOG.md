@@ -2,20 +2,23 @@
 
 ## v0.4.3 — 2026-04-20
 
-Bug-fix release. **Twenty-two issues fixed + one simplify pass**
-across **three review passes plus a cleanup pass** — six in the first
-pass (arg parsing, review prompt pipeline, state/config corruption
-handling, template dispatch), seven in the second pass (setup
-resilience, dead-code pruning, job-file error UX, shipped-schema
-fail-closed, finding confidence rendering, dead target metadata, doc
-drift), nine in the third pass (symmetric status resilience, generic
-fs fail-closed, error-shadow fix, home-path redaction, test-coverage
-backfill), and a sixth-round simplify pass pruning dead codex-scaffold
-functions, a bogus `"Resume thread: null"` output branch, and duplicated
-error-formatting boilerplate. Version stays at 0.4.3 per user directive
-to keep the public sequence `0.4.2 → 0.4.3` continuous — the passes
-are recorded here as separate "Fixed (N pass)" / "Simplified (cleanup
-pass)" subsections so readers can diff them individually. The headline fix: pre-fix, every `/glm:review` and
+Bug-fix release. **Twenty-two issues fixed + two simplify passes**
+across **three review passes plus two cleanup passes** — six in the
+first pass (arg parsing, review prompt pipeline, state/config
+corruption handling, template dispatch), seven in the second pass
+(setup resilience, dead-code pruning, job-file error UX,
+shipped-schema fail-closed, finding confidence rendering, dead target
+metadata, doc drift), nine in the third pass (symmetric status
+resilience, generic fs fail-closed, error-shadow fix, home-path
+redaction, test-coverage backfill), and two final cleanup passes
+pruning dead codex-scaffold functions, a bogus `"Resume thread: null"`
+output branch, duplicated error-formatting boilerplate, an empty
+"GLM Session ID" table column, the thread/turn concept scaffolding
+throughout, and a ReferenceError Bundle E+ introduced in
+`pushJobDetails`. Version stays at 0.4.3 per user directive to keep
+the public sequence `0.4.2 → 0.4.3` continuous — the passes are
+recorded here as separate "Fixed (N pass)" / "Simplified (N pass)"
+subsections so readers can diff them individually. The headline fix: pre-fix, every `/glm:review` and
 `/glm:adversarial-review` call shipped an EMPTY repository context to
 GLM — the prompt template used `{{REVIEW_INPUT}}` / `{{TARGET_LABEL}}`
 / `{{USER_FOCUS}}` / `{{REVIEW_COLLECTION_GUIDANCE}}` while the
@@ -185,12 +188,15 @@ resolved without changing public API or config shape.
 - **CHANGELOG / release_card test-count typo**: second-pass section
   said "32 tests second-pass"; actual was 33. Corrected.
 
-### Simplified (cleanup pass)
+### Simplified (final cleanup pass)
 
 After the three hotfix passes landed, a review-only simplify scan by
 `pr-review-toolkit:code-simplifier` flagged a handful of opportunities
-that had accumulated as scar tissue. Four P1 items plus two P2 helper
-extractions applied without changing any user-visible behaviour.
+that had accumulated as scar tissue. Applied in two sub-passes: first
+the four P1 items plus two P2 helper extractions (Bundle E+), then a
+follow-up pass (Bundle F) that caught a ReferenceError Bundle E+ had
+introduced and finished the thread / resume scaffolding removal the
+simplify pass had only half-completed.
 
 - **`scripts/lib/render.mjs` — deleted the `"Resume thread: null"`
   output branch**. `renderStoredJobResult` declared
@@ -200,6 +206,9 @@ extractions applied without changing any user-visible behaviour.
   legacy job record that happened to carry a non-null `threadId` would
   have rendered literal `"Resume thread: null"` to the user.
   `formatResumeCommand` helper (always returns null) deleted with it.
+  (Note: the first simplify commit deleted the helper but missed a
+  second call site in `pushJobDetails` — see the follow-up bug fix
+  below.)
 - **`scripts/glm-companion.mjs` — removed two unused imports**
   (`listJobs` from `state.mjs`, `appendLogLine` from
   `tracked-jobs.mjs`). `npm run check` validates.
@@ -227,11 +236,57 @@ extractions applied without changing any user-visible behaviour.
   option to `buildStatusSnapshot` / `resolveCancelableJob`, but the
   receiving functions read session scoping from `options.env` via
   `filterJobsForCurrentSession → getCurrentSessionId`, never
-  `options.session_id`. `runCancel` now passes `{ env: process.env }`
-  so scoping actually reaches `filterJobsForCurrentSession` (a
-  latent correctness improvement — before this, cancel's session
-  scoping relied on process.env being inherited correctly down the
-  default path).
+  `options.session_id`. `runCancel` now passes `{ env: process.env }`.
+  (Note: this is code-intent cleanup, not a functional fix —
+  `getCurrentSessionId` already falls back to `process.env` if
+  `options.env` is missing, so both callers worked either way.)
+
+### Simplified (Bundle F — thread / resume scaffolding removed)
+
+Bundle E+ ran in review-only mode and the execution missed a live
+call site, introducing a ReferenceError. Bundle F fixes that and
+takes the opportunity to delete all remaining thread / resume
+scaffolding — every field was null-valued or always-empty in GLM
+because the bigmodel API is stateless HTTP.
+
+- **🚨 ReferenceError fix**: `scripts/lib/render.mjs:142` was still
+  calling `formatResumeCommand(job)` after Bundle E+ deleted the
+  function. Existing tests missed it because the for-loop in
+  `pushJobDetails` never entered with a real job during testing.
+  Any user running `/glm:status <job-id>` or `/glm:status` with an
+  active job would have hit `ReferenceError: formatResumeCommand is
+  not defined`. Fix: removed the call + the two "Resume thread: …" /
+  "GLM thread ref: …" output lines from `pushJobDetails`.
+- **`scripts/lib/render.mjs` — deleted the "GLM Session ID" column**
+  from `appendActiveJobsTable`. Header said "GLM Session ID" but the
+  cell read `job.threadId ?? ""` — always empty for GLM. Column
+  dropped entirely (7 columns → 6) so `/glm:status` no longer shows
+  a permanently empty column.
+- **`scripts/lib/render.mjs` — simplified `renderStoredJobResult`**.
+  The Bundle D3+ version kept a `threadRefSuffix` that only fired if
+  a legacy threadId happened to be stored; now the function just
+  returns rendered / raw output without any thread-ref scaffolding.
+- **`scripts/lib/tracked-jobs.mjs` — removed `threadId` / `turnId`
+  from the progress-event pipeline**: `normalizeProgressEvent` no
+  longer normalizes the two fields, `createJobProgressUpdater` no
+  longer tracks `lastThreadId` / `lastTurnId` (the tracking was
+  always a no-op because the normalized values were always null),
+  `runTrackedJob` no longer writes `threadId`/`turnId` into
+  `writeJobFile` / `upsertJob` payloads.
+- **`scripts/lib/glm-client.mjs` — removed `threadId: null` /
+  `turnId: null` from three response shapes** (successful JSON
+  result, successful raw result, `failureShape`). These fields were
+  hard-coded null to "match the codex scaffold shape" but every
+  GLM consumer read them as null anyway.
+- **`scripts/lib/glm-client.mjs` — renamed
+  `buildPersistentTaskThreadName` → `buildTaskTitle`**, and
+  `TASK_THREAD_PREFIX` → `TASK_TITLE_PREFIX`. The function never
+  built a "persistent thread name" — it built a short job title
+  from the first line of the prompt. Name now matches behaviour.
+- **`scripts/lib/glm-client.mjs` — module docstring rewrite**:
+  dropped the "keep the function surface aligned with the
+  codex-plugin-cc scaffold" framing. GLM is stateless HTTP — stating
+  the positive fact is clearer than a historical alignment note.
 
 ### Added
 
@@ -298,8 +353,16 @@ extractions applied without changing any user-visible behaviour.
   `formatUserFacingError` helper (pulls `.message` from Error
   instances + redacts $HOME; falls back to `String()` for
   non-Error throws).
-- **Total**: 0 tests in v0.4.2 → 25 tests first-pass → 33 tests
-  second-pass → 56 tests third-pass → 58 tests post-simplify
+- **`tests/job-render.test.mjs`** (Bundle F, new) — 7 tests for
+  the four renderers that walk job records
+  (`renderJobStatusReport`, `renderStatusReport` with running /
+  finished / recent slots, `renderStoredJobResult` with and without
+  legacy threadId, `renderCancelReport`). These exercise the exact
+  path that Bundle E+ broke (`pushJobDetails` calling the deleted
+  `formatResumeCommand`) so the same class of regression fails
+  loudly next time.
+- **Total**: 0 tests in v0.4.2 → 25 first-pass → 33 second-pass
+  → 56 third-pass → 58 after Bundle E+ → 65 after Bundle F
   (all pass).
 
 ### Codex scaffold alignment

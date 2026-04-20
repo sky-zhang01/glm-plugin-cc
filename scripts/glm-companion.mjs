@@ -8,7 +8,7 @@ import { parseArgs, splitRawArgumentString } from "./lib/args.mjs";
 import { formatUserFacingError } from "./lib/fs.mjs";
 import {
   DEFAULT_CONTINUE_PROMPT,
-  buildPersistentTaskThreadName,
+  buildTaskTitle,
   getGlmAuthStatus,
   getGlmAvailability,
   getSessionRuntimeStatus,
@@ -423,7 +423,7 @@ async function runTask(argv, { rescueMode }) {
   const jobRecord = createJobRecord({
     id: jobId,
     kind: rescueMode ? "rescue" : "task",
-    title: rescueMode ? "GLM rescue" : buildPersistentTaskThreadName(prompt),
+    title: rescueMode ? "GLM rescue" : buildTaskTitle(prompt),
     status: "running",
     sessionId: currentSessionId(),
     startedAt: nowIso(),

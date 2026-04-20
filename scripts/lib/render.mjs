@@ -109,15 +109,15 @@ function escapeMarkdownCell(value) {
 
 function appendActiveJobsTable(lines, jobs) {
   lines.push("Active jobs:");
-  lines.push("| Job | Kind | Status | Phase | Elapsed | GLM Session ID | Summary | Actions |");
-  lines.push("| --- | --- | --- | --- | --- | --- | --- | --- |");
+  lines.push("| Job | Kind | Status | Phase | Elapsed | Summary | Actions |");
+  lines.push("| --- | --- | --- | --- | --- | --- | --- |");
   for (const job of jobs) {
     const actions = [`/glm:status ${job.id}`];
     if (job.status === "queued" || job.status === "running") {
       actions.push(`/glm:cancel ${job.id}`);
     }
     lines.push(
-      `| ${escapeMarkdownCell(job.id)} | ${escapeMarkdownCell(job.kindLabel)} | ${escapeMarkdownCell(job.status)} | ${escapeMarkdownCell(job.phase ?? "")} | ${escapeMarkdownCell(job.elapsed ?? "")} | ${escapeMarkdownCell(job.threadId ?? "")} | ${escapeMarkdownCell(job.summary ?? "")} | ${actions.map((action) => `\`${action}\``).join("<br>")} |`
+      `| ${escapeMarkdownCell(job.id)} | ${escapeMarkdownCell(job.kindLabel)} | ${escapeMarkdownCell(job.status)} | ${escapeMarkdownCell(job.phase ?? "")} | ${escapeMarkdownCell(job.elapsed ?? "")} | ${escapeMarkdownCell(job.summary ?? "")} | ${actions.map((action) => `\`${action}\``).join("<br>")} |`
     );
   }
 }
@@ -135,13 +135,6 @@ function pushJobDetails(lines, job, options = {}) {
   }
   if (options.showDuration && job.duration) {
     lines.push(`  Duration: ${job.duration}`);
-  }
-  if (job.threadId) {
-    lines.push(`  GLM thread ref: ${job.threadId}`);
-  }
-  const resumeCommand = formatResumeCommand(job);
-  if (resumeCommand) {
-    lines.push(`  Resume thread: ${resumeCommand}`);
   }
   if (job.logFile && options.showLog) {
     lines.push(`  Log: ${job.logFile}`);
@@ -437,17 +430,12 @@ export function renderJobStatusReport(job) {
 }
 
 export function renderStoredJobResult(job, storedJob) {
-  // GLM is stateless HTTP — no resume equivalent, so we only emit the
-  // thread ref (when one happens to be stored on a legacy record) and
-  // skip the "Resume thread: …" line that the original codex scaffold
-  // carried. Pre-cleanup, that line read literal "null" whenever
-  // threadId was set.
-  const threadId = storedJob?.threadId ?? job.threadId ?? null;
-  const threadRefSuffix = threadId ? `\nGLM thread ref: ${threadId}\n` : "";
-
+  // GLM is stateless HTTP — there are no threads / turns / resume
+  // semantics, so we just emit whatever rendered content or raw output
+  // was captured. The threadId / turnId scaffolding that the codex
+  // scaffold carried was removed in the final v0.4.3 cleanup pass.
   if (isStructuredReviewStoredResult(storedJob) && storedJob?.rendered) {
-    const output = storedJob.rendered.endsWith("\n") ? storedJob.rendered : `${storedJob.rendered}\n`;
-    return threadId ? `${output}${threadRefSuffix}` : output;
+    return storedJob.rendered.endsWith("\n") ? storedJob.rendered : `${storedJob.rendered}\n`;
   }
 
   const rawOutput =
@@ -455,13 +443,11 @@ export function renderStoredJobResult(job, storedJob) {
     (typeof storedJob?.result?.glm?.stdout === "string" && storedJob.result.glm.stdout) ||
     "";
   if (rawOutput) {
-    const output = rawOutput.endsWith("\n") ? rawOutput : `${rawOutput}\n`;
-    return threadId ? `${output}${threadRefSuffix}` : output;
+    return rawOutput.endsWith("\n") ? rawOutput : `${rawOutput}\n`;
   }
 
   if (storedJob?.rendered) {
-    const output = storedJob.rendered.endsWith("\n") ? storedJob.rendered : `${storedJob.rendered}\n`;
-    return threadId ? `${output}${threadRefSuffix}` : output;
+    return storedJob.rendered.endsWith("\n") ? storedJob.rendered : `${storedJob.rendered}\n`;
   }
 
   const lines = [
@@ -470,10 +456,6 @@ export function renderStoredJobResult(job, storedJob) {
     `Job: ${job.id}`,
     `Status: ${job.status}`
   ];
-
-  if (threadId) {
-    lines.push(`GLM thread ref: ${threadId}`);
-  }
 
   if (job.summary) {
     lines.push(`Summary: ${job.summary}`);
