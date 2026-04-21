@@ -470,7 +470,7 @@ All findings treated this as a pre-install bar, not polish.
 
 ```
 /plugin marketplace add https://github.com/sky-zhang01/glm-plugin-cc
-/plugin install glm@sky-zhang01/glm-plugin-cc
+/plugin install glm@glm-plugin-cc
 ```
 
 ## v0.3.3 — 2026-04-20
