@@ -101,10 +101,10 @@ function main() {
   console.log("====================");
   console.log("");
   console.log(
-    "fixture | temp | top_p | seed | think | N | schema | echo | invalid | cite_acc (±sd) | false_file | latency_ms (±sd) | PASS?"
+    "fixture | temp | top_p | seed | think | N | schema | empty_str | echo | invalid | cite_acc (±sd) | false_file | latency_ms (±sd) | PASS?"
   );
   console.log(
-    "--------|------|-------|------|-------|---|--------|------|---------|----------------|-----------|-----------------|------"
+    "--------|------|-------|------|-------|---|--------|-----------|------|---------|----------------|-----------|-----------------|------"
   );
 
   const summaryRows = [];
@@ -112,6 +112,11 @@ function main() {
     const [fixture, temp, topP, seed, thinking] = key.split("|");
     const N = rows.length;
     const sc = mean(rows.map((r) => Number(r.schema_compliance)));
+    // schema_empty_string column may be absent in older CSVs; treat NaN as 0
+    const emptyStr = mean(rows.map((r) => {
+      const v = Number(r.schema_empty_string);
+      return Number.isFinite(v) ? v : 0;
+    }));
     const se = mean(rows.map((r) => Number(r.schema_echo)));
     const is_ = mean(rows.map((r) => Number(r.invalid_shape)));
     const caMean = mean(rows.map((r) => Number(r.citation_accuracy)));
@@ -120,6 +125,10 @@ function main() {
     const latMean = mean(rows.map((r) => Number(r.latency_ms)));
     const latStd = stdev(rows.map((r) => Number(r.latency_ms)));
 
+    // Success criteria (issue #7): schema_compliance is aligned with
+    // classifyReviewPayload (type-valid). schema_empty_string is tracked
+    // but does NOT block PASS — empty-content payloads are a content-
+    // quality concern, not a plugin-level validity failure.
     const passes =
       sc >= 0.95 &&
       se === 0 &&
@@ -135,6 +144,7 @@ function main() {
         thinking,
         N,
         sc.toFixed(2),
+        emptyStr.toFixed(2),
         se.toFixed(2),
         is_.toFixed(2),
         `${caMean.toFixed(2)} (±${caStd.toFixed(2)})`,
@@ -143,7 +153,7 @@ function main() {
         passes ? "YES" : "no"
       ].join(" | ")
     );
-    summaryRows.push({ key, passes, sc, se, caMean, ff });
+    summaryRows.push({ key, passes, sc, emptyStr, se, caMean, ff });
   }
 
   console.log("");

@@ -48,6 +48,7 @@ const CSV_HEADER = [
   "thinking",
   "run_index",
   "schema_compliance",
+  "schema_empty_string",
   "schema_echo",
   "invalid_shape",
   "findings_count",
@@ -57,8 +58,14 @@ const CSV_HEADER = [
   "output_tokens",
   "latency_ms",
   "error_code",
-  "correction_attempted"
+  "correction_attempted",
+  "raw_payload_path"
 ].join(",");
+
+// Cap raw-output snippet size so sidecar files stay bounded
+// (~10-30 KB each). rawOutput in practice is bounded by the companion
+// already; this is just defense.
+const RAW_OUTPUT_HEAD_BYTES = 8192;
 
 function parseArgs(argv) {
   const out = {};
@@ -151,7 +158,21 @@ function csvEscape(value) {
   return s;
 }
 
-function runOne({ fixtureId, base, temperature, topP, seed, thinking, runIndex, groundTruth }) {
+function buildPayloadSidecarPath(outPath, fixtureId, temperature, topP, seed, runIndex) {
+  const dir = path.join(path.dirname(outPath), "payloads");
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  const cellTag = [
+    fixtureId,
+    `t${temperature ?? "unset"}`,
+    `tp${topP ?? "unset"}`,
+    `s${seed ?? "unset"}`,
+    `r${runIndex}`,
+    new Date().toISOString().replace(/[:.]/g, "-")
+  ].join("_");
+  return path.join(dir, `${cellTag}.json`);
+}
+
+function runOne({ fixtureId, base, temperature, topP, seed, thinking, runIndex, groundTruth, outPath }) {
   const companionArgs = [
     COMPANION,
     "adversarial-review",
@@ -176,12 +197,25 @@ function runOne({ fixtureId, base, temperature, topP, seed, thinking, runIndex, 
   });
   const latencyMs = Date.now() - started;
 
+  const sidecarPath = buildPayloadSidecarPath(outPath, fixtureId, temperature, topP, seed, runIndex);
+  const sidecarRelative = path.relative(path.dirname(outPath), sidecarPath);
+
   let payload;
   try {
     payload = JSON.parse(proc.stdout);
-  } catch {
+  } catch (err) {
+    // Persist raw stdout/stderr so the failure is inspectable later.
+    writeFileSync(sidecarPath, JSON.stringify({
+      error: "COMPANION_NON_JSON",
+      parseError: err?.message ?? String(err),
+      stdoutHead: String(proc.stdout || "").slice(0, RAW_OUTPUT_HEAD_BYTES),
+      stderrHead: String(proc.stderr || "").slice(0, RAW_OUTPUT_HEAD_BYTES),
+      exitCode: proc.status,
+      signal: proc.signal
+    }, null, 2));
     return {
       schema_compliance: 0,
+      schema_empty_string: 0,
       schema_echo: 0,
       invalid_shape: 0,
       findings_count: 0,
@@ -191,16 +225,37 @@ function runOne({ fixtureId, base, temperature, topP, seed, thinking, runIndex, 
       output_tokens: 0,
       latency_ms: latencyMs,
       error_code: "COMPANION_NON_JSON",
-      correction_attempted: 0
+      correction_attempted: 0,
+      raw_payload_path: sidecarRelative
     };
   }
 
   const result = payload?.result || {};
   const parsed = result?.parsed;
+  const rawOutput = typeof result?.rawOutput === "string" ? result.rawOutput : "";
+  const reasoningSummary = typeof result?.reasoningSummary === "string" ? result.reasoningSummary : "";
   const errorCode = result?.errorCode || "";
   const correctionAttempted = result?.correctionAttempted ? 1 : 0;
 
-  const schemaCompliance = parsed && parsed.verdict && parsed.summary && Array.isArray(parsed.findings) ? 1 : 0;
+  // schema_compliance: type-valid per the plugin's own classifyReviewPayload
+  // (typeof verdict === "string", typeof summary === "string",
+  // Array.isArray(findings)). Empty strings pass this check — that's the
+  // plugin's actual validity judgment.
+  const typesValid =
+    parsed !== null &&
+    typeof parsed === "object" &&
+    !Array.isArray(parsed) &&
+    typeof parsed.verdict === "string" &&
+    typeof parsed.summary === "string" &&
+    Array.isArray(parsed.findings);
+  // schema_empty_string: separate signal for the case where types are
+  // valid but verdict or summary is literally the empty string. Empty
+  // content isn't a schema failure per classifyReviewPayload but also
+  // isn't useful review output — tracking it independently lets us
+  // distinguish model degenerate states from harness strictness artifacts.
+  const hasEmptyContent = typesValid && (parsed.verdict === "" || parsed.summary === "");
+  const schemaCompliance = typesValid ? 1 : 0;
+  const schemaEmptyString = hasEmptyContent ? 1 : 0;
   const schemaEcho = errorCode === "SCHEMA_ECHO" ? 1 : 0;
   const invalidShape = errorCode === "INVALID_SHAPE" ? 1 : 0;
   const findings = Array.isArray(parsed?.findings) ? parsed.findings : [];
@@ -212,8 +267,41 @@ function runOne({ fixtureId, base, temperature, topP, seed, thinking, runIndex, 
   const inputTokens = result?.usage?.prompt_tokens ?? 0;
   const outputTokens = result?.usage?.completion_tokens ?? 0;
 
+  // Persist parsed payload + rawOutput head + metadata for offline audit.
+  // Saves the full parsed JSON (validated shape, bounded size) plus a
+  // capped rawOutput slice (defense against pathological model output).
+  writeFileSync(sidecarPath, JSON.stringify({
+    cell: {
+      fixtureId,
+      temperature: temperature ?? null,
+      topP: topP ?? null,
+      seed: seed ?? null,
+      thinking,
+      runIndex
+    },
+    metrics: {
+      schema_compliance: schemaCompliance,
+      schema_empty_string: schemaEmptyString,
+      schema_echo: schemaEcho,
+      invalid_shape: invalidShape,
+      findings_count: findings.length,
+      citation_accuracy: Number(citation.accuracy.toFixed(3)),
+      citation_false_file_hits: citation.falseFileHits,
+      latency_ms: latencyMs,
+      error_code: errorCode
+    },
+    parsed,
+    rawOutputHead: rawOutput.slice(0, RAW_OUTPUT_HEAD_BYTES),
+    rawOutputTruncated: rawOutput.length > RAW_OUTPUT_HEAD_BYTES,
+    reasoningSummaryHead: reasoningSummary.slice(0, RAW_OUTPUT_HEAD_BYTES / 2),
+    errorCode,
+    correctionAttempted: Boolean(result?.correctionAttempted),
+    capturedAt: new Date().toISOString()
+  }, null, 2));
+
   return {
     schema_compliance: schemaCompliance,
+    schema_empty_string: schemaEmptyString,
     schema_echo: schemaEcho,
     invalid_shape: invalidShape,
     findings_count: findings.length,
@@ -223,7 +311,8 @@ function runOne({ fixtureId, base, temperature, topP, seed, thinking, runIndex, 
     output_tokens: outputTokens,
     latency_ms: latencyMs,
     error_code: errorCode,
-    correction_attempted: correctionAttempted
+    correction_attempted: correctionAttempted,
+    raw_payload_path: sidecarRelative
   };
 }
 
@@ -246,7 +335,7 @@ async function main() {
 
   for (let i = 1; i <= runs; i++) {
     process.stdout.write(`  run ${i}/${runs} ... `);
-    const metrics = runOne({ fixtureId, base, temperature, topP, seed, thinking, runIndex: i, groundTruth });
+    const metrics = runOne({ fixtureId, base, temperature, topP, seed, thinking, runIndex: i, groundTruth, outPath });
     const row = [
       new Date().toISOString(),
       fixtureId,
@@ -256,6 +345,7 @@ async function main() {
       thinking,
       i,
       metrics.schema_compliance,
+      metrics.schema_empty_string,
       metrics.schema_echo,
       metrics.invalid_shape,
       metrics.findings_count,
@@ -265,10 +355,12 @@ async function main() {
       metrics.output_tokens,
       metrics.latency_ms,
       metrics.error_code,
-      metrics.correction_attempted
+      metrics.correction_attempted,
+      metrics.raw_payload_path
     ].map(csvEscape).join(",");
     appendFileSync(outPath, row + "\n");
-    console.log(`schema=${metrics.schema_compliance} echo=${metrics.schema_echo} cite=${metrics.citation_accuracy} err=${metrics.error_code || "ok"} ${metrics.latency_ms}ms`);
+    const emptyFlag = metrics.schema_empty_string ? " [empty-str]" : "";
+    console.log(`schema=${metrics.schema_compliance}${emptyFlag} echo=${metrics.schema_echo} cite=${metrics.citation_accuracy} err=${metrics.error_code || "ok"} ${metrics.latency_ms}ms`);
   }
 }
 
