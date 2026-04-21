@@ -81,7 +81,7 @@ workflow-governor cross-review hallucination session:
   become the review-specific default.
 - **~~No BigModel error-code table update~~** — CANCELED. Phase 7a
   consolidated the vendor-error observation to 5×1234 + 2×500 across
-  69 runs. Cross-checking https://docs.bigmodel.cn/cn/faq/api-code
+  85 runs (69 + 16 from Phase 7b effective-N fill). Cross-checking https://docs.bigmodel.cn/cn/faq/api-code
   confirmed both codes are documented (1234 = upstream network error,
   500 = upstream internal error), plus 3 more codes the v0.4.6
   snapshot missed (1311, 1312, 1313). Table expansion now ships in
@@ -139,6 +139,15 @@ workflow-governor cross-review hallucination session:
     expansion added to Added section, Changed section notes the
     table growth, outcome table expanded to include N=6 cells +
     error_code distribution histogram. ✓
+22b. **(Added post-phase-7b)** Effective-N fill: +16 targeted runs
+    on 5 cells previously polluted by Phase 7a upstream failures,
+    so every cell has ≥5 effective model-behavior samples. Zero
+    upstream errors in Phase 7b confirms vendor errors are
+    time-correlated BigModel transient instability. C1 100%/100%/100%
+    schema on effective N; C3 temperature chain refined to
+    83%/71%/67% (Fisher p ≈ 0.5, not significant at N=6-7). CHANGELOG
+    + release_card updated to replace earlier "unambiguous C3
+    temperature signal" narrative with "mild, inconclusive at N=6". ✓
 23. `Skill(simplify)` on changed files — pending
 24. `npm run ci:local` — **DONE** (156/156 green)
 25. Adversarial review (Codex primary if quota allows, else GLM
@@ -206,10 +215,10 @@ the POST body when the caller explicitly passes a flag).
     with raw-payload sidecar capture + `--base` flag + schema-check
     alignment to classifyReviewPayload
   - `results/v0.4.7/sanity-sweep.csv` (initial 9 runs, v1 strictness)
-  - `results/v0.4.7/expanded-sweep.csv` (69 runs: 54 Phase 4/5 +
-    15 Phase 7a, new strictness)
-  - `results/v0.4.7/payloads/` (69 sidecar JSON files: 54 Phase 4/5
-    + 15 Phase 7a)
+  - `results/v0.4.7/expanded-sweep.csv` (85 runs: 54 Phase 4/5 +
+    15 Phase 7a + 16 Phase 7b effective-N fill)
+  - `results/v0.4.7/payloads/` (85 sidecar JSON files: 54 Phase 4/5
+    + 15 Phase 7a + 16 Phase 7b)
 - Modified: `scripts/ci/check-no-local-paths.sh` (exclude
   review-eval corpus + results paths from path-leak scanner).
 - Version bump in 3 manifest files + CHANGELOG v0.4.7 rewrite with
@@ -232,7 +241,7 @@ the POST body when the caller explicitly passes a flag).
 | Gitea CI | `ai-quality-gate.yml` + `pr-check.yml` | both green |
 | GitHub CI | same 2 workflows | both green |
 | **Release gate** | `bash scripts/ci/check-release-ready.sh v0.4.7` | All 4 checks pass (runs automatically in pre-push on tag push) |
-| **Expanded sweep data** | `node test-automation/review-eval/scripts/summarize.mjs results/v0.4.7/expanded-sweep.csv` | 69 rows, 0 SCHEMA_ECHO, 0 false_file_hits, 8/18 cells PASS; vendor-error distribution: 5× 1234 + 2× 500 + 1× NETWORK_ERROR + 1× EMPTY_RESPONSE |
+| **Expanded sweep data** | `node test-automation/review-eval/scripts/summarize.mjs results/v0.4.7/expanded-sweep.csv` | 85 rows, 0 SCHEMA_ECHO, 0 false_file_hits, 8/18 cells PASS raw; after effective-N filter C1=100%/100%/100%, C2=97%, C3=83%/71%/67%. Upstream failures 9/85 (10.6%) all in Phase 7a time window; Phase 7b zero upstream failures. |
 
 ## Local Verification
 

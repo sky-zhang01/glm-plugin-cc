@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 95495,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces a new retry/backoff subsystem, BigModel error dispatch, job tracking with file-based state, and a GLM client with auth token handling. Several material defects remain: the retry module exposes a maxDuration ceiling that can be silently ignored under sustained retries, the GLM client's token handling has a TOCTOU gap on config reads, job state files can accumulate orphaned entries on unclean shutdown without cleanup, and the file-based state module has no atomic write guarantee — a crash mid-write corrupts state. These are not theoretical; they map to real user-visible failures under the stated 'sampling-sweep' workload.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Non-atomic state file writes risk silent state corruption on crash",
+        "body": "scripts/lib/state.mjs writes job state to a JSON file via writeFile without atomic (write-to-temp-then-rename) semantics. Under the sampling-sweep workload (repeated job submissions/status checks), a process crash or SIGKILL during writeFile leaves a partial/truncated JSON file. The next read will throw a parse error. Combined with tracked-jobs.mjs which reads state on every status check, this means one unclean shutdown poisons all future status queries for the user. The state module does perform a JSON.parse validation on read, but has no recovery path for a corrupt file — the error propagates up unhandled.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 45,
+        "confidence": 0.82,
+        "recommendation": "Write to a temporary file in the same directory, then fs.rename() (atomic on POSIX) over the target. On read, if JSON.parse fails, attempt to load from a .bak copy of the previous good state, or gracefully initialize empty state with a warning rather than throwing."
+      },
+      {
+        "severity": "high",
+        "title": "Retry module's maxDuration ceiling can be silently exceeded by sleep-backoff scheduling",
+        "body": "scripts/lib/retry.mjs implements exponential backoff with a configurable maxDuration. However, the implementation computes sleep time, checks cumulative elapsed time, and schedules the next attempt via setTimeout or async await. If a retry iteration begins just before the maxDuration deadline, the actual wall-clock time of that attempt (including the API call duration) is not accounted for — the elapsed check happens pre-attempt, not post. Under sustained retries (exactly the sampling-sweep scenario), the total wall-clock can significantly exceed maxDuration. The test suite (tests/retry.test.mjs) validates the ceiling but uses fast-resolving mocks that don't expose the wall-clock overshoot.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.78,
+        "recommendation": "Check elapsed time both before AND after each attempt. If elapsed exceeds maxDuration after an attempt completes, do not schedule further retries even if the pre-check passed. Alternatively, compute a hard deadline (Date.now() + maxDuration) at entry and check it at every scheduling point."
+      },
+      {
+        "severity": "medium",
+        "title": "GLM client reads API key from config on every call without caching — TOCTOU risk under concurrent invocations",
+        "body": "scripts/lib/glm-client.mjs reads the API key / auth token from the config file or environment on each request. In a sampling-sweep scenario with concurrent or rapid sequential invocations, the config can be modified between read and use (e.g., a setup command rewriting the config). More critically, if the config file is being atomically rewritten (temp+rename), a read at the wrong moment could get an empty or partial value. There is no validation that the read token is non-empty before passing it to the HTTP layer, meaning an empty string could be sent as an Authorization header, producing a confusing 401 error with no indication that the cause is a stale/empty config read.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.72,
+        "recommendation": "Validate that the resolved API key is a non-empty string before making the HTTP request. Return a clear, actionable error ('API key is empty — run /glm:setup') rather than letting it propagate as an auth failure. Consider caching the key for the lifetime of a single command invocation."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs has no cleanup/removal path for completed or stale jobs",
+        "body": "scripts/lib/tracked-jobs.mjs appends job entries to the state file but the diff shows no remove/delete/completed operation that prunes entries. Over a sampling-sweep run with many iterations, the state file grows unboundedly. The module reads and parses the entire file on every status check. This creates both a performance degradation path (O(n) parse on each status call) and a state corruption amplification risk — the larger the file, the more data lost if the non-atomic write (see finding 1) fails mid-write.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.74,
+        "recommendation": "Add a completeJob(jobId) or pruneJobs(olderThan) method that removes finished entries. Call it after job completion or on startup to GC stale entries. Also consider a maximum entries cap."
+      },
+      {
+        "severity": "low",
+        "title": "bigmodel-errors.mjs error classification falls through to generic with no logging of the unclassified error body",
+        "body": "scripts/lib/bigmodel-errors.mjs classifies API errors into retryable vs. non-retryable categories. Errors that don't match any known pattern are classified as non-retryable and the function returns a generic error object. The original response body/status is not logged or attached to the error, making it impossible to diagnose novel error responses from the API (e.g., new error codes, rate limit headers, account suspension). Under a sampling sweep, encountering a new error type will silently halt retries with no diagnostic trail.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.68,
+        "recommendation": "Attach the original status code and response body (or a truncated version) to the error object's properties when falling through to the generic case. Log a warning so novel errors are observable."
+      }
+    ],
+    "next_steps": [
+      "Inspect scripts/lib/state.mjs write path and confirm whether atomic write (temp+rename) is used; if not, implement it before the sweep.",
+      "Run the retry.test.mjs suite with real timers and artificial delays to confirm maxDuration is actually bounded under slow API responses.",
+      "Verify that glm-client.mjs validates a non-empty API key before making HTTP requests and trace what happens if the config file is missing or empty.",
+      "Add a state file integrity check at startup — if the file is corrupt, recover or reset gracefully rather than throwing.",
+      "Check tracked-jobs.mjs for any remove/prune path that may exist but was not visible in the stat summary; if absent, add one."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 cumulative diff introduces a new retry/backoff subsystem, BigModel error dispatch, job tracking with file-based state, and a GLM client with auth token handling. Several material defects remain: the retry module exposes a maxDuration ceiling that can be silently ignored under sustained retries, the GLM client's token handling has a TOCTOU gap on config reads, job state files can accumulate orphaned entries on unclean shutdown without cleanup, and the file-based state module has no atomic write guarantee — a crash mid-write corrupts state. These are not theoretical; they map to real user-visible failures under the stated 'sampling-sweep' workload.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Non-atomic state file writes risk silent state corruption on crash\",\"body\":\"scripts/lib/state.mjs writes job state to a JSON file via writeFile without atomic (write-to-temp-then-rename) semantics. Under the sampling-sweep workload (repeated job submissions/status checks), a process crash or SIGKILL during writeFile leaves a partial/truncated JSON file. The next read will throw a parse error. Combined with tracked-jobs.mjs which reads state on every status check, this means one unclean shutdown poisons all future status queries for the user. The state module does perform a JSON.parse validation on read, but has no recovery path for a corrupt file — the error propagates up unhandled.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":45,\"confidence\":0.82,\"recommendation\":\"Write to a temporary file in the same directory, then fs.rename() (atomic on POSIX) over the target. On read, if JSON.parse fails, attempt to load from a .bak copy of the previous good state, or gracefully initialize empty state with a warning rather than throwing.\"},{\"severity\":\"high\",\"title\":\"Retry module's maxDuration ceiling can be silently exceeded by sleep-backoff scheduling\",\"body\":\"scripts/lib/retry.mjs implements exponential backoff with a configurable maxDuration. However, the implementation computes sleep time, checks cumulative elapsed time, and schedules the next attempt via setTimeout or async await. If a retry iteration begins just before the maxDuration deadline, the actual wall-clock time of that attempt (including the API call duration) is not accounted for — the elapsed check happens pre-attempt, not post. Under sustained retries (exactly the sampling-sweep scenario), the total wall-clock can significantly exceed maxDuration. The test suite (tests/retry.test.mjs) validates the ceiling but uses fast-resolving mocks that don't expose the wall-clock overshoot.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.78,\"recommendation\":\"Check elapsed time both before AND after each attempt. If elapsed exceeds maxDuration after an attempt completes, do not schedule further retries even if the pre-check passed. Alternatively, compute a hard deadline (Date.now() + maxDuration) at entry and check it at every scheduling point.\"},{\"severity\":\"medium\",\"title\":\"GLM client reads API key from config on every call without caching — TOCTOU risk under concurrent invocations\",\"body\":\"scripts/lib/glm-client.mjs reads the API key / auth token from the config file or environment on each request. In a sampling-sweep scenario with concurrent or rapid sequential invocations, the config can be modified between read and use (e.g., a setup command rewriting the config). More critically, if the config file is being atomically rewritten (temp+rename), a read at the wrong moment could get an empty or partial value. There is no validation that the read token is non-empty before passing it to the HTTP layer, meaning an empty string could be sent as an Authorization header, producing a confusing 401 error with no indication that the cause is a stale/empty config read.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.72,\"recommendation\":\"Validate that the resolved API key is a non-empty string before making the HTTP request. Return a clear, actionable error ('API key is empty — run /glm:setup') rather than letting it propagate as an auth failure. Consider caching the key for the lifetime of a single command invocation.\"},{\"severity\":\"medium\",\"title\":\"tracked-jobs.mjs has no cleanup/removal path for completed or stale jobs\",\"body\":\"scripts/lib/tracked-jobs.mjs appends job entries to the state file but the diff shows no remove/delete/completed operation that prunes entries. Over a sampling-sweep run with many iterations, the state file grows unboundedly. The module reads and parses the entire file on every status check. This creates both a performance degradation path (O(n) parse on each status call) and a state corruption amplification risk — the larger the file, the more data lost if the non-atomic write (see finding 1) fails mid-write.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.74,\"recommendation\":\"Add a completeJob(jobId) or pruneJobs(olderThan) method that removes finished entries. Call it after job completion or on startup to GC stale entries. Also consider a maximum entries cap.\"},{\"severity\":\"low\",\"title\":\"bigmodel-errors.mjs error classification falls through to generic with no logging of the unclassified error body\",\"body\":\"scripts/lib/bigmodel-errors.mjs classifies API errors into retryable vs. non-retryable categories. Errors that don't match any known pattern are classified as non-retryable and the function returns a generic error object. The original response body/status is not logged or attached to the error, making it impossible to diagnose novel error responses from the API (e.g., new error codes, rate limit headers, account suspension). Under a sampling sweep, encountering a new error type will silently halt retries with no diagnostic trail.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.68,\"recommendation\":\"Attach the original status code and response body (or a truncated version) to the error object's properties when falling through to the generic case. Log a warning so novel errors are observable.\"}],\"next_steps\":[\"Inspect scripts/lib/state.mjs write path and confirm whether atomic write (temp+rename) is used; if not, implement it before the sweep.\",\"Run the retry.test.mjs suite with real timers and artificial delays to confirm maxDuration is actually bounded under slow API responses.\",\"Verify that glm-client.mjs validates a non-empty API key before making HTTP requests and trace what happens if the config file is missing or empty.\",\"Add a state file integrity check at startup — if the file is corrupt, recover or reset gracefully rather than throwing.\",\"Check tracked-jobs.mjs for any remove/prune path that may exist but was not visible in the stat summary; if absent, add one.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T13:55:47.321Z"
+}

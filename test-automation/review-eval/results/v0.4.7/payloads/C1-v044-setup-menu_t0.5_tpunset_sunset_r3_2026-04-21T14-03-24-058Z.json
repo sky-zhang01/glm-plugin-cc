@@ -1,0 +1,79 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 46772,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.7 commit modifies the /glm:setup command to add an interactive menu when already configured, plus renames the npm scope. The setup.md change introduces a re-configuration menu flow that has structural weaknesses: no explicit rollback/backout guidance if the user picks the wrong option, potential for silent overwriting of valid configuration, and no validation or confirmation prompts before destructive actions like 'Reset configuration'. The release_card.md has substantial changes that appear to be documentation but should be verified for accuracy against the actual plugin behavior.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Interactive setup menu lacks destructive action safeguards",
+        "body": "The commands/setup.md file now presents an interactive menu with options like 'Reset configuration' when the user is already configured. There is no confirmation step or warning before destructive actions. A user who accidentally selects 'Reset configuration' will have their configuration wiped with no undo path. The menu flow appears to rely on the LLM correctly interpreting and executing each option, but prompt-based menus are inherently fragile — the LLM could misinterpret the user's intent, skip confirmation, or execute the wrong branch.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.72,
+        "recommendation": "Add explicit confirmation guards in the prompt instructions before any destructive action (reset, overwrite). For example: 'Before executing Reset configuration, confirm with the user and warn that this action cannot be undone.' Also consider whether a backup of the previous configuration should be created before reset."
+      },
+      {
+        "severity": "medium",
+        "title": "Setup menu branch handling assumes perfect LLM compliance",
+        "body": "The setup.md command now branches into multiple paths based on whether the user is already configured and what menu option they select. This relies on the LLM correctly detecting the 'already configured' state, presenting the exact menu options, and faithfully following the selected branch. There is no fallback instruction for what to do if the user's response doesn't match any menu option, or if the configuration state is ambiguous (e.g., partially configured — some files exist but not all). An empty or corrupt config state could cause undefined behavior in the menu logic.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.68,
+        "recommendation": "Add explicit handling for: (1) user input that doesn't match any menu option, (2) partially configured state where some config files exist but others don't, (3) corrupted or unreadable configuration. Define a default/fallback path."
+      },
+      {
+        "severity": "medium",
+        "title": "NPM scope rename has no migration path for existing users",
+        "body": "package.json changes the npm package scope/name. Existing users who installed under the previous scope will not receive updates automatically — npm treats a scope change as an entirely different package. There is no evidence of a deprecation notice for the old package name, postinstall migration script, or user-facing guidance for existing installations to switch to the new scope. This could strand users on the old package version.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 6,
+        "confidence": 0.78,
+        "recommendation": "Either publish a postinstall/deprecation notice on the old package name pointing users to the new one, or document the migration step prominently in CHANGELOG.md and release_card.md. Verify that the marketplace.json and plugin.json references are internally consistent with the new scope."
+      },
+      {
+        "severity": "low",
+        "title": "CHANGELOG entry documents interactive menu not yet battle-tested",
+        "body": "The CHANGELOG adds an entry for the interactive menu feature. Since this is a prompt-based interactive flow that depends on LLM behavior, it should be flagged as potentially unstable. The changelog does not mention the npm scope rename's migration implications, which means users reading the changelog won't know they need to take action.",
+        "file": "CHANGELOG.md",
+        "line_start": 1,
+        "line_end": 21,
+        "confidence": 0.6,
+        "recommendation": "Update the CHANGELOG entry to explicitly note the npm scope rename and provide migration instructions for existing users."
+      }
+    ],
+    "next_steps": [
+      "Read commands/setup.md in full to verify all menu branches have appropriate guards and fallback handling.",
+      "Read package.json to confirm the old and new package names and check if any install/migration scripts exist.",
+      "Verify that marketplace.json and plugin.json are internally consistent after the scope rename.",
+      "Test the interactive setup menu flow against edge cases: partially configured state, invalid menu selection, and reset confirmation."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.7 commit modifies the /glm:setup command to add an interactive menu when already configured, plus renames the npm scope. The setup.md change introduces a re-configuration menu flow that has structural weaknesses: no explicit rollback/backout guidance if the user picks the wrong option, potential for silent overwriting of valid configuration, and no validation or confirmation prompts before destructive actions like 'Reset configuration'. The release_card.md has substantial changes that appear to be documentation but should be verified for accuracy against the actual plugin behavior.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Interactive setup menu lacks destructive action safeguards\",\n      \"body\": \"The commands/setup.md file now presents an interactive menu with options like 'Reset configuration' when the user is already configured. There is no confirmation step or warning before destructive actions. A user who accidentally selects 'Reset configuration' will have their configuration wiped with no undo path. The menu flow appears to rely on the LLM correctly interpreting and executing each option, but prompt-based menus are inherently fragile — the LLM could misinterpret the user's intent, skip confirmation, or execute the wrong branch.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Add explicit confirmation guards in the prompt instructions before any destructive action (reset, overwrite). For example: 'Before executing Reset configuration, confirm with the user and warn that this action cannot be undone.' Also consider whether a backup of the previous configuration should be created before reset.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Setup menu branch handling assumes perfect LLM compliance\",\n      \"body\": \"The setup.md command now branches into multiple paths based on whether the user is already configured and what menu option they select. This relies on the LLM correctly detecting the 'already configured' state, presenting the exact menu options, and faithfully following the selected branch. There is no fallback instruction for what to do if the user's response doesn't match any menu option, or if the configuration state is ambiguous (e.g., partially configured — some files exist but not all). An empty or corrupt config state could cause undefined behavior in the menu logic.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Add explicit handling for: (1) user input that doesn't match any menu option, (2) partially configured state where some config files exist but others don't, (3) corrupted or unreadable configuration. Define a default/fallback path.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"NPM scope rename has no migration path for existing users\",\n      \"body\": \"package.json changes the npm package scope/name. Existing users who installed under the previous scope will not receive updates automatically — npm treats a scope change as an entirely different package. There is no evidence of a deprecation notice for the old package name, postinstall migration script, or user-facing guidance for existing installations to switch to the new scope. This could strand users on the old package version.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 6,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Either publish a postinstall/deprecation notice on the old package name pointing users to the new one, or document the migration step prominently in CHANGELOG.md and release_card.md. Verify that the marketplace.json and plugin.json references are internally consistent with the new scope.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"CHANGELOG entry documents interactive menu not yet battle-tested\",\n      \"body\": \"The CHANGELOG adds an entry for the interactive menu feature. Since this is a prompt-based interactive flow that depends on LLM behavior, it should be flagged as potentially unstable. The changelog does not mention the npm scope rename's migration implications, which means users reading the changelog won't know they need to take action.\",\n      \"file\": \"CHANGELOG.md\",\n      \"line_start\": 1,\n      \"line_end\": 21,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Update the CHANGELOG entry to explicitly note the npm scope rename and provide migration instructions for existing users.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Read commands/setup.md in full to verify all menu branches have appropriate guards and fallback handling.\",\n    \"Read package.json to confirm the old and new package names and check if any install/migration scripts exist.\",\n    \"Verify that marketplace.json and plugin.json are internally consistent after the scope rename.\",\n    \"Test the interactive setup menu flow against edge cases: partially configured state, invalid menu selection, and reset confirmation.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:03:24.090Z"
+}

@@ -1,0 +1,33 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 4
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 8002,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "approve",
+    "summary": "The commit renames the npm scope and adds an interactive menu to /glm:setup when already configured. Changes are confined to metadata (package.json, plugin manifests), markdown documentation (CHANGELOG, commands/setup.md), and a release card. No executable logic, auth boundaries, data mutations, or runtime code paths are affected. The interactive menu is declared in markdown for an LLM-based tool, not implemented in application code. No material risk found that would block shipping.",
+    "findings": [],
+    "next_steps": []
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"approve\",\n  \"summary\": \"The commit renames the npm scope and adds an interactive menu to /glm:setup when already configured. Changes are confined to metadata (package.json, plugin manifests), markdown documentation (CHANGELOG, commands/setup.md), and a release card. No executable logic, auth boundaries, data mutations, or runtime code paths are affected. The interactive menu is declared in markdown for an LLM-based tool, not implemented in application code. No material risk found that would block shipping.\",\n  \"findings\": [],\n  \"next_steps\": []\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:00:30.770Z"
+}

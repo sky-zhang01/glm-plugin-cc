@@ -1,0 +1,68 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 4
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0,
+    "citation_false_file_hits": 0,
+    "latency_ms": 50119,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The commit renames the npm scope from @anthropics to @anthropic-ai and restructures the setup command documentation. The scope rename is a breaking change for existing users who reference the old package name — no migration path, redirects, or compatibility shims are documented. The setup.md command changes introduce an interactive menu path but the markdown appears to be documentation rather than executable logic, limiting blast radius. The primary risk is the package rename without any apparent backward compatibility.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename from @anthropics to @anthropic-ai has no migration or backward-compatibility strategy",
+        "body": "The package.json name changes from '@anthropics/claude-code' to '@anthropic-ai/claude-code'. The setup.md and release_card.md references are updated to the new scope. However, there is no deprecation notice on the old package, no documentation of a migration path, and no indication that the old scope will continue to resolve. Existing users who pinned or referenced '@anthropics/claude-code' will experience breakage on install. If this is a published npm package, the old scope package becomes a dangling reference with no redirect.",
+        "file": "package.json",
+        "line_start": 2,
+        "line_end": 2,
+        "confidence": 0.75,
+        "recommendation": "If the old scope was published to npm, either: (1) publish a deprecated stub under @anthropics/claude-code that points to the new name, or (2) explicitly document the breaking rename in CHANGELOG.md as a breaking change with migration instructions. If this is not a published npm package and the name is purely internal, document that to reduce reviewer concern."
+      },
+      {
+        "severity": "medium",
+        "title": "CHANGELOG entry for v0.4.4 does not mention the package rename as a breaking change",
+        "body": "The CHANGELOG.md adds entries for v0.4.4 through v0.4.7 but none of them flag the npm scope rename as a breaking change. If users upgrade blindly they will not be warned that the package identity has changed. This is an observability gap that hides a potentially user-visible breaking change.",
+        "file": "CHANGELOG.md",
+        "line_start": 4,
+        "line_end": 25,
+        "confidence": 0.7,
+        "recommendation": "Add a 'BREAKING CHANGE' note to the relevant CHANGELOG entry calling out the scope rename and what users must do to migrate."
+      },
+      {
+        "severity": "medium",
+        "title": "release_card.md contains a large restructured markdown block with potential template/rendering issues",
+        "body": "The release_card.md has 273 insertions and 103 deletions — the largest change in the commit. It contains restructured configuration examples and instructions. Without being able to verify the rendered output, there is risk of broken markdown links, malformed code blocks, or copy-paste errors in the instruction text that would be user-facing immediately on release. The file mixes template directives with prose which is fragile under editing.",
+        "file": "release_card.md",
+        "line_start": 1,
+        "line_end": 326,
+        "confidence": 0.5,
+        "recommendation": "Verify the rendered release_card.md output end-to-end before shipping. Check for broken internal links, unclosed code fences, and that all example commands (especially referencing the new @anthropic-ai scope) are syntactically correct."
+      }
+    ],
+    "next_steps": [
+      "Confirm whether @anthropics/claude-code was published to npm. If yes, add deprecation/migration handling before shipping.",
+      "Add a BREAKING CHANGE entry to CHANGELOG.md for the scope rename.",
+      "Visually verify release_card.md renders correctly with all new content and updated scope references."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The commit renames the npm scope from @anthropics to @anthropic-ai and restructures the setup command documentation. The scope rename is a breaking change for existing users who reference the old package name — no migration path, redirects, or compatibility shims are documented. The setup.md command changes introduce an interactive menu path but the markdown appears to be documentation rather than executable logic, limiting blast radius. The primary risk is the package rename without any apparent backward compatibility.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename from @anthropics to @anthropic-ai has no migration or backward-compatibility strategy\",\n      \"body\": \"The package.json name changes from '@anthropics/claude-code' to '@anthropic-ai/claude-code'. The setup.md and release_card.md references are updated to the new scope. However, there is no deprecation notice on the old package, no documentation of a migration path, and no indication that the old scope will continue to resolve. Existing users who pinned or referenced '@anthropics/claude-code' will experience breakage on install. If this is a published npm package, the old scope package becomes a dangling reference with no redirect.\",\n      \"file\": \"package.json\",\n      \"line_start\": 2,\n      \"line_end\": 2,\n      \"confidence\": 0.75,\n      \"recommendation\": \"If the old scope was published to npm, either: (1) publish a deprecated stub under @anthropics/claude-code that points to the new name, or (2) explicitly document the breaking rename in CHANGELOG.md as a breaking change with migration instructions. If this is not a published npm package and the name is purely internal, document that to reduce reviewer concern.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"CHANGELOG entry for v0.4.4 does not mention the package rename as a breaking change\",\n      \"body\": \"The CHANGELOG.md adds entries for v0.4.4 through v0.4.7 but none of them flag the npm scope rename as a breaking change. If users upgrade blindly they will not be warned that the package identity has changed. This is an observability gap that hides a potentially user-visible breaking change.\",\n      \"file\": \"CHANGELOG.md\",\n      \"line_start\": 4,\n      \"line_end\": 25,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Add a 'BREAKING CHANGE' note to the relevant CHANGELOG entry calling out the scope rename and what users must do to migrate.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"release_card.md contains a large restructured markdown block with potential template/rendering issues\",\n      \"body\": \"The release_card.md has 273 insertions and 103 deletions — the largest change in the commit. It contains restructured configuration examples and instructions. Without being able to verify the rendered output, there is risk of broken markdown links, malformed code blocks, or copy-paste errors in the instruction text that would be user-facing immediately on release. The file mixes template directives with prose which is fragile under editing.\",\n      \"file\": \"release_card.md\",\n      \"line_start\": 1,\n      \"line_end\": 326,\n      \"confidence\": 0.5,\n      \"recommendation\": \"Verify the rendered release_card.md output end-to-end before shipping. Check for broken internal links, unclosed code fences, and that all example commands (especially referencing the new @anthropic-ai scope) are syntactically correct.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Confirm whether @anthropics/claude-code was published to npm. If yes, add deprecation/migration handling before shipping.\",\n    \"Add a BREAKING CHANGE entry to CHANGELOG.md for the scope rename.\",\n    \"Visually verify release_card.md renders correctly with all new content and updated scope references.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:04:14.245Z"
+}
