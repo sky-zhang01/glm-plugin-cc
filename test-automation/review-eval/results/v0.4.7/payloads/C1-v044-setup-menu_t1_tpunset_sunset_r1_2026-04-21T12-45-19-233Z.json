@@ -1,0 +1,33 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 20163,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "approve",
+    "summary": "The commit renames the npm scope (@anthropic → @anthropics) and adds an interactive menu to the /glm:setup command when already configured. Changes span plugin metadata, a markdown command file, changelog, package.json, and release card documentation. No executable logic, auth boundaries, data mutations, or runtime code paths are touched — the affected files are configuration, documentation, and a markdown prompt template. No material safety, correctness, or security risk is present in this changeset.",
+    "findings": [],
+    "next_steps": []
+  },
+  "rawOutputHead": "{\"verdict\":\"approve\",\"summary\":\"The commit renames the npm scope (@anthropic → @anthropics) and adds an interactive menu to the /glm:setup command when already configured. Changes span plugin metadata, a markdown command file, changelog, package.json, and release card documentation. No executable logic, auth boundaries, data mutations, or runtime code paths are touched — the affected files are configuration, documentation, and a markdown prompt template. No material safety, correctness, or security risk is present in this changeset.\",\"findings\":[],\"next_steps\":[]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T12:45:19.234Z"
+}

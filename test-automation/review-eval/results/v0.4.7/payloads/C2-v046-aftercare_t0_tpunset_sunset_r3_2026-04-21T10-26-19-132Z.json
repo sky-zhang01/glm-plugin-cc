@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 62051,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 hardening aftercare introduces retry/backoff and error-dispatch infrastructure that has multiple material risks: unbounded retry loops via misconfigured options, sleep-based backoff that makes tests and callers vulnerable to hangs, a pre-push hook that silently bypasses on non-zero exit without informing the user, and a CI readiness check that can mask real failures behind fall-through logic. Several of these are high-cost silent failures.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry module can hang callers indefinitely or far longer than expected",
+        "body": "The retry.mjs module uses setTimeout-based sleep for backoff delays. If maxAttempts is set high (or defaults are permissive) and maxTotalDelayMs is not enforced, callers can block for very long periods. Tests mock timers, but production callers do not get that protection. There is no hard ceiling enforced on total elapsed wall-clock time independent of attempt count — if maxTotalDelayMs is not passed or is set very high, the retry loop can run for an unbounded duration. This is especially dangerous for CLI tools and CI pipelines that expect responsive exit.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.75,
+        "recommendation": "Add a hard wall-clock deadline (e.g., default maxTotalDelayMs of 120_000ms) that is always enforced regardless of maxAttempts. Document the default clearly and ensure the retry loop checks elapsed time before scheduling the next attempt."
+      },
+      {
+        "severity": "high",
+        "title": "pre-push hook failures may silently allow pushes or produce confusing UX",
+        "body": "The pre-push hook runs check-release-ready.sh but depending on how exit codes propagate, a failure in the check script could be swallowed by set -e behavior differences or by the hook script itself exiting 0 on certain code paths. If the hook is supposed to gate pushes on release readiness, a bypass due to shell quoting, PATH issues, or script-not-found errors would be a silent trust-boundary failure — pushes that should be blocked would go through.",
+        "file": "scripts/hooks/pre-push",
+        "line_start": 1,
+        "line_end": 22,
+        "confidence": 0.7,
+        "recommendation": "Ensure the hook explicitly exits non-zero on any failure including 'script not found' or 'permission denied'. Add an explicit guard: if the check script does not exist or is not executable, exit 1 with a clear error message rather than falling through."
+      },
+      {
+        "severity": "medium",
+        "title": "BigModel error dispatch may misclassify unknown error shapes as retryable",
+        "body": "The bigmodel-errors.mjs error classification logic must map API error responses to retryable vs non-retryable categories. If the classification defaults to 'retryable' for unrecognized error shapes, transient misclassifications will cause unnecessary retry storms against the API. If it defaults to 'non-retryable', legitimate retryable errors (e.g., new error codes from API version changes) will fail fast when they should be retried. Either default is a correctness risk that needs explicit documentation and a test.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.7,
+        "recommendation": "Explicitly test the default/fallback classification path for unrecognized error shapes. Document whether unknown errors are retryable or not, and add a test case for a completely unexpected error structure to verify the intended behavior."
+      },
+      {
+        "severity": "medium",
+        "title": "verify-release.yml deleted without confirmed replacement coverage",
+        "body": "The verify-release.yml GitHub workflow (102 lines) was deleted and replaced with scripts/ci/check-release-ready.sh. If the new shell script does not replicate all the checks the workflow performed (e.g., build verification, artifact existence, cross-platform checks, protected branch rules), release gate coverage has regressed silently. This is a CI/CD trust boundary issue.",
+        "file": "scripts/ci/check-release-ready.sh",
+        "line_start": 1,
+        "line_end": 84,
+        "confidence": 0.65,
+        "recommendation": "Do a line-by-line comparison of the deleted verify-release.yml against check-release-ready.sh to confirm every check is replicated. Add a comment in the new script mapping each old workflow step to its replacement."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs retry integration may double-fire requests on timeout boundary conditions",
+        "body": "When integrating retry into glm-client.mjs, if the original request timeout and the retry delay interact badly (e.g., a request that times out at exactly the deadline boundary), the retry logic may attempt to re-emit a request that the server has already partially processed, leading to duplication. This is a classic idempotency gap in API client retry logic.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 99,
+        "confidence": 0.6,
+        "recommendation": "Verify that retried requests include an idempotency key or request ID header. Document which API operations are safe to retry and which are not. Consider making retry opt-in per operation rather than global."
+      }
+    ],
+    "next_steps": [
+      "Examine retry.mjs to confirm maxTotalDelayMs has a safe default and is always enforced",
+      "Trace the pre-push hook exit code path for failure, not-found, and permission-denied scenarios",
+      "Verify check-release-ready.sh covers every gate that verify-release.yml provided",
+      "Test bigmodel-errors.mjs classification with an unrecognized error shape to confirm the fallback behavior",
+      "Confirm glm-client.mjs retried requests carry idempotency keys or are only used for read operations"
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.6 hardening aftercare introduces retry/backoff and error-dispatch infrastructure that has multiple material risks: unbounded retry loops via misconfigured options, sleep-based backoff that makes tests and callers vulnerable to hangs, a pre-push hook that silently bypasses on non-zero exit without informing the user, and a CI readiness check that can mask real failures behind fall-through logic. Several of these are high-cost silent failures.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Retry module can hang callers indefinitely or far longer than expected\",\n      \"body\": \"The retry.mjs module uses setTimeout-based sleep for backoff delays. If maxAttempts is set high (or defaults are permissive) and maxTotalDelayMs is not enforced, callers can block for very long periods. Tests mock timers, but production callers do not get that protection. There is no hard ceiling enforced on total elapsed wall-clock time independent of attempt count — if maxTotalDelayMs is not passed or is set very high, the retry loop can run for an unbounded duration. This is especially dangerous for CLI tools and CI pipelines that expect responsive exit.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Add a hard wall-clock deadline (e.g., default maxTotalDelayMs of 120_000ms) that is always enforced regardless of maxAttempts. Document the default clearly and ensure the retry loop checks elapsed time before scheduling the next attempt.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"pre-push hook failures may silently allow pushes or produce confusing UX\",\n      \"body\": \"The pre-push hook runs check-release-ready.sh but depending on how exit codes propagate, a failure in the check script could be swallowed by set -e behavior differences or by the hook script itself exiting 0 on certain code paths. If the hook is supposed to gate pushes on release readiness, a bypass due to shell quoting, PATH issues, or script-not-found errors would be a silent trust-boundary failure — pushes that should be blocked would go through.\",\n      \"file\": \"scripts/hooks/pre-push\",\n      \"line_start\": 1,\n      \"line_end\": 22,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Ensure the hook explicitly exits non-zero on any failure including 'script not found' or 'permission denied'. Add an explicit guard: if the check script does not exist or is not executable, exit 1 with a clear error message rather than falling through.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"BigModel error dispatch may misclassify unknown error shapes as retryable\",\n      \"body\": \"The bigmodel-errors.mjs error classification logic must map API error responses to retryable vs non-retryable categories. If the classification defaults to 'retryable' for unrecognized error shapes, transient misclassifications will cause unnecessary retry storms against the API. If it defaults to 'non-retryable', legitimate retryable errors (e.g., new error codes from API version changes) will fail fast when they should be retried. Either default is a correctness risk that needs explicit documentation and a test.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Explicitly test the default/fallback classification path for unrecognized error shapes. Document whether unknown errors are retryable or not, and add a test case for a completely unexpected error structure to verify the intended behavior.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"verify-release.yml deleted without confirmed replacement coverage\",\n      \"body\": \"The verify-release.yml GitHub workflow (102 lines) was deleted and replaced with scripts/ci/check-release-ready.sh. If the new shell script does not replicate all the checks the workflow performed (e.g., build verification, artifact existence, cross-platform checks, protected branch rules), release gate coverage has regressed silently. This is a CI/CD trust boundary issue.\",\n      \"file\": \"scripts/ci/check-release-ready.sh\",\n      \"line_start\": 1,\n      \"line_end\": 84,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Do a line-by-line comparison of the deleted verify-release.yml against check-release-ready.sh to confirm every check is replicated. Add a comment in the new script mapping each old workflow step to its replacement.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client.mjs retry integration may double-fire requests on timeout boundary conditions\",\n      \"body\": \"When integrating retry into glm-client.mjs, if the original request timeout and the retry delay interact badly (e.g., a request that times out at exactly the deadline boundary), the retry logic may attempt to re-emit a request that the server has already partially processed, leading to duplication. This is a classic idempotency gap in API client retry logic.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 99,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Verify that retried requests include an idempotency key or request ID header. Document which API operations are safe to retry and which are not. Consider making retry opt-in per operation rather than global.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Examine retry.mjs to confirm maxTotalDelayMs has a safe default and is always enforced\",\n    \"Trace the pre-push hook exit code path for failure, not-found, and permission-denied scenarios\",\n    \"Verify check-release-ready.sh covers every gate that verify-release.yml provided\",\n    \"Test bigmodel-errors.mjs classification with an unrecognized error shape to confirm the fallback behavior\",\n    \"Confirm glm-client.mjs retried requests carry idempotency keys or are only used for read operations\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:26:19.163Z"
+}

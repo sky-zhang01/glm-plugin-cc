@@ -1,0 +1,79 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 0,
+    "topP": null,
+    "seed": 2024,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 51362,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 aftercare branch introduces retry/backoff and BigModel error dispatch logic but ships with several material risks: (1) retry.mjs has no ceiling on total wall-clock time beyond attempt count, meaning retries can block callers for unbounded duration under sustained throttling; (2) glm-client.mjs grew substantially but the diff does not show integration tests exercising the retry+error-classification paths end-to-end against real failure modes; (3) the pre-push hook and CI check-release-ready.sh are new guard rails but there is no evidence they were tested against the actual failure modes they are meant to prevent. These gaps could cause silent hangs or missed errors in production.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs retryWithBackoff has no overall timeout or wall-clock ceiling",
+        "body": "The retry module caps the number of attempts but relies solely on exponential backoff delay between attempts. Under sustained 429/503 responses from BigModel, a caller invoking retryWithBackoff can be blocked for arbitrarily long (e.g. 10 retries with backoff compounding = minutes of wall time). There is no overall deadline/timeout parameter, and no mechanism for the caller to abort early via AbortController or similar. This can cause silent hangs in CLI or CI contexts where the user sees no output and cannot interrupt gracefully.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Add an optional `maxElapsedMs` (deadline) parameter to retryWithBackoff. Before each attempt, check if the deadline has been exceeded and if so, throw/reject with a distinguished error. Also consider accepting an AbortSignal so callers can cancel in-flight retries."
+      },
+      {
+        "severity": "medium",
+        "title": "classifyError in bigmodel-errors.mjs may misclassify unexpected error shapes, causing wrong retry behavior",
+        "body": "The error classification logic must handle arbitrary error objects from HTTP calls. If the BigModel API returns an unexpected response shape (e.g. error body without expected fields, non-JSON response, or a network-level error with unusual properties), the classifier could return a category that either suppresses a real failure or triggers unnecessary retries. The tests cover known cases but there is no default/fallback guard documented for truly novel error shapes.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.65,
+        "recommendation": "Ensure the default/fallback classification branch returns a non-retryable category (e.g. 'unknown' with retryable=false) for any error that does not match known patterns. Add a test case that passes a completely novel error object and asserts the safe non-retryable classification."
+      },
+      {
+        "severity": "medium",
+        "title": "check-release-ready.sh is a new CI gate with no test coverage",
+        "body": "scripts/ci/check-release-ready.sh is introduced as a release-readiness gate but has no corresponding test file (e.g. tests/check-release-ready.test.mjs). A bug in this script could either block legitimate releases or, worse, allow broken releases through. Shell scripts are notoriously fragile around edge cases (empty variables, special characters in paths, missing tools).",
+        "file": "scripts/ci/check-release-ready.sh",
+        "line_start": 1,
+        "line_end": 84,
+        "confidence": 0.6,
+        "recommendation": "Add at least basic integration/smoke tests for check-release-ready.sh covering: (a) passes on a correctly prepared repo, (b) fails when version mismatch, (c) fails when required files are missing. Alternatively, rewrite the logic in a testable .mjs module."
+      },
+      {
+        "severity": "low",
+        "title": "pre-push hook silently skips if hooks directory or script is missing",
+        "body": "The pre-push hook at scripts/hooks/pre-push will only protect pushes if it is actually installed. There is no CI-side enforcement that the hook is present (check-release-ready.sh may cover this, but the hook itself is a local-only guard). Developers can bypass it with --no-verify or by not installing it, meaning the protection is advisory rather than enforced.",
+        "file": "scripts/hooks/pre-push",
+        "line_start": 1,
+        "line_end": 22,
+        "confidence": 0.55,
+        "recommendation": "Document that the pre-push hook is advisory. Ensure check-release-ready.sh in CI provides the same or stronger checks so that bypassing the hook locally is caught server-side. Consider adding a CI step that verifies the hook is present in the expected location."
+      }
+    ],
+    "next_steps": [
+      "Read retry.mjs in full and confirm whether maxElapsedMs or AbortSignal support exists or is missing.",
+      "Read bigmodel-errors.mjs classifyError and verify the default fallback branch returns non-retryable.",
+      "Read check-release-ready.sh for unquoted variables, missing error handling, or assumptions about repo state.",
+      "Confirm whether integration tests exist that exercise the retry+error-classification pipeline end-to-end before shipping."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.6 aftercare branch introduces retry/backoff and BigModel error dispatch logic but ships with several material risks: (1) retry.mjs has no ceiling on total wall-clock time beyond attempt count, meaning retries can block callers for unbounded duration under sustained throttling; (2) glm-client.mjs grew substantially but the diff does not show integration tests exercising the retry+error-classification paths end-to-end against real failure modes; (3) the pre-push hook and CI check-release-ready.sh are new guard rails but there is no evidence they were tested against the actual failure modes they are meant to prevent. These gaps could cause silent hangs or missed errors in production.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs retryWithBackoff has no overall timeout or wall-clock ceiling\",\"body\":\"The retry module caps the number of attempts but relies solely on exponential backoff delay between attempts. Under sustained 429/503 responses from BigModel, a caller invoking retryWithBackoff can be blocked for arbitrarily long (e.g. 10 retries with backoff compounding = minutes of wall time). There is no overall deadline/timeout parameter, and no mechanism for the caller to abort early via AbortController or similar. This can cause silent hangs in CLI or CI contexts where the user sees no output and cannot interrupt gracefully.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.72,\"recommendation\":\"Add an optional `maxElapsedMs` (deadline) parameter to retryWithBackoff. Before each attempt, check if the deadline has been exceeded and if so, throw/reject with a distinguished error. Also consider accepting an AbortSignal so callers can cancel in-flight retries.\"},{\"severity\":\"medium\",\"title\":\"classifyError in bigmodel-errors.mjs may misclassify unexpected error shapes, causing wrong retry behavior\",\"body\":\"The error classification logic must handle arbitrary error objects from HTTP calls. If the BigModel API returns an unexpected response shape (e.g. error body without expected fields, non-JSON response, or a network-level error with unusual properties), the classifier could return a category that either suppresses a real failure or triggers unnecessary retries. The tests cover known cases but there is no default/fallback guard documented for truly novel error shapes.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.65,\"recommendation\":\"Ensure the default/fallback classification branch returns a non-retryable category (e.g. 'unknown' with retryable=false) for any error that does not match known patterns. Add a test case that passes a completely novel error object and asserts the safe non-retryable classification.\"},{\"severity\":\"medium\",\"title\":\"check-release-ready.sh is a new CI gate with no test coverage\",\"body\":\"scripts/ci/check-release-ready.sh is introduced as a release-readiness gate but has no corresponding test file (e.g. tests/check-release-ready.test.mjs). A bug in this script could either block legitimate releases or, worse, allow broken releases through. Shell scripts are notoriously fragile around edge cases (empty variables, special characters in paths, missing tools).\",\"file\":\"scripts/ci/check-release-ready.sh\",\"line_start\":1,\"line_end\":84,\"confidence\":0.6,\"recommendation\":\"Add at least basic integration/smoke tests for check-release-ready.sh covering: (a) passes on a correctly prepared repo, (b) fails when version mismatch, (c) fails when required files are missing. Alternatively, rewrite the logic in a testable .mjs module.\"},{\"severity\":\"low\",\"title\":\"pre-push hook silently skips if hooks directory or script is missing\",\"body\":\"The pre-push hook at scripts/hooks/pre-push will only protect pushes if it is actually installed. There is no CI-side enforcement that the hook is present (check-release-ready.sh may cover this, but the hook itself is a local-only guard). Developers can bypass it with --no-verify or by not installing it, meaning the protection is advisory rather than enforced.\",\"file\":\"scripts/hooks/pre-push\",\"line_start\":1,\"line_end\":22,\"confidence\":0.55,\"recommendation\":\"Document that the pre-push hook is advisory. Ensure check-release-ready.sh in CI provides the same or stronger checks so that bypassing the hook locally is caught server-side. Consider adding a CI step that verifies the hook is present in the expected location.\"}],\"next_steps\":[\"Read retry.mjs in full and confirm whether maxElapsedMs or AbortSignal support exists or is missing.\",\"Read bigmodel-errors.mjs classifyError and verify the default fallback branch returns non-retryable.\",\"Read check-release-ready.sh for unquoted variables, missing error handling, or assumptions about repo state.\",\"Confirm whether integration tests exist that exercise the retry+error-classification pipeline end-to-end before shipping.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:47:58.749Z"
+}

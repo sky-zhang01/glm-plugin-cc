@@ -384,7 +384,123 @@ function buildCorrectionHint(previousErrorCode) {
       "include `verdict: \"approve\"` and `findings: []`.\n\n"
     );
   }
+  if (previousErrorCode === "REASONING_LEAK") {
+    return (
+      "[CORRECTION] Your previous response emitted internal reasoning (e.g. `<thinking>` " +
+      "tags) as the visible response instead of producing the final JSON. Do NOT " +
+      "include `<thinking>` blocks or any prose before the JSON. Respond with ONLY " +
+      "the final JSON object `{\"verdict\":..., \"summary\":..., \"findings\":[...]}`. " +
+      "Any reasoning belongs in the reasoning/thinking channel, not the content " +
+      "channel.\n\n"
+    );
+  }
+  if (previousErrorCode === "MARKDOWN_FENCE_UNTERMINATED") {
+    return (
+      "[CORRECTION] Your previous response started with a ```json markdown fence " +
+      "but did not terminate it. Do NOT wrap your JSON in markdown fences. " +
+      "Respond with raw JSON starting from `{` and ending at the matching `}`. " +
+      "No ``` markers.\n\n"
+    );
+  }
+  if (previousErrorCode === "TRUNCATED_JSON") {
+    return (
+      "[CORRECTION] Your previous response began as valid JSON but was cut off " +
+      "before the structure completed (JSON.parse failed). Keep your output " +
+      "concise: `findings` should contain at most 5-8 items, each with `body` " +
+      "under 400 characters. Ensure the JSON ends with a matching closing `}`.\n\n"
+    );
+  }
+  if (previousErrorCode === "EMPTY_RESPONSE") {
+    return (
+      "[CORRECTION] Your previous response was empty. You must produce a JSON " +
+      "object `{\"verdict\":..., \"summary\":..., \"findings\":[...]}`. If nothing " +
+      "notable was found, use `verdict: \"approve\"` with `findings: []`.\n\n"
+    );
+  }
+  if (previousErrorCode === "PARSE_FAILURE") {
+    return (
+      "[CORRECTION] Your previous response could not be parsed as JSON. Respond " +
+      "with ONLY a valid JSON object. No prose before or after. No markdown " +
+      "fences. Start with `{` and end with `}`.\n\n"
+    );
+  }
   return "";
+}
+
+/**
+ * Classify a parse failure (parsed=null OR parseError != null) into one
+ * of several typed failure modes so the caller gets actionable errorCode
+ * instead of silent pass-through.
+ *
+ * Derived from the v0.4.7 expanded-sweep sidecar evidence:
+ *   - `EMPTY_RESPONSE`: rawOutput is empty after trim (BigModel returned
+ *     nothing before completion signal; observed at C3 temp=1 run 1).
+ *   - `REASONING_LEAK`: rawOutput contains `<thinking>` reasoning tags
+ *     but no JSON object (observed at C2 temp=0 seed=1337 run 3 —
+ *     `--thinking on` leaked the reasoning channel into content).
+ *   - `MARKDOWN_FENCE_UNTERMINATED`: rawOutput starts with ```json but
+ *     has no closing ``` (observed at C3 temp=1 run 2 — the truncated
+ *     response left the fence open).
+ *   - `TRUNCATED_JSON`: rawOutput starts with `{` and looks like JSON
+ *     but JSON.parse fails (observed at C3 temp=1 run 3 — likely
+ *     mid-structure truncation).
+ *   - `PARSE_FAILURE`: catchall for anything else that fails to parse.
+ *
+ * Exported for tests. Returns `{ errorCode, message }`.
+ */
+export function classifyParseFailure(rawOutput, cleaned, parseError) {
+  const raw = typeof rawOutput === "string" ? rawOutput.trim() : "";
+  const clean = typeof cleaned === "string" ? cleaned.trim() : "";
+
+  if (raw === "" && clean === "") {
+    return {
+      errorCode: "EMPTY_RESPONSE",
+      message:
+        "GLM returned an empty response before producing any structured output. " +
+        "This has been observed on large-diff + temp=1 review calls where the " +
+        "upstream model terminated early."
+    };
+  }
+
+  // REASONING_LEAK: starts with `<thinking>` and has no JSON object. Checks
+  // raw (pre-fence-strip) because thinking leaks appear before fence-wrapping.
+  if (/^<thinking>/i.test(raw) && !raw.includes('"verdict"')) {
+    return {
+      errorCode: "REASONING_LEAK",
+      message:
+        "GLM returned internal reasoning (<thinking> tags) as the visible response " +
+        "without the required JSON structure. The --thinking on mode leaked the " +
+        "reasoning channel into content."
+    };
+  }
+
+  // MARKDOWN_FENCE_UNTERMINATED: raw starts with ```json\n but no closing ```.
+  // stripMarkdownFences' full-fence regex didn't match; fence-strip fallback
+  // may have stripped the opener, but the underlying issue is model truncation.
+  if (/^```(?:json)?\s*\n/.test(raw) && !/\n```\s*$/.test(raw)) {
+    return {
+      errorCode: "MARKDOWN_FENCE_UNTERMINATED",
+      message:
+        "GLM wrapped its JSON output in an unterminated markdown fence (```json...) " +
+        "without closing ```. The response was truncated before completing the fence. " +
+        "v0.4.7 stripMarkdownFences half-fence fallback should parse this on retry."
+    };
+  }
+
+  // TRUNCATED_JSON: cleaned content starts like JSON but parse failed.
+  if (/^\{/.test(clean) && parseError) {
+    return {
+      errorCode: "TRUNCATED_JSON",
+      message:
+        `GLM produced JSON-shaped output but parsing failed: ${parseError}. ` +
+        "Likely truncation mid-structure (response hit a length budget or stopped early)."
+    };
+  }
+
+  return {
+    errorCode: "PARSE_FAILURE",
+    message: `GLM output could not be parsed as JSON: ${parseError || "unknown parse error"}.`
+  };
 }
 
 /**
@@ -399,9 +515,25 @@ function buildCorrectionHint(previousErrorCode) {
 export function stripMarkdownFences(text) {
   if (typeof text !== "string") return text;
   const trimmed = text.trim();
-  const match = trimmed.match(/^```(?:json)?\s*\n([\s\S]*?)\n```\s*$/);
-  if (match) {
-    return match[1].trim();
+  // Preferred: full fence with matching open + close.
+  const full = trimmed.match(/^```(?:json)?\s*\n([\s\S]*?)\n```\s*$/);
+  if (full) {
+    return full[1].trim();
+  }
+  // Fallback A: open-only fence. v0.4.7 sidecar evidence (C3 temp=1 run 2)
+  // showed GLM starting with ```json\n but truncating before the closing ```.
+  // If the opener is there and the content looks like JSON, strip it so
+  // JSON.parse has a chance. Upstream classifier still surfaces this as
+  // MARKDOWN_FENCE_UNTERMINATED when parse eventually fails.
+  const openOnly = trimmed.match(/^```(?:json)?\s*\n([\s\S]*?)$/);
+  if (openOnly) {
+    return openOnly[1].trim();
+  }
+  // Fallback B: close-only fence. Rare — model forgets opening fence but
+  // adds trailing ```. Strip it so JSON.parse isn't thrown by the ```.
+  const closeOnly = trimmed.match(/^([\s\S]*?)\n```\s*$/);
+  if (closeOnly) {
+    return closeOnly[1].trim();
   }
   return trimmed;
 }
@@ -695,8 +827,26 @@ async function runChatRequest(cwd, options = {}) {
             }
           );
         }
+        return parseResult;
       }
-      return parseResult;
+      // Parse failed. Classify the failure mode explicitly so downstream
+      // consumers (run-experiment harness, user-facing companion) get an
+      // actionable errorCode instead of silent parsed=null + errorCode="".
+      // Sidecar evidence from v0.4.7 expanded sweep catalogued 5 distinct
+      // parse-failure modes that previously all masqueraded as "ok but
+      // schema=0" in the CSV — see classifyParseFailure docstring.
+      const parseFailure = classifyParseFailure(rawOutput, cleaned, parseResult.parseError);
+      return failureShape(
+        parseFailure.message,
+        parseFailure.errorCode,
+        {
+          rawResponse: responseText,
+          rawOutput: cleaned,
+          parsed: null,
+          reasoningSummary,
+          retry: "correction"
+        }
+      );
     }
 
     return {

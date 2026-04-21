@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 1,
+    "topP": null,
+    "seed": 1337,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 47415,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 aftercare change adds retry/backoff infrastructure and BigModel error dispatch but ships with a critical logging gap: failed API calls that exhaust retries return null/undefined to callers with no error propagation or diagnostic trail. The retry module has no jitter, creating thundering-herd risk under coordinated retries. The GLM client swallows errors silently, making production failures invisible and unrecoverable. These are ship-blocking observability and correctness defects.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "GLM client silently swallows errors after retry exhaustion",
+        "body": "In glm-client.mjs, when all retry attempts fail, the call returns undefined/null to the caller with no thrown error, no logged diagnostic, and no structured error payload. Any downstream code consuming the response will fail with a cryptic TypeError (e.g., 'Cannot read property of undefined') instead of a meaningful error. This makes production debugging extremely difficult and violates the principle that failures should be loud. The caller cannot distinguish between 'API returned empty valid result' and 'all retries failed catastrophically'.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 99,
+        "confidence": 0.85,
+        "recommendation": "After retry exhaustion, throw a structured error (or at minimum log a diagnostic with full context including endpoint, status codes, and attempt count) so the caller can handle the failure explicitly rather than silently receiving undefined."
+      },
+      {
+        "severity": "high",
+        "title": "Retry module has no jitter, enabling thundering herd under coordinated failure",
+        "body": "The retry.mjs exponential backoff implementation uses deterministic delay calculations without random jitter. If multiple clients or instances encounter the same upstream failure simultaneously (e.g., BigModel rate limit or outage), they will all retry at the same computed intervals, creating synchronized request bursts that amplify load on the recovering service. This is a well-documented distributed systems failure mode (AWS architecture blog 'Exponential Backoff and Jitter').",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.8,
+        "recommendation": "Add random jitter to each backoff delay. The standard approach is: delay = min(cap, base * 2 ** attempt) with jitter = random(0, delay). Even a simple random(0.5 * delay, 1.5 * delay) would significantly reduce coordinated retry bursts."
+      },
+      {
+        "severity": "medium",
+        "title": "BigModel error classification has no fallback for unrecognized error shapes",
+        "body": "The bigmodel-errors.mjs error dispatch relies on pattern matching known error shapes from the BigModel API. If the API returns an unexpected error format (new error code, changed response structure, or non-standard HTTP status), the classifier likely returns an unknown/generic result that may not trigger appropriate retry behavior or user-facing error messaging. There is no evidence of a catch-all classification that maps unrecognized errors to a safe default action (e.g., retry with conservative backoff).",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.72,
+        "recommendation": "Ensure the error classifier has a default/fallback classification for any error that doesn't match known patterns. This fallback should default to the safest behavior (retryable with conservative backoff) and log the unrecognized error shape for future classification updates. Add a test case for a completely novel error shape."
+      },
+      {
+        "severity": "medium",
+        "title": "verify-release.yml removed with no documented replacement for CI validation",
+        "body": "The verify-release.yml GitHub Actions workflow (102 lines) was deleted entirely. While scripts/ci/check-release-ready.sh was added as a local replacement, there is no CI workflow file referencing it. This means release validation is now purely manual/local, removing the automated gate that would catch release-readiness issues on PRs. The pre-push hook only runs locally and can be bypassed with --no-verify.",
+        "file": ".github/workflows/verify-release.yml",
+        "line_start": 1,
+        "line_end": 102,
+        "confidence": 0.88,
+        "recommendation": "Either restore a CI workflow that calls check-release-ready.sh on PRs/pushes, or document that release validation is now purely local and acknowledge the reduced safety net. The commit message says 'retire verify-release.yml' but the replacement is not equivalent in enforcement."
+      }
+    ],
+    "next_steps": [
+      "Trace the full error path: inject a persistent failure in the BigModel API and verify that the error is visible in logs, has correct structure, and the caller can handle it gracefully.",
+      "Add jitter to retry.mjs backoff calculations and add a test verifying that concurrent retry attempts produce non-deterministic delays.",
+      "Add a test for bigmodel-errors.mjs with a completely unknown error shape and verify it produces a safe default classification.",
+      "Confirm whether CI release validation is intentionally being moved to local-only, and if so, document this decision and its risk trade-offs.",
+      "Run the full test suite against the branch to verify retry and error dispatch test coverage is adequate for edge cases."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.6 aftercare change adds retry/backoff infrastructure and BigModel error dispatch but ships with a critical logging gap: failed API calls that exhaust retries return null/undefined to callers with no error propagation or diagnostic trail. The retry module has no jitter, creating thundering-herd risk under coordinated retries. The GLM client swallows errors silently, making production failures invisible and unrecoverable. These are ship-blocking observability and correctness defects.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"GLM client silently swallows errors after retry exhaustion\",\n      \"body\": \"In glm-client.mjs, when all retry attempts fail, the call returns undefined/null to the caller with no thrown error, no logged diagnostic, and no structured error payload. Any downstream code consuming the response will fail with a cryptic TypeError (e.g., 'Cannot read property of undefined') instead of a meaningful error. This makes production debugging extremely difficult and violates the principle that failures should be loud. The caller cannot distinguish between 'API returned empty valid result' and 'all retries failed catastrophically'.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 99,\n      \"confidence\": 0.85,\n      \"recommendation\": \"After retry exhaustion, throw a structured error (or at minimum log a diagnostic with full context including endpoint, status codes, and attempt count) so the caller can handle the failure explicitly rather than silently receiving undefined.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"Retry module has no jitter, enabling thundering herd under coordinated failure\",\n      \"body\": \"The retry.mjs exponential backoff implementation uses deterministic delay calculations without random jitter. If multiple clients or instances encounter the same upstream failure simultaneously (e.g., BigModel rate limit or outage), they will all retry at the same computed intervals, creating synchronized request bursts that amplify load on the recovering service. This is a well-documented distributed systems failure mode (AWS architecture blog 'Exponential Backoff and Jitter').\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.8,\n      \"recommendation\": \"Add random jitter to each backoff delay. The standard approach is: delay = min(cap, base * 2 ** attempt) with jitter = random(0, delay). Even a simple random(0.5 * delay, 1.5 * delay) would significantly reduce coordinated retry bursts.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"BigModel error classification has no fallback for unrecognized error shapes\",\n      \"body\": \"The bigmodel-errors.mjs error dispatch relies on pattern matching known error shapes from the BigModel API. If the API returns an unexpected error format (new error code, changed response structure, or non-standard HTTP status), the classifier likely returns an unknown/generic result that may not trigger appropriate retry behavior or user-facing error messaging. There is no evidence of a catch-all classification that maps unrecognized errors to a safe default action (e.g., retry with conservative backoff).\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Ensure the error classifier has a default/fallback classification for any error that doesn't match known patterns. This fallback should default to the safest behavior (retryable with conservative backoff) and log the unrecognized error shape for future classification updates. Add a test case for a completely novel error shape.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"verify-release.yml removed with no documented replacement for CI validation\",\n      \"body\": \"The verify-release.yml GitHub Actions workflow (102 lines) was deleted entirely. While scripts/ci/check-release-ready.sh was added as a local replacement, there is no CI workflow file referencing it. This means release validation is now purely manual/local, removing the automated gate that would catch release-readiness issues on PRs. The pre-push hook only runs locally and can be bypassed with --no-verify.\",\n      \"file\": \".github/workflows/verify-release.yml\",\n      \"line_start\": 1,\n      \"line_end\": 102,\n      \"confidence\": 0.88,\n      \"recommendation\": \"Either restore a CI workflow that calls check-release-ready.sh on PRs/pushes, or document that release validation is now purely local and acknowledge the reduced safety net. The commit message says 'retire verify-release.yml' but the replacement is not equivalent in enforcement.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Trace the full error path: inject a persistent failure in the BigModel API and verify that the error is visible in logs, has correct structure, and the caller can handle it gracefully.\",\n    \"Add jitter to retry.mjs backoff calculations and add a test verifying that concurrent retry attempts produce non-deterministic delays.\",\n    \"Add a test for bigmodel-errors.mjs with a completely unknown error shape and verify it produces a safe default classification.\",\n    \"Confirm whether CI release validation is intentionally being moved to local-only, and if so, document this decision and its risk trade-offs.\",\n    \"Run the full test suite against the branch to verify retry and error dispatch test coverage is adequate for edge cases.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:45:18.194Z"
+}

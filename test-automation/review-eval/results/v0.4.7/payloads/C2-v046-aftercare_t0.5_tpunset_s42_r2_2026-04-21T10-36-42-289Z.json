@@ -1,0 +1,89 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": 42,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 42100,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 hardening aftercare branch introduces retry/backoff logic and BigModel error dispatch without sufficient guards against partial failure, retry storms, or silent data corruption. The retry module has no global concurrency limit or circuit breaker, the GLM client changes layer retries on top of HTTP calls without clear idempotency guarantees, and the pre-push hook silently allows pushes on non-zero exit from check-release-ready.sh depending on shell behavior. Ship blocked until retry boundaries and failure-mode propagation are clarified.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs has no maximum wall-clock time or circuit breaker",
+        "body": "The retry module exposes `maxRetries` and backoff configuration but nothing caps total elapsed wall-clock time. Under sustained downstream failures (e.g. BigModel API degraded), callers will accumulate hours of sleeping promises. There is also no circuit-breaker pattern: every new call starts fresh retries even if the last 100 calls all failed, risking retry storms against a down service.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.8,
+        "recommendation": "Add a `maxTotalMs` option that aborts retries once wall-clock time exceeds a threshold. Consider a shared circuit-breaker instance that short-circuits after N consecutive failures across calls."
+      },
+      {
+        "severity": "high",
+        "title": "GLM client may double-retry if HTTP layer also retries",
+        "body": "glm-client.mjs now wraps calls with retry logic from retry.mjs, but many HTTP clients (including fetch wrappers) have their own retry behavior. If the underlying transport retries and then the GLM client retries on top, a single transient error can produce 2×–4× the expected number of API calls, wasting quota and potentially hitting rate limits that trigger more retries in a feedback loop.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 99,
+        "confidence": 0.75,
+        "recommendation": "Document and enforce that the underlying HTTP transport must NOT retry independently, or expose a configuration to disable transport-level retries. Add a guard that limits total attempted HTTP requests per logical call."
+      },
+      {
+        "severity": "medium",
+        "title": "pre-push hook may not block pushes on script failure",
+        "body": "The pre-push hook invokes `scripts/ci/check-release-ready.sh`. If the script is not executable, missing, or exits non-zero due to a bug rather than a real check failure, the hook's behavior depends on shell error propagation. Without explicit `set -e` or explicit exit-code checking, a failed check could be silently swallowed and the push allowed through, defeating the safety gate.",
+        "file": "scripts/hooks/pre-push",
+        "line_start": 1,
+        "line_end": 22,
+        "confidence": 0.7,
+        "recommendation": "Ensure the hook script uses `set -euo pipefail`, explicitly captures the exit code of check-release-ready.sh, and exits with that code. Test with a deliberately failing check to confirm the push is blocked."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error classification may misclassify unknown errors as retryable",
+        "body": "The error dispatch module maps known BigModel error codes to retry/recoverable categories. If the upstream API introduces new error codes or changes response formatting, unrecognized errors may fall into a default branch that either silently swallows them or incorrectly retries a non-retryable condition (e.g. auth failure, quota exceeded), wasting resources and delaying user-visible failure reporting.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.7,
+        "recommendation": "Default classification for unknown errors should be 'non-retryable' (fail-fast). Log unrecognized error codes/response shapes at warning level so they surface in observability. Add a test case for unexpected response shapes."
+      },
+      {
+        "severity": "medium",
+        "title": "verify-release.yml deleted with no documented replacement in CI",
+        "body": "The verify-release.yml GitHub Actions workflow was deleted entirely. If this provided the only automated release-validation gate in CI, removing it without a tested replacement means releases can be cut without any automated verification, increasing the risk of shipping broken artifacts.",
+        "file": ".github/workflows/verify-release.yml",
+        "line_start": 1,
+        "line_end": 102,
+        "confidence": 0.65,
+        "recommendation": "Confirm that check-release-ready.sh fully covers the verification that verify-release.yml performed, and that it is integrated into CI (not just a local pre-push hook). If CI coverage is reduced, do not delete the workflow until parity is confirmed."
+      }
+    ],
+    "next_steps": [
+      "Read scripts/lib/retry.mjs to confirm wall-clock and circuit-breaker gaps, then add maxTotalMs cap.",
+      "Read scripts/lib/glm-client.mjs to audit retry layering and confirm no double-retry path.",
+      "Execute scripts/hooks/pre-push with a deliberately failing check-release-ready.sh to confirm the push is actually blocked.",
+      "Verify CI pipeline still has release-verification coverage after verify-release.yml removal."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.6 hardening aftercare branch introduces retry/backoff logic and BigModel error dispatch without sufficient guards against partial failure, retry storms, or silent data corruption. The retry module has no global concurrency limit or circuit breaker, the GLM client changes layer retries on top of HTTP calls without clear idempotency guarantees, and the pre-push hook silently allows pushes on non-zero exit from check-release-ready.sh depending on shell behavior. Ship blocked until retry boundaries and failure-mode propagation are clarified.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs has no maximum wall-clock time or circuit breaker\",\"body\":\"The retry module exposes `maxRetries` and backoff configuration but nothing caps total elapsed wall-clock time. Under sustained downstream failures (e.g. BigModel API degraded), callers will accumulate hours of sleeping promises. There is also no circuit-breaker pattern: every new call starts fresh retries even if the last 100 calls all failed, risking retry storms against a down service.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.8,\"recommendation\":\"Add a `maxTotalMs` option that aborts retries once wall-clock time exceeds a threshold. Consider a shared circuit-breaker instance that short-circuits after N consecutive failures across calls.\"},{\"severity\":\"high\",\"title\":\"GLM client may double-retry if HTTP layer also retries\",\"body\":\"glm-client.mjs now wraps calls with retry logic from retry.mjs, but many HTTP clients (including fetch wrappers) have their own retry behavior. If the underlying transport retries and then the GLM client retries on top, a single transient error can produce 2×–4× the expected number of API calls, wasting quota and potentially hitting rate limits that trigger more retries in a feedback loop.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":99,\"confidence\":0.75,\"recommendation\":\"Document and enforce that the underlying HTTP transport must NOT retry independently, or expose a configuration to disable transport-level retries. Add a guard that limits total attempted HTTP requests per logical call.\"},{\"severity\":\"medium\",\"title\":\"pre-push hook may not block pushes on script failure\",\"body\":\"The pre-push hook invokes `scripts/ci/check-release-ready.sh`. If the script is not executable, missing, or exits non-zero due to a bug rather than a real check failure, the hook's behavior depends on shell error propagation. Without explicit `set -e` or explicit exit-code checking, a failed check could be silently swallowed and the push allowed through, defeating the safety gate.\",\"file\":\"scripts/hooks/pre-push\",\"line_start\":1,\"line_end\":22,\"confidence\":0.7,\"recommendation\":\"Ensure the hook script uses `set -euo pipefail`, explicitly captures the exit code of check-release-ready.sh, and exits with that code. Test with a deliberately failing check to confirm the push is blocked.\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors.mjs error classification may misclassify unknown errors as retryable\",\"body\":\"The error dispatch module maps known BigModel error codes to retry/recoverable categories. If the upstream API introduces new error codes or changes response formatting, unrecognized errors may fall into a default branch that either silently swallows them or incorrectly retries a non-retryable condition (e.g. auth failure, quota exceeded), wasting resources and delaying user-visible failure reporting.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.7,\"recommendation\":\"Default classification for unknown errors should be 'non-retryable' (fail-fast). Log unrecognized error codes/response shapes at warning level so they surface in observability. Add a test case for unexpected response shapes.\"},{\"severity\":\"medium\",\"title\":\"verify-release.yml deleted with no documented replacement in CI\",\"body\":\"The verify-release.yml GitHub Actions workflow was deleted entirely. If this provided the only automated release-validation gate in CI, removing it without a tested replacement means releases can be cut without any automated verification, increasing the risk of shipping broken artifacts.\",\"file\":\".github/workflows/verify-release.yml\",\"line_start\":1,\"line_end\":102,\"confidence\":0.65,\"recommendation\":\"Confirm that check-release-ready.sh fully covers the verification that verify-release.yml performed, and that it is integrated into CI (not just a local pre-push hook). If CI coverage is reduced, do not delete the workflow until parity is confirmed.\"}],\"next_steps\":[\"Read scripts/lib/retry.mjs to confirm wall-clock and circuit-breaker gaps, then add maxTotalMs cap.\",\"Read scripts/lib/glm-client.mjs to audit retry layering and confirm no double-retry path.\",\"Execute scripts/hooks/pre-push with a deliberately failing check-release-ready.sh to confirm the push is actually blocked.\",\"Verify CI pipeline still has release-verification coverage after verify-release.yml removal.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:36:42.320Z"
+}

@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": 2024,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 51430,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 changes introduce a retry/backoff library, BigModel error dispatch, and GLM client improvements. While test coverage looks substantial, there are several material concerns around silent failure swallowing in retry logic, potential unbounded retry loops on transient errors, and missing validation in the error classification layer that could mask real failures in production. The deletion of verify-release.yml without a replacement CI gate is also operationally risky.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry logic may silently swallow fatal errors via catch-all error classification",
+        "body": "The retry.mjs module depends on bigmodel-errors.mjs to classify errors as retryable vs fatal. If the error classifier fails to correctly identify a non-retryable error (e.g., auth failure, invalid request), the retry loop will continue burning API credits and delaying the caller until max retries are exhausted. This is especially dangerous if the error classification logic has edge cases around unexpected error shapes or non-Error thrown values. The retry wrapper appears to catch broadly and delegate to the classifier, meaning any gap in classification silently becomes a retryable error.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.75,
+        "recommendation": "Audit the retry predicate path: ensure that any error that does NOT explicitly match a known retryable pattern defaults to 'fatal/not retryable' rather than the opposite. Add a guard that logs a warning when an unexpected error type is encountered, and cap the default maxAttempts to a small number with a clear doc contract."
+      },
+      {
+        "severity": "high",
+        "title": "GLM client changes extend surface area without visible integration tests for failure modes",
+        "body": "The glm-client.mjs diff shows ~99 lines changed, likely adding retry/backoff integration and error dispatch. This is the hot path for every API call. The unit tests for retry.mjs and bigmodel-errors.mjs exist, but there is no evidence of integration tests that exercise the full GLM client with simulated network failures, partial responses, or rate-limit headers. A bug in how the client wires retry logic could cause every request to fail silently or double-fire.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 99,
+        "confidence": 0.7,
+        "recommendation": "Add at least one integration-level test that mocks the HTTP layer and verifies: (1) a 429 response triggers retry with backoff, (2) a 401 response fails immediately without retry, (3) a network timeout retries and eventually propagates the error. Without this, the wiring between retry.mjs, bigmodel-errors.mjs, and the actual HTTP call is untested."
+      },
+      {
+        "severity": "medium",
+        "title": "verify-release.yml deleted without functional replacement in CI pipeline",
+        "body": "The GitHub workflow .github/workflows/verify-release.yml was entirely deleted (102 lines). While a scripts/ci/check-release-ready.sh was added, there is no evidence of a new GitHub Actions workflow that calls it. This means release verification may no longer run in CI, relying entirely on developers running the script locally or the pre-push hook. Pre-push hooks are easily bypassed with --no-verify.",
+        "file": ".github/workflows/verify-release.yml",
+        "line_start": 1,
+        "line_end": 102,
+        "confidence": 0.85,
+        "recommendation": "Either restore a CI workflow that invokes check-release-ready.sh, or confirm that an equivalent gate exists elsewhere in the CI pipeline. Releasing without an automated CI verification gate is a regression."
+      },
+      {
+        "severity": "medium",
+        "title": "pre-push hook may not be installed by default — no install mechanism visible",
+        "body": "scripts/hooks/pre-push was added but there is no visible install script, package.json hook config, or documentation ensuring it gets installed into .git/hooks/. If the hook is not installed, the checks it provides are silently skipped, and combined with the removed CI workflow, there is no safety net.",
+        "file": "scripts/hooks/pre-push",
+        "line_start": 1,
+        "line_end": 22,
+        "confidence": 0.7,
+        "recommendation": "Add a postinstall script in package.json or a setup script that symlinks scripts/hooks/pre-push to .git/hooks/pre-push. Document the requirement. Without this, the hook is dead code."
+      },
+      {
+        "severity": "low",
+        "title": "Error dispatch may not handle non-standard BigModel error response shapes",
+        "body": "The bigmodel-errors.mjs module (168 lines) is responsible for parsing and classifying errors from the BigModel API. If the API returns an unexpected error shape (e.g., missing error.code, non-JSON body, or a new error type not in the dispatch table), the classifier needs to handle that gracefully. Without seeing the exact code, this is a common blind spot — unknown error codes should be treated as fatal, not silently retried.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.6,
+        "recommendation": "Verify that the error dispatch has a default/fallback case that treats unrecognized error codes as non-retryable. Ensure a test exists for an unrecognized error code to confirm it does not enter the retry loop."
+      }
+    ],
+    "next_steps": [
+      "Inspect scripts/lib/retry.mjs to confirm the default error classification is 'not retryable' rather than 'retryable'",
+      "Inspect scripts/lib/glm-client.mjs to verify the retry integration correctly propagates fatal errors immediately",
+      "Verify whether a CI workflow exists that calls scripts/ci/check-release-ready.sh or if release verification is now unguarded",
+      "Confirm the pre-push hook has an installation mechanism",
+      "Add integration tests for the GLM client covering 4xx, 5xx, timeout, and network error scenarios"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.6 changes introduce a retry/backoff library, BigModel error dispatch, and GLM client improvements. While test coverage looks substantial, there are several material concerns around silent failure swallowing in retry logic, potential unbounded retry loops on transient errors, and missing validation in the error classification layer that could mask real failures in production. The deletion of verify-release.yml without a replacement CI gate is also operationally risky.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Retry logic may silently swallow fatal errors via catch-all error classification\",\"body\":\"The retry.mjs module depends on bigmodel-errors.mjs to classify errors as retryable vs fatal. If the error classifier fails to correctly identify a non-retryable error (e.g., auth failure, invalid request), the retry loop will continue burning API credits and delaying the caller until max retries are exhausted. This is especially dangerous if the error classification logic has edge cases around unexpected error shapes or non-Error thrown values. The retry wrapper appears to catch broadly and delegate to the classifier, meaning any gap in classification silently becomes a retryable error.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.75,\"recommendation\":\"Audit the retry predicate path: ensure that any error that does NOT explicitly match a known retryable pattern defaults to 'fatal/not retryable' rather than the opposite. Add a guard that logs a warning when an unexpected error type is encountered, and cap the default maxAttempts to a small number with a clear doc contract.\"},{\"severity\":\"high\",\"title\":\"GLM client changes extend surface area without visible integration tests for failure modes\",\"body\":\"The glm-client.mjs diff shows ~99 lines changed, likely adding retry/backoff integration and error dispatch. This is the hot path for every API call. The unit tests for retry.mjs and bigmodel-errors.mjs exist, but there is no evidence of integration tests that exercise the full GLM client with simulated network failures, partial responses, or rate-limit headers. A bug in how the client wires retry logic could cause every request to fail silently or double-fire.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":99,\"confidence\":0.7,\"recommendation\":\"Add at least one integration-level test that mocks the HTTP layer and verifies: (1) a 429 response triggers retry with backoff, (2) a 401 response fails immediately without retry, (3) a network timeout retries and eventually propagates the error. Without this, the wiring between retry.mjs, bigmodel-errors.mjs, and the actual HTTP call is untested.\"},{\"severity\":\"medium\",\"title\":\"verify-release.yml deleted without functional replacement in CI pipeline\",\"body\":\"The GitHub workflow .github/workflows/verify-release.yml was entirely deleted (102 lines). While a scripts/ci/check-release-ready.sh was added, there is no evidence of a new GitHub Actions workflow that calls it. This means release verification may no longer run in CI, relying entirely on developers running the script locally or the pre-push hook. Pre-push hooks are easily bypassed with --no-verify.\",\"file\":\".github/workflows/verify-release.yml\",\"line_start\":1,\"line_end\":102,\"confidence\":0.85,\"recommendation\":\"Either restore a CI workflow that invokes check-release-ready.sh, or confirm that an equivalent gate exists elsewhere in the CI pipeline. Releasing without an automated CI verification gate is a regression.\"},{\"severity\":\"medium\",\"title\":\"pre-push hook may not be installed by default — no install mechanism visible\",\"body\":\"scripts/hooks/pre-push was added but there is no visible install script, package.json hook config, or documentation ensuring it gets installed into .git/hooks/. If the hook is not installed, the checks it provides are silently skipped, and combined with the removed CI workflow, there is no safety net.\",\"file\":\"scripts/hooks/pre-push\",\"line_start\":1,\"line_end\":22,\"confidence\":0.7,\"recommendation\":\"Add a postinstall script in package.json or a setup script that symlinks scripts/hooks/pre-push to .git/hooks/pre-push. Document the requirement. Without this, the hook is dead code.\"},{\"severity\":\"low\",\"title\":\"Error dispatch may not handle non-standard BigModel error response shapes\",\"body\":\"The bigmodel-errors.mjs module (168 lines) is responsible for parsing and classifying errors from the BigModel API. If the API returns an unexpected error shape (e.g., missing error.code, non-JSON body, or a new error type not in the dispatch table), the classifier needs to handle that gracefully. Without seeing the exact code, this is a common blind spot — unknown error codes should be treated as fatal, not silently retried.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.6,\"recommendation\":\"Verify that the error dispatch has a default/fallback case that treats unrecognized error codes as non-retryable. Ensure a test exists for an unrecognized error code to confirm it does not enter the retry loop.\"}],\"next_steps\":[\"Inspect scripts/lib/retry.mjs to confirm the default error classification is 'not retryable' rather than 'retryable'\",\"Inspect scripts/lib/glm-client.mjs to verify the retry integration correctly propagates fatal errors immediately\",\"Verify whether a CI workflow exists that calls scripts/ci/check-release-ready.sh or if release verification is now unguarded\",\"Confirm the pre-push hook has an installation mechanism\",\"Add integration tests for the GLM client covering 4xx, 5xx, timeout, and network error scenarios\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:50:47.776Z"
+}

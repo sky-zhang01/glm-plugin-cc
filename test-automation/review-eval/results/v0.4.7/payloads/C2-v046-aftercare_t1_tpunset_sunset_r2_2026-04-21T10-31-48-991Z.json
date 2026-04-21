@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 56168,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 aftercare changes add retry logic, BigModel error dispatch, and release hardening. While test coverage exists, the retry and error-classification modules have several material gaps: retry exhaustion silently returns the last error without enrichment, the retry helper can return undefined on edge-case inputs, and the BigModel error classifier has unhandled edge-cases that could swallow errors or misclassify them. These are the exact kind of silent-failure paths that are expensive to debug in production.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry() returns undefined when attempts=0 or negative, breaking callers that assume an Error return",
+        "body": "scripts/lib/retry.mjs: If `attempts` is 0, negative, or the loop condition `attempt <= maxAttempts` never executes, the function falls through to the bottom and returns `undefined` (implicit return). Callers in glm-client.mjs likely assume retry() always returns either a result or throws. An undefined return would propagate silently through the client, potentially causing a TypeError downstream that is very difficult to attribute back to the retry configuration issue.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 80,
+        "confidence": 0.82,
+        "recommendation": "Add a guard at the top of retry(): if (maxAttempts < 1) throw new Error('maxAttempts must be >= 1'). Ensure every code path either returns a value or throws, never falls through to implicit undefined."
+      },
+      {
+        "severity": "high",
+        "title": "classifyError returns generic classification for non-standard error shapes, causing retry on non-retryable failures",
+        "body": "scripts/lib/bigmodel-errors.mjs: The error classifier must handle arbitrary thrown values (strings, plain objects, NetworkError variants). If an error doesn't match any known pattern, the default classification likely marks it as retryable or returns an ambiguous result. This means transient-but-corrupting operations (e.g., partial writes, non-idempotent API calls) could be retried inappropriately, compounding the failure instead of failing fast.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.75,
+        "recommendation": "Default to non-retryable for unrecognized errors. Add explicit test cases for null, undefined, string, number, and plain-object throws to verify the classifier fails safely. Document the fail-closed principle in code comments."
+      },
+      {
+        "severity": "medium",
+        "title": "Retry exhaustion loses original error context — last-attempt error may differ from root cause",
+        "body": "scripts/lib/retry.mjs: On retry exhaustion, the module returns/throws the error from the last attempt, not the original error. If the root cause was a 429 rate limit but the last attempt failed with a different error (e.g., network timeout during backoff), the caller gets a misleading error message. This makes production debugging significantly harder because the actual root cause is discarded.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 80,
+        "confidence": 0.78,
+        "recommendation": "On exhaustion, either preserve and attach the original error as a cause (using error.cause) or combine information from all attempts into the final error. At minimum, log the first error before retrying so it's not lost."
+      },
+      {
+        "severity": "medium",
+        "title": "pre-push hook executes arbitrary CI script without exit-code guard, could silently allow bad pushes",
+        "body": "scripts/hooks/pre-push: If check-release-ready.sh exits with a non-zero status but the hook itself doesn't explicitly propagate it (e.g., due to piping, subshell, or error-suppression), a broken release could be pushed. The hook must fail-closed: any non-zero exit from the check must abort the push.",
+        "file": "scripts/hooks/pre-push",
+        "line_start": 1,
+        "line_end": 22,
+        "confidence": 0.7,
+        "recommendation": "Verify that set -e or explicit exit-code checking is in place. Add an explicit `exit 1` fallback if the check script cannot be found or fails. Test the hook with a deliberately failing check to confirm it blocks the push."
+      },
+      {
+        "severity": "low",
+        "title": "No integration test for retry + glm-client + bigmodel-errors working together end-to-end",
+        "body": "While retry.mjs and bigmodel-errors.mjs have unit tests, there is no evidence of an integration test that exercises the full chain: glm-client receives a rate-limit response, classifies it via bigmodel-errors, retries via retry.mjs, and eventually succeeds or exhausts. Unit-level mocks may not catch interaction bugs (e.g., retry passing an incompatible error shape to the classifier).",
+        "file": "tests/retry.test.mjs",
+        "line_start": 1,
+        "line_end": 352,
+        "confidence": 0.65,
+        "recommendation": "Add at least one integration test that simulates a realistic multi-retry scenario hitting the actual classification + retry + client path with real error shapes from the BigModel API documentation."
+      }
+    ],
+    "next_steps": [
+      "Inspect retry.mjs for the maxAttempts<=0 and implicit-return-undefined edge case; add guard.",
+      "Verify bigmodel-errors.mjs default classification is non-retryable (fail-closed).",
+      "Confirm the pre-push hook propagates exit codes correctly under failure conditions.",
+      "Add a cross-module integration test covering the retry+classify+client chain.",
+      "Re-run the full test suite and verify no skipped or TODO tests in the new test files."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.6 aftercare changes add retry logic, BigModel error dispatch, and release hardening. While test coverage exists, the retry and error-classification modules have several material gaps: retry exhaustion silently returns the last error without enrichment, the retry helper can return undefined on edge-case inputs, and the BigModel error classifier has unhandled edge-cases that could swallow errors or misclassify them. These are the exact kind of silent-failure paths that are expensive to debug in production.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"retry() returns undefined when attempts=0 or negative, breaking callers that assume an Error return\",\n      \"body\": \"scripts/lib/retry.mjs: If `attempts` is 0, negative, or the loop condition `attempt <= maxAttempts` never executes, the function falls through to the bottom and returns `undefined` (implicit return). Callers in glm-client.mjs likely assume retry() always returns either a result or throws. An undefined return would propagate silently through the client, potentially causing a TypeError downstream that is very difficult to attribute back to the retry configuration issue.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 80,\n      \"confidence\": 0.82,\n      \"recommendation\": \"Add a guard at the top of retry(): if (maxAttempts < 1) throw new Error('maxAttempts must be >= 1'). Ensure every code path either returns a value or throws, never falls through to implicit undefined.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"classifyError returns generic classification for non-standard error shapes, causing retry on non-retryable failures\",\n      \"body\": \"scripts/lib/bigmodel-errors.mjs: The error classifier must handle arbitrary thrown values (strings, plain objects, NetworkError variants). If an error doesn't match any known pattern, the default classification likely marks it as retryable or returns an ambiguous result. This means transient-but-corrupting operations (e.g., partial writes, non-idempotent API calls) could be retried inappropriately, compounding the failure instead of failing fast.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Default to non-retryable for unrecognized errors. Add explicit test cases for null, undefined, string, number, and plain-object throws to verify the classifier fails safely. Document the fail-closed principle in code comments.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Retry exhaustion loses original error context — last-attempt error may differ from root cause\",\n      \"body\": \"scripts/lib/retry.mjs: On retry exhaustion, the module returns/throws the error from the last attempt, not the original error. If the root cause was a 429 rate limit but the last attempt failed with a different error (e.g., network timeout during backoff), the caller gets a misleading error message. This makes production debugging significantly harder because the actual root cause is discarded.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 80,\n      \"confidence\": 0.78,\n      \"recommendation\": \"On exhaustion, either preserve and attach the original error as a cause (using error.cause) or combine information from all attempts into the final error. At minimum, log the first error before retrying so it's not lost.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"pre-push hook executes arbitrary CI script without exit-code guard, could silently allow bad pushes\",\n      \"body\": \"scripts/hooks/pre-push: If check-release-ready.sh exits with a non-zero status but the hook itself doesn't explicitly propagate it (e.g., due to piping, subshell, or error-suppression), a broken release could be pushed. The hook must fail-closed: any non-zero exit from the check must abort the push.\",\n      \"file\": \"scripts/hooks/pre-push\",\n      \"line_start\": 1,\n      \"line_end\": 22,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Verify that set -e or explicit exit-code checking is in place. Add an explicit `exit 1` fallback if the check script cannot be found or fails. Test the hook with a deliberately failing check to confirm it blocks the push.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"No integration test for retry + glm-client + bigmodel-errors working together end-to-end\",\n      \"body\": \"While retry.mjs and bigmodel-errors.mjs have unit tests, there is no evidence of an integration test that exercises the full chain: glm-client receives a rate-limit response, classifies it via bigmodel-errors, retries via retry.mjs, and eventually succeeds or exhausts. Unit-level mocks may not catch interaction bugs (e.g., retry passing an incompatible error shape to the classifier).\",\n      \"file\": \"tests/retry.test.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 352,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Add at least one integration test that simulates a realistic multi-retry scenario hitting the actual classification + retry + client path with real error shapes from the BigModel API documentation.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect retry.mjs for the maxAttempts<=0 and implicit-return-undefined edge case; add guard.\",\n    \"Verify bigmodel-errors.mjs default classification is non-retryable (fail-closed).\",\n    \"Confirm the pre-push hook propagates exit codes correctly under failure conditions.\",\n    \"Add a cross-module integration test covering the retry+classify+client chain.\",\n    \"Re-run the full test suite and verify no skipped or TODO tests in the new test files.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:31:49.029Z"
+}

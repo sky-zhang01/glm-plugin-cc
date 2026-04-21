@@ -1,0 +1,28 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": 42,
+    "thinking": "on",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 0,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 14672,
+    "error_code": ""
+  },
+  "parsed": null,
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.6 hardening adds retry/backoff and error-dispatch infrastructure, but I need to inspect the actual implementation files for concrete defects before giving a final verdict. Let me examine the core logic files.\",\"findings\":[],\"next_steps\":[\"Read scripts/lib/retry.mjs to check for off-by-one in attempt counting, improper jitter, and idempotency gaps\",\"Read scripts/lib/bigmodel-errors.mjs to verify error classification completeness and silent swallow paths\",\"Read scripts/lib/glm-client.mjs to check that retry integration handles partial responses and stream failures correctly\",\"Read scripts/ci/check-release-ready.sh for any silent-exit or missing-guard issues\",\"Read scripts/hooks/pre-push for any bypass or credential-exposure risks\",\"Inspect tests/retry.test.mjs and tests/bigmodel-errors.test.mjs for coverage gaps on edge cases (concurrent retries, max-attempts exhaustion, null/undefined error objects)\",\"Verify that removing .github/workflows/verify-release.yml doesn't leave a CI gap with no replacement\"]}\n\nI need to actually read the source files to produce grounded findings. Let me do that now.",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:36:56.993Z"
+}

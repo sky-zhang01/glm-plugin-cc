@@ -1,0 +1,33 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 12245,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "approve",
+    "summary": "The commit renames the npm scope and adds an interactive re-configuration menu to /glm:setup when already configured. Changes are confined to metadata files (package.json, plugin JSONs), markdown documentation (CHANGELOG, release_card), and a prompt template (commands/setup.md). No executable logic, no auth boundaries, no data mutations, no state management — purely declarative and documentation-level changes. No material defects found.",
+    "findings": [],
+    "next_steps": []
+  },
+  "rawOutputHead": "{\"verdict\":\"approve\",\"summary\":\"The commit renames the npm scope and adds an interactive re-configuration menu to /glm:setup when already configured. Changes are confined to metadata files (package.json, plugin JSONs), markdown documentation (CHANGELOG, release_card), and a prompt template (commands/setup.md). No executable logic, no auth boundaries, no data mutations, no state management — purely declarative and documentation-level changes. No material defects found.\",\"findings\":[],\"next_steps\":[]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T12:43:14.756Z"
+}

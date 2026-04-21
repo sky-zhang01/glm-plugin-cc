@@ -46,21 +46,43 @@ workflow-governor cross-review hallucination session:
    Out-of-range values are silently skipped so sweep automation never
    crashes mid-run.
 
-3. **Evaluation harness** (`test-automation/review-eval/`) — pinned
-   fixture (C2, the v0.4.5→v0.4.6 diff), automated citation scoring
-   via file-existence + distinctive-token grep, CSV results format
-   stable across releases. Ships with the v0.4.7 9-call sanity-sweep
-   results so the next release can diff rather than re-instrument.
+3. **Three-fixture evaluation harness** (`test-automation/review-eval/`)
+   — pinned fixtures at three scales (C1 small ~440 lines / C2 medium
+   ~1550 lines / C3 large ~8336 lines), automated citation scoring via
+   file-existence + distinctive-token grep, CSV results format stable
+   across releases, per-run sidecar payload capture for offline audit.
+   Ships with both the initial 9-call sanity-sweep data
+   (`sanity-sweep.csv`) and the expanded 54-run B+D+E matrix data
+   (`expanded-sweep.csv`) so v0.4.8+ can diff against either baseline.
+
+4. **Extended parse-failure classifier** added post-expanded-sweep.
+   The initial 9-run sweep (medium diff) produced a schema=0 cell
+   that user push-back correctly identified as possibly underpowered.
+   The 54-run expanded sweep on C1/C2/C3 surfaced five distinct
+   parse-failure modes that the initial `classifyReviewPayload` did
+   not cover — all now typed and correction-hinted:
+   - `EMPTY_RESPONSE`, `REASONING_LEAK`, `MARKDOWN_FENCE_UNTERMINATED`,
+     `TRUNCATED_JSON`, `PARSE_FAILURE`.
+   - `stripMarkdownFences` also extended with open-only and close-only
+     half-fence fallbacks.
+   - 15 new unit tests, total suite 149/149 passing.
 
 ## Out of Scope
 
-- **No default sampling parameter change.** The 9-call sanity sweep
-  (issue #7 comment 2026-04-21, maintainer-approved β scope) did not
-  surface signal strong enough to justify changing server-default
-  temperature / top_p / seed. Per the maintainer directive ("model
-  updates faster than experimental data stays valid"), scope was
-  intentionally capped at 9 calls rather than the originally-proposed
-  96-cell grid.
+- **No default sampling parameter change.** The initial 9-call sanity
+  sweep was followed up with a 54-run B+D+E expanded matrix (3 fixtures
+  × up to 4 seeds × 3 temps × N=3). Even at the expanded scope, N=3
+  per cell is too thin to justify a release-wide default shift. The
+  data surfaces a clear C3 large-diff scale effect
+  (schema_compliance 0.67 / 0.33 / 0.00 at temp 0 / 0.5 / 1) that is
+  the v0.4.8 investigation priority — a focused C3 sweep with N ≥ 10
+  per temperature would determine whether `temperature=0.2` should
+  become the review-specific default.
+- **No BigModel error-code table update** despite seeing
+  `VENDOR_ERROR:1234` × 2 and `VENDOR_ERROR:500` × 1 in the expanded
+  sweep. These fell through the v0.4.6 catchall as designed. Deferred
+  to v0.4.8 pending BigModel documenting codes 1234 and 500 (or
+  confirming they are transient/undocumented).
 - **No C1 (small) / C3 (large) fixtures.** v0.4.7 ships only the C2
   medium fixture. Adding smaller or larger fixtures is deferred until
   a regression actually motivates them.
@@ -91,28 +113,37 @@ workflow-governor cross-review hallucination session:
     pin arbitrary base refs ✓
 12. Bump 0.4.6 → 0.4.7 (package.json + plugin.json + marketplace.json) ✓
 13. CHANGELOG v0.4.7 section with sweep outcome table ✓
-14. `Skill(simplify)` on changed files — pending
-15. `npm run ci:local` — pending
-16. Adversarial review (Codex primary if quota allows, else GLM
+14. **(Added post-user-pushback)** Harness strictness realignment +
+    raw-payload sidecar capture (commit 66ba99c) ✓
+15. **(Added)** C1 (small) + C3 (large) fixtures + path-leak exclusion
+    (commit 7a971a7) ✓
+16. **(Added)** 54-run B+D+E expanded sweep on 3 fixtures ✓
+17. **(Added)** `classifyParseFailure` for 5 parse-failure modes +
+    `stripMarkdownFences` half-fence fallbacks + 15 new unit tests ✓
+18. **(Added)** CHANGELOG v0.4.7 rewrite with expanded-sweep outcome
+    table + C3 scale-effect flag for v0.4.8 ✓
+19. `Skill(simplify)` on changed files — pending
+20. `npm run ci:local` — pending
+21. Adversarial review (Codex primary if quota allows, else GLM
     fallback) — pending
-17. Push to Gitea only. Open PR → `develop`. Paste adversarial verdict
+22. Push to Gitea only. Open PR → `develop`. Paste adversarial verdict
     in PR body. — pending
-18. Gitea CI green → auto-merge PR to develop — pending
-19. Open Gitea PR: develop → main. Merge. — pending
-20. Tag v0.4.7 annotated on main merge commit. Pre-push hook runs
+23. Gitea CI green → auto-merge PR to develop — pending
+24. Open Gitea PR: develop → main. Merge. — pending
+25. Tag v0.4.7 annotated on main merge commit. Pre-push hook runs
     `check-release-ready.sh v0.4.7`. — pending
-21. Publish Gitea release v0.4.7 (Latest auto-set) — pending
-22. Sync main + develop + tag to GitHub. Confirm PR Check + AI Quality
+26. Publish Gitea release v0.4.7 (Latest auto-set) — pending
+27. Sync main + develop + tag to GitHub. Confirm PR Check + AI Quality
     Gate green — pending
-23. Publish GitHub release v0.4.7, mark Latest — pending
-24. Fast-forward develop → main on both remotes (GitFlow cleanup) —
+28. Publish GitHub release v0.4.7, mark Latest — pending
+29. Fast-forward develop → main on both remotes (GitFlow cleanup) —
     pending
-25. Upgrade local plugin cache to v0.4.7 — pending
-26. Close Gitea issue #7 with link to CHANGELOG entry + final CSV —
-    pending
+30. Upgrade local plugin cache to v0.4.7 — pending
+31. Close Gitea issue #7 with link to CHANGELOG entry + final CSV,
+    and open v0.4.8 follow-up issue for focused C3 sweep — pending
 
-## Scope Completion: will reach COMPLETE at step 26
-## Outstanding In-Scope Work: steps 14-26 pending
+## Scope Completion: will reach COMPLETE at step 31
+## Outstanding In-Scope Work: steps 19-31 pending
 
 ## Major Upgrade Review: N/A
 
@@ -147,29 +178,42 @@ the POST body when the caller explicitly passes a flag).
   forwarding into `runGlmReview` options, updated printUsage).
 - Modified: `commands/review.md`, `commands/adversarial-review.md`
   (argument-hint extension + scope-flags doc pointer to issue #7).
-- New: `tests/review-payload.test.mjs` (184 lines, 19 tests).
+- New: `tests/review-payload.test.mjs` (initial 19 tests + 15 added
+  post-expanded-sweep for half-fences + 5-mode parse-failure classifier
+  = 34 total).
 - New: `test-automation/review-eval/` directory
-  (README + corpus/C2-v046-aftercare/{meta,ground-truth,diff.patch} +
-  scripts/{run-experiment,summarize}.mjs + results/v0.4.7/sanity-sweep.csv).
-- Version bump in 3 manifest files + CHANGELOG v0.4.7 section.
-- Gitea issue #7 opened + commented with scope reduction (β).
+  - `corpus/C1-v044-setup-menu/` (small fixture, 440 lines, 6 files)
+  - `corpus/C2-v046-aftercare/` (medium fixture, 1550 lines, 11 files)
+  - `corpus/C3-v04x-cumulative/` (large fixture, 8336 lines, 84 files)
+  - `scripts/{run-experiment,summarize}.mjs` — run-experiment extended
+    with raw-payload sidecar capture + `--base` flag + schema-check
+    alignment to classifyReviewPayload
+  - `results/v0.4.7/sanity-sweep.csv` (initial 9 runs, v1 strictness)
+  - `results/v0.4.7/expanded-sweep.csv` (54 runs, new strictness)
+  - `results/v0.4.7/payloads/` (54 sidecar JSON files)
+- Modified: `scripts/ci/check-no-local-paths.sh` (exclude
+  review-eval corpus + results paths from path-leak scanner).
+- Version bump in 3 manifest files + CHANGELOG v0.4.7 rewrite with
+  expanded-sweep outcome table.
+- Gitea issue #7 opened + commented with scope reduction (β) +
+  expanded (B+D+E mix).
 
 ## Verification Plan
 
 | Layer | Tool | Pass criterion |
 |---|---|---|
 | Static | `npm run check` | All modules parse; import graph resolves |
-| Unit | `npm test` | 134/134 pass (115 existing + 19 review-payload) |
+| Unit | `npm test` | 149/149 pass (115 existing + 34 review-payload) |
 | Manifest | `check-plugin-manifest.sh` | Version 0.4.7 consistent across 3 JSON files |
 | CHANGELOG | `check-changelog-updated.sh` | `## v0.4.7` section present |
-| Leak guard | `check-no-local-paths.sh` | No internal paths leaked |
+| Leak guard | `check-no-local-paths.sh` | No internal paths leaked (corpus/results excluded) |
 | Cross-AI | `check-cross-ai-review.mjs` | adversarial review referenced |
 | Companion UAT | reuse v0.4.5 scenarios | Still PASS — v0.4.7 additive only |
 | Adversarial | `/codex:adversarial-review` preferred, else `/glm:adversarial-review` | No unresolved CRITICAL/HIGH |
 | Gitea CI | `ai-quality-gate.yml` + `pr-check.yml` | both green |
 | GitHub CI | same 2 workflows | both green |
 | **Release gate** | `bash scripts/ci/check-release-ready.sh v0.4.7` | All 4 checks pass (runs automatically in pre-push on tag push) |
-| **Sanity sweep data** | `node test-automation/review-eval/scripts/summarize.mjs results/v0.4.7/sanity-sweep.csv` | 9 rows, no SCHEMA_ECHO, no false_file_hits |
+| **Expanded sweep data** | `node test-automation/review-eval/scripts/summarize.mjs results/v0.4.7/expanded-sweep.csv` | 54 rows, 0 SCHEMA_ECHO, 0 false_file_hits, 8/18 cells PASS |
 
 ## Local Verification
 

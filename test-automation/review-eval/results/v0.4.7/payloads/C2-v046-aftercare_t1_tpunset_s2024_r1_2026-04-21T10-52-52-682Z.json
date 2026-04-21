@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 1,
+    "topP": null,
+    "seed": 2024,
+    "thinking": "on",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 56539,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 changes introduce retry/backoff logic, BigModel error dispatch, and CI hardening. While the retry module has strong test coverage, the glm-client integration has a timing-based retry decision that can silently swallow non-retryable errors when the error dispatcher returns a falsy value. The error dispatcher also has an incomplete classification that could misroute transient errors as permanent, causing unnecessary user-facing failures. The pre-push hook uses unguarded git operations that will produce confusing errors if run outside a git repo. These are real reliability risks for the stated use case of production API calls.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry logic silently drops non-classified errors without any fallback handling",
+        "body": "In glm-client.mjs, the retry decision relies entirely on `classifyBigModelError(err)` returning a truthy object. If an error occurs that is NOT in the bigmodel-errors registry (e.g., a new error code, an unexpected response shape, a DNS error, a timeout from fetch itself), `classifyBigModelError` returns `undefined`. The code at the call site does `if (retryInfo?.retryable)` — but if `retryInfo` is undefined, the entire error is silently dropped: no retry, no error logging, no user feedback. The caller may proceed as if the request succeeded with no data. This is a silent failure path on the unhappy path.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 99,
+        "confidence": 0.78,
+        "recommendation": "Add an explicit guard after the retry classification: if `classifyBigModelError` returns undefined/null, the error should be logged and re-thrown (or a default classification applied). Do not silently continue. For example: `if (!retryInfo) { log.warn('Unclassified error', err); throw err; }`"
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs does not cover network-level failures or fetch abort/timeout",
+        "body": "The error classifier only handles HTTP-status-based errors (400, 401, 429, 500, etc.) and extracts error codes from response bodies. It has no coverage for: network connectivity failures (ECONNREFUSED, ENOTFOUND), DNS resolution failures, fetch AbortError (from timeout), or connection resets. These are common transient failures that SHOULD be retried but will instead fall through as unclassified errors (see previous finding), likely resulting in silent failure or unhandled exceptions depending on the integration path.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.82,
+        "recommendation": "Add classification rules for common network errors (TypeError from fetch, AbortError, system error codes). At minimum, provide a default 'transient network error' classification that enables retry with backoff rather than dropping the error entirely."
+      },
+      {
+        "severity": "medium",
+        "title": "Retry module exponential backoff uses Math.random() without seeding protection for concurrent calls",
+        "body": "The jitter in the retry module uses `Math.random()` for jitter calculation. In concurrent environments (multiple simultaneous API calls), if retries are initiated at nearly the same time with similar retry counts, the jitter spread may not be sufficient to prevent thundering-herd behavior against the API. More critically, the retry delay calculation `Math.min(baseDelay * Math.pow(2, attempt), maxDelay)` does not account for wall-clock time already elapsed during previous attempts — if a single API call takes 30 seconds before timing out, the retry delay adds on top of that, potentially exceeding the caller's total timeout budget without any signal.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.55,
+        "recommendation": "Add an optional total elapsed-time budget to the retry options that caps the cumulative wait + execution time. Document that callers should set `maxDelay` and `maxRetries` relative to their expected total timeout. Consider adding jitter spread proportional to attempt count."
+      },
+      {
+        "severity": "low",
+        "title": "pre-push hook runs git commands without checking if inside a git repository",
+        "body": "The pre-push hook script executes `git` commands directly. If the hook is somehow triggered outside a git repository (e.g., during development with symlinks, or in a detached worktree scenario), it will produce raw git errors to the user rather than a clean error message. While unlikely in normal use, it degrades the user experience for edge cases.",
+        "file": "scripts/hooks/pre-push",
+        "line_start": 1,
+        "line_end": 22,
+        "confidence": 0.4,
+        "recommendation": "Add a guard at the top of the pre-push hook: `git rev-parse --git-dir >/dev/null 2>&1 || { echo 'Not a git repository'; exit 1; }`"
+      }
+    ],
+    "next_steps": [
+      "Inspect glm-client.mjs to trace the exact code path when classifyBigModelError returns undefined — confirm whether the error is swallowed or propagated.",
+      "Add a default/fallback classification in bigmodel-errors.mjs for unrecognized errors so they are at least logged and re-thrown, not silently dropped.",
+      "Verify retry.mjs tests cover the case where the classifier returns null/undefined to ensure the integration handles it gracefully.",
+      "Run the existing test suite (`npm test`) to confirm no regressions from the new modules.",
+      "Test a live scenario with an intentionally broken API endpoint (wrong host, timeout) to verify the retry and error paths behave as expected end-to-end."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.6 changes introduce retry/backoff logic, BigModel error dispatch, and CI hardening. While the retry module has strong test coverage, the glm-client integration has a timing-based retry decision that can silently swallow non-retryable errors when the error dispatcher returns a falsy value. The error dispatcher also has an incomplete classification that could misroute transient errors as permanent, causing unnecessary user-facing failures. The pre-push hook uses unguarded git operations that will produce confusing errors if run outside a git repo. These are real reliability risks for the stated use case of production API calls.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Retry logic silently drops non-classified errors without any fallback handling\",\n      \"body\": \"In glm-client.mjs, the retry decision relies entirely on `classifyBigModelError(err)` returning a truthy object. If an error occurs that is NOT in the bigmodel-errors registry (e.g., a new error code, an unexpected response shape, a DNS error, a timeout from fetch itself), `classifyBigModelError` returns `undefined`. The code at the call site does `if (retryInfo?.retryable)` — but if `retryInfo` is undefined, the entire error is silently dropped: no retry, no error logging, no user feedback. The caller may proceed as if the request succeeded with no data. This is a silent failure path on the unhappy path.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 99,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Add an explicit guard after the retry classification: if `classifyBigModelError` returns undefined/null, the error should be logged and re-thrown (or a default classification applied). Do not silently continue. For example: `if (!retryInfo) { log.warn('Unclassified error', err); throw err; }`\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"bigmodel-errors.mjs does not cover network-level failures or fetch abort/timeout\",\n      \"body\": \"The error classifier only handles HTTP-status-based errors (400, 401, 429, 500, etc.) and extracts error codes from response bodies. It has no coverage for: network connectivity failures (ECONNREFUSED, ENOTFOUND), DNS resolution failures, fetch AbortError (from timeout), or connection resets. These are common transient failures that SHOULD be retried but will instead fall through as unclassified errors (see previous finding), likely resulting in silent failure or unhandled exceptions depending on the integration path.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.82,\n      \"recommendation\": \"Add classification rules for common network errors (TypeError from fetch, AbortError, system error codes). At minimum, provide a default 'transient network error' classification that enables retry with backoff rather than dropping the error entirely.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Retry module exponential backoff uses Math.random() without seeding protection for concurrent calls\",\n      \"body\": \"The jitter in the retry module uses `Math.random()` for jitter calculation. In concurrent environments (multiple simultaneous API calls), if retries are initiated at nearly the same time with similar retry counts, the jitter spread may not be sufficient to prevent thundering-herd behavior against the API. More critically, the retry delay calculation `Math.min(baseDelay * Math.pow(2, attempt), maxDelay)` does not account for wall-clock time already elapsed during previous attempts — if a single API call takes 30 seconds before timing out, the retry delay adds on top of that, potentially exceeding the caller's total timeout budget without any signal.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Add an optional total elapsed-time budget to the retry options that caps the cumulative wait + execution time. Document that callers should set `maxDelay` and `maxRetries` relative to their expected total timeout. Consider adding jitter spread proportional to attempt count.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"pre-push hook runs git commands without checking if inside a git repository\",\n      \"body\": \"The pre-push hook script executes `git` commands directly. If the hook is somehow triggered outside a git repository (e.g., during development with symlinks, or in a detached worktree scenario), it will produce raw git errors to the user rather than a clean error message. While unlikely in normal use, it degrades the user experience for edge cases.\",\n      \"file\": \"scripts/hooks/pre-push\",\n      \"line_start\": 1,\n      \"line_end\": 22,\n      \"confidence\": 0.4,\n      \"recommendation\": \"Add a guard at the top of the pre-push hook: `git rev-parse --git-dir >/dev/null 2>&1 || { echo 'Not a git repository'; exit 1; }`\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect glm-client.mjs to trace the exact code path when classifyBigModelError returns undefined — confirm whether the error is swallowed or propagated.\",\n    \"Add a default/fallback classification in bigmodel-errors.mjs for unrecognized errors so they are at least logged and re-thrown, not silently dropped.\",\n    \"Verify retry.mjs tests cover the case where the classifier returns null/undefined to ensure the integration handles it gracefully.\",\n    \"Run the existing test suite (`npm test`) to confirm no regressions from the new modules.\",\n    \"Test a live scenario with an intentionally broken API endpoint (wrong host, timeout) to verify the retry and error paths behave as expected end-to-end.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:52:52.714Z"
+}

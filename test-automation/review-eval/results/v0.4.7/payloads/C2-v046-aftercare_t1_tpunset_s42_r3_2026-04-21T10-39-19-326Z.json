@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 1,
+    "topP": null,
+    "seed": 42,
+    "thinking": "on",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 41415,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 diff introduces retry/backoff and error-dispatch infrastructure (retry.mjs, bigmodel-errors.mjs, glm-client.mjs) that ships with good test coverage but carries material risk: the retry loop has a subtle correctness issue around jitter math that can produce zero-delay retries on re-entrancy, and the GLM client's error-classification path can silently swallow non-classifiable errors by converting them to generic Error instances, discarding the original HTTP status and response body. These are exactly the kind of silent-degradation failures that are expensive to diagnose in production.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry jitter can produce zero delay when base delay rounds to zero",
+        "body": "In retry.mjs, the jitter calculation `Math.floor(Math.random() * delay)` where delay is computed as `baseDelay * 2 ** attempt` can produce a jitter value of 0, and the resulting delay can also be 0 when baseDelay is small and attempt is 0. This means the first retry fires immediately with no backoff. Under sustained failures this collapses into a tight retry loop that can exhaust rate limits or amplify load on an already-degraded dependency. The tests only check that delay is within bounds, not that it is strictly positive.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.75,
+        "recommendation": "Add a floor to the computed delay, e.g. `const jitteredDelay = Math.max(1, delay - jitter)` or `delay = Math.max(minDelay, baseDelay * 2 ** attempt)`. Add an explicit test case that asserts delay > 0 for all attempts up to maxRetries."
+      },
+      {
+        "severity": "medium",
+        "title": "GLM client error wrapping can discard original HTTP status and response body for unclassified errors",
+        "body": "In glm-client.mjs, when BigModel error classification does not match a known pattern, the code creates a generic Error, losing the original status code and response body. Callers upstream cannot distinguish a 500 (retryable) from a 403 (not retryable) because the classification layer consumed and discarded that information. This creates a silent failure path where non-retryable auth/permission errors get retried until maxRetries, wasting quota and delaying user-visible errors.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 99,
+        "confidence": 0.7,
+        "recommendation": "Ensure the fallback Error path preserves `status`, `headers`, and a truncated `body` property on the error object. Consider adding an `originalError` or `cause` reference so that debugging production failures does not require guessing what BigModel returned."
+      },
+      {
+        "severity": "medium",
+        "title": "pre-push hook runs release-readiness check that can block legitimate pushes without override",
+        "body": "The pre-push hook at scripts/hooks/pre-push invokes check-release-ready.sh, which can fail and block `git push`. There is no documented `--no-verify` escape hatch or skip mechanism in the hook itself. If a developer needs to push a WIP branch or a hotfix that intentionally skips version bumps, the hook will reject the push. This is a developer-experience footgun that can delay critical patches.",
+        "file": "scripts/hooks/pre-push",
+        "line_start": 1,
+        "line_end": 22,
+        "confidence": 0.6,
+        "recommendation": "Document the `--no-verify` git flag in a comment inside the hook or in README. Alternatively, make the check conditional on the branch name (e.g. only enforce on main/develop) so feature branches are not blocked."
+      }
+    ],
+    "next_steps": [
+      "Inspect retry.mjs jitter math and add a positive floor guard with a test",
+      "Audit glm-client.mjs error fallback path to ensure HTTP status/body are preserved on the thrown error",
+      "Verify that bigmodel-errors.mjs classification covers all documented BigModel error codes, not just a subset",
+      "Confirm pre-push hook behavior on non-release branches and document skip mechanism"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.6 diff introduces retry/backoff and error-dispatch infrastructure (retry.mjs, bigmodel-errors.mjs, glm-client.mjs) that ships with good test coverage but carries material risk: the retry loop has a subtle correctness issue around jitter math that can produce zero-delay retries on re-entrancy, and the GLM client's error-classification path can silently swallow non-classifiable errors by converting them to generic Error instances, discarding the original HTTP status and response body. These are exactly the kind of silent-degradation failures that are expensive to diagnose in production.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Retry jitter can produce zero delay when base delay rounds to zero\",\"body\":\"In retry.mjs, the jitter calculation `Math.floor(Math.random() * delay)` where delay is computed as `baseDelay * 2 ** attempt` can produce a jitter value of 0, and the resulting delay can also be 0 when baseDelay is small and attempt is 0. This means the first retry fires immediately with no backoff. Under sustained failures this collapses into a tight retry loop that can exhaust rate limits or amplify load on an already-degraded dependency. The tests only check that delay is within bounds, not that it is strictly positive.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.75,\"recommendation\":\"Add a floor to the computed delay, e.g. `const jitteredDelay = Math.max(1, delay - jitter)` or `delay = Math.max(minDelay, baseDelay * 2 ** attempt)`. Add an explicit test case that asserts delay > 0 for all attempts up to maxRetries.\"},{\"severity\":\"medium\",\"title\":\"GLM client error wrapping can discard original HTTP status and response body for unclassified errors\",\"body\":\"In glm-client.mjs, when BigModel error classification does not match a known pattern, the code creates a generic Error, losing the original status code and response body. Callers upstream cannot distinguish a 500 (retryable) from a 403 (not retryable) because the classification layer consumed and discarded that information. This creates a silent failure path where non-retryable auth/permission errors get retried until maxRetries, wasting quota and delaying user-visible errors.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":99,\"confidence\":0.7,\"recommendation\":\"Ensure the fallback Error path preserves `status`, `headers`, and a truncated `body` property on the error object. Consider adding an `originalError` or `cause` reference so that debugging production failures does not require guessing what BigModel returned.\"},{\"severity\":\"medium\",\"title\":\"pre-push hook runs release-readiness check that can block legitimate pushes without override\",\"body\":\"The pre-push hook at scripts/hooks/pre-push invokes check-release-ready.sh, which can fail and block `git push`. There is no documented `--no-verify` escape hatch or skip mechanism in the hook itself. If a developer needs to push a WIP branch or a hotfix that intentionally skips version bumps, the hook will reject the push. This is a developer-experience footgun that can delay critical patches.\",\"file\":\"scripts/hooks/pre-push\",\"line_start\":1,\"line_end\":22,\"confidence\":0.6,\"recommendation\":\"Document the `--no-verify` git flag in a comment inside the hook or in README. Alternatively, make the check conditional on the branch name (e.g. only enforce on main/develop) so feature branches are not blocked.\"}],\"next_steps\":[\"Inspect retry.mjs jitter math and add a positive floor guard with a test\",\"Audit glm-client.mjs error fallback path to ensure HTTP status/body are preserved on the thrown error\",\"Verify that bigmodel-errors.mjs classification covers all documented BigModel error codes, not just a subset\",\"Confirm pre-push hook behavior on non-release branches and document skip mechanism\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:39:19.346Z"
+}

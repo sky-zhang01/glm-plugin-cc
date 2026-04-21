@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "on",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 63244,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 change introduces retry/backoff logic and BigModel error dispatch without sufficient guards against silent corruption. The retry module has multiple failure modes that could mask real errors or cause resource exhaustion. The review focus (v0.4.7 sampling-sweep run 1 aftercare) suggests this is post-release triage, which makes the gaps below more concerning since they already shipped.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry module uses exponential backoff without jitter, creating thundering herd risk under coordinated failure",
+        "body": "The retry.mjs module implements exponential backoff but appears to lack jitter randomization. When multiple callers hit the same failing endpoint simultaneously (e.g., after a brief BigModel outage), all retry attempts will cluster at the same timestamps, amplifying load on the recovering service rather than spreading it. This is a well-known distributed systems failure mode. Under real production conditions with parallel requests, this can turn a brief downstream blip into a sustained outage via retry storms. The test file (retry.test.mjs at 352 lines) should contain test cases for concurrent retry behavior but likely does not validate jitter or herd behavior.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.75,
+        "recommendation": "Add randomized jitter to the backoff calculation (e.g., `delay = baseDelay * 2^attempt * (0.5 + Math.random() * 0.5)`). Add a test case that validates retry timing includes variance. Document the maximum total retry wall-clock time so callers know the worst-case latency they're signing up for."
+      },
+      {
+        "severity": "high",
+        "title": "Retry wrapper may silently swallow fatal errors if classification logic is imperfect",
+        "body": "The retry module combined with bigmodel-errors.mjs creates a classification layer that decides which errors are retryable. If the error classifier incorrectly marks a non-retryable fatal error (e.g., auth failure, invalid request shape, quota exceeded) as retryable, the system will burn through retry attempts for ~minutes before eventually failing — but worse, it may return a stale or default response if the final error handling path has any fallback logic. The coupling between retry.mjs and bigmodel-errors.mjs means a misclassification in one silently changes retry behavior in the other. There is no explicit 'never retry' guard for errors that are definitively non-retryable (4xx class beyond rate limiting).",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.8,
+        "recommendation": "Add an explicit 'fatal' or 'non-retryable' error category that short-circuits retry immediately. Ensure HTTP 4xx responses (except 429) are classified as non-retryable. Add integration tests that verify specific HTTP status codes (401, 403, 422, 400) are never retried regardless of response body content."
+      },
+      {
+        "severity": "medium",
+        "title": "No abort/cancellation mechanism for in-flight retries, risking resource leaks on process shutdown",
+        "body": "The retry module does not appear to expose an AbortController or cancellation signal. If the parent process receives SIGTERM or SIGINT while retries are in progress, the retry loop will continue consuming resources (timers, network connections) until completion. In a CI/CD context (which this appears to be used in), this means hung retries can delay pipeline termination and waste compute. The pre-push hook integration makes this especially relevant — a developer who Ctrl+C during a push will have orphaned retry timers.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.7,
+        "recommendation": "Accept an AbortSignal parameter in the retry function. Check signal.aborted before each retry attempt and between delay waits. Clean up pending timers on abort. Document that callers should pass a signal for long-running operations."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs changes increase coupling without visibility into retry state for callers",
+        "body": "The glm-client.mjs file grew by ~99 lines, presumably integrating the retry and error dispatch modules. If the client now silently retries on behalf of callers, any caller that implements its own retry logic will double-retry, creating exponential retry amplification. The client should expose retry configuration and state but may not, meaning callers have no way to know whether a response came from the first attempt or the fifth, or whether the latency they observed includes hidden retry time.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 99,
+        "confidence": 0.65,
+        "recommendation": "Return retry metadata (attempt count, total retry time, final vs initial error) in the response or via a logging callback. Allow callers to disable built-in retries. Document the default retry behavior clearly so integrators don't layer their own retry on top."
+      },
+      {
+        "severity": "medium",
+        "title": "check-release-ready.sh is a new CI gate with no test coverage",
+        "body": "A new shell script at scripts/ci/check-release-ready.sh (84 lines) was added as a release gate with no corresponding test file visible in the diff. Shell scripts are notoriously fragile across environments (macOS vs Linux, different bash versions, missing utilities). A buggy release-readiness check could either block valid releases (false negative — expensive) or allow broken releases through (false positive — catastrophic). Given this is a CI gate, any failure mode is high-cost.",
+        "file": "scripts/ci/check-release-ready.sh",
+        "line_start": 1,
+        "line_end": 84,
+        "confidence": 0.7,
+        "recommendation": "Add a test file (e.g., tests/check-release-ready.test.mjs or a bats test) that validates: correct pass for a valid release state, correct fail for missing changelog, incorrect version bump, uncommitted changes, etc. Pin shellcheck in CI and run it against this file."
+      }
+    ],
+    "next_steps": [
+      "Read retry.mjs to confirm jitter absence and abort signal gaps",
+      "Read bigmodel-errors.mjs to verify 4xx classification logic",
+      "Read glm-client.mjs to check for double-retry risk and retry observability",
+      "Read check-release-ready.sh for shell portability issues",
+      "Verify test coverage for retry edge cases (max retries exhausted, zero-length delays, non-Error exceptions)"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.6 change introduces retry/backoff logic and BigModel error dispatch without sufficient guards against silent corruption. The retry module has multiple failure modes that could mask real errors or cause resource exhaustion. The review focus (v0.4.7 sampling-sweep run 1 aftercare) suggests this is post-release triage, which makes the gaps below more concerning since they already shipped.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Retry module uses exponential backoff without jitter, creating thundering herd risk under coordinated failure\",\"body\":\"The retry.mjs module implements exponential backoff but appears to lack jitter randomization. When multiple callers hit the same failing endpoint simultaneously (e.g., after a brief BigModel outage), all retry attempts will cluster at the same timestamps, amplifying load on the recovering service rather than spreading it. This is a well-known distributed systems failure mode. Under real production conditions with parallel requests, this can turn a brief downstream blip into a sustained outage via retry storms. The test file (retry.test.mjs at 352 lines) should contain test cases for concurrent retry behavior but likely does not validate jitter or herd behavior.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.75,\"recommendation\":\"Add randomized jitter to the backoff calculation (e.g., `delay = baseDelay * 2^attempt * (0.5 + Math.random() * 0.5)`). Add a test case that validates retry timing includes variance. Document the maximum total retry wall-clock time so callers know the worst-case latency they're signing up for.\"},{\"severity\":\"high\",\"title\":\"Retry wrapper may silently swallow fatal errors if classification logic is imperfect\",\"body\":\"The retry module combined with bigmodel-errors.mjs creates a classification layer that decides which errors are retryable. If the error classifier incorrectly marks a non-retryable fatal error (e.g., auth failure, invalid request shape, quota exceeded) as retryable, the system will burn through retry attempts for ~minutes before eventually failing — but worse, it may return a stale or default response if the final error handling path has any fallback logic. The coupling between retry.mjs and bigmodel-errors.mjs means a misclassification in one silently changes retry behavior in the other. There is no explicit 'never retry' guard for errors that are definitively non-retryable (4xx class beyond rate limiting).\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.8,\"recommendation\":\"Add an explicit 'fatal' or 'non-retryable' error category that short-circuits retry immediately. Ensure HTTP 4xx responses (except 429) are classified as non-retryable. Add integration tests that verify specific HTTP status codes (401, 403, 422, 400) are never retried regardless of response body content.\"},{\"severity\":\"medium\",\"title\":\"No abort/cancellation mechanism for in-flight retries, risking resource leaks on process shutdown\",\"body\":\"The retry module does not appear to expose an AbortController or cancellation signal. If the parent process receives SIGTERM or SIGINT while retries are in progress, the retry loop will continue consuming resources (timers, network connections) until completion. In a CI/CD context (which this appears to be used in), this means hung retries can delay pipeline termination and waste compute. The pre-push hook integration makes this especially relevant — a developer who Ctrl+C during a push will have orphaned retry timers.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.7,\"recommendation\":\"Accept an AbortSignal parameter in the retry function. Check signal.aborted before each retry attempt and between delay waits. Clean up pending timers on abort. Document that callers should pass a signal for long-running operations.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs changes increase coupling without visibility into retry state for callers\",\"body\":\"The glm-client.mjs file grew by ~99 lines, presumably integrating the retry and error dispatch modules. If the client now silently retries on behalf of callers, any caller that implements its own retry logic will double-retry, creating exponential retry amplification. The client should expose retry configuration and state but may not, meaning callers have no way to know whether a response came from the first attempt or the fifth, or whether the latency they observed includes hidden retry time.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":99,\"confidence\":0.65,\"recommendation\":\"Return retry metadata (attempt count, total retry time, final vs initial error) in the response or via a logging callback. Allow callers to disable built-in retries. Document the default retry behavior clearly so integrators don't layer their own retry on top.\"},{\"severity\":\"medium\",\"title\":\"check-release-ready.sh is a new CI gate with no test coverage\",\"body\":\"A new shell script at scripts/ci/check-release-ready.sh (84 lines) was added as a release gate with no corresponding test file visible in the diff. Shell scripts are notoriously fragile across environments (macOS vs Linux, different bash versions, missing utilities). A buggy release-readiness check could either block valid releases (false negative — expensive) or allow broken releases through (false positive — catastrophic). Given this is a CI gate, any failure mode is high-cost.\",\"file\":\"scripts/ci/check-release-ready.sh\",\"line_start\":1,\"line_end\":84,\"confidence\":0.7,\"recommendation\":\"Add a test file (e.g., tests/check-release-ready.test.mjs or a bats test) that validates: correct pass for a valid release state, correct fail for missing changelog, incorrect version bump, uncommitted changes, etc. Pin shellcheck in CI and run it against this file.\"}],\"next_steps\":[\"Read retry.mjs to confirm jitter absence and abort signal gaps\",\"Read bigmodel-errors.mjs to verify 4xx classification logic\",\"Read glm-client.mjs to check for double-retry risk and retry observability\",\"Read check-release-ready.sh for shell portability issues\",\"Verify test coverage for retry edge cases (max retries exhausted, zero-length delays, non-Error exceptions)\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:33:58.198Z"
+}

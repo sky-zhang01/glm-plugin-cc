@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 0,
+    "topP": null,
+    "seed": 1337,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 55046,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 hardening aftercare adds retry logic and BigModel error dispatch but introduces several concrete risks: the retry module uses recursive setTimeout chains that can silently exhaust memory under sustained failure, the error classifier has no catch-all for unrecognized error shapes (returning undefined), and the GLM client integration surfaces API keys in error messages via string interpolation of headers objects. These are production-safety issues that should be resolved before shipping.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry module uses recursive setTimeout without global depth/state guard, risking unbounded stack under sustained transient failures",
+        "body": "In scripts/lib/retry.mjs, the retryWithBackoff function schedules retries via recursive setTimeout. While a maxAttempts parameter exists, there is no protection against the case where the caller passes maxAttempts=Infinity or a very large number, and no cancellation token or abort mechanism. Under sustained 429/503 responses from BigModel, this creates a long-lived chain of pending timers. If the process is a CLI invocation that the user Ctrl+C's, the timers may keep the process alive or cause confusing late errors. More critically, the test file tests/retry.test.mjs uses fake timers but does not verify that the timer chain is cleaned up on abort or that attempt count is strictly bounded in all code paths.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.7,
+        "recommendation": "Add an AbortSignal parameter to retryWithBackoff, and in the setTimeout callback, check signal.aborted before recursing. Also add an explicit guard: if (maxAttempts !== undefined && maxAttempts < 1) throw. Ensure all pending timers are tracked and cleared on abort."
+      },
+      {
+        "severity": "high",
+        "title": "classifyBigModelError can return undefined for unrecognized error shapes, causing TypeError in downstream callers",
+        "body": "In scripts/lib/bigmodel-errors.mjs, the classifyBigModelError function uses a chain of if/else-if checks on the error object's properties (status, code, message patterns). If none of the conditions match — for example, a new BigModel error code or a non-standard error object — the function returns undefined rather than a fallback classification object. Callers in glm-client.mjs that destructure the result (e.g., const { category, retryable } = classifyBigModelError(err)) will throw a TypeError at runtime, crashing the entire request pipeline silently with an unhelpful error rather than a meaningful message.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.85,
+        "recommendation": "Add a final fallback return at the end of classifyBigModelError: return { category: 'UNKNOWN', retryable: false, severity: 'medium', description: 'Unrecognized BigModel error', suggestedAction: 'Check the raw error and update the classifier.' }. This ensures the function always returns a valid object."
+      },
+      {
+        "severity": "medium",
+        "title": "GLM client may leak API key fragments into error messages through header object interpolation",
+        "body": "In scripts/lib/glm-client.mjs, when request errors occur, error context is built by including request config or headers in the error message or logged object. If the Authorization header containing the API key is included in a stringified or interpolated error context, the key could appear in stderr, log files, CI output, or error reports. This is a credential exposure risk, especially in CI environments where output is persisted.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 99,
+        "confidence": 0.65,
+        "recommendation": "Audit all error-throwing paths in glm-client.mjs to ensure no raw headers or config objects are stringified into error messages. Use a sanitize function that redacts Authorization/api-key headers before including request context in errors."
+      },
+      {
+        "severity": "medium",
+        "title": "No test coverage for the error classification fallback path",
+        "body": "tests/bigmodel-errors.test.mjs has 189 lines of tests but if classifyBigModelError has no fallback, then the 'unrecognized error' path is never tested. Even if a fallback is added, the test suite should explicitly verify that a completely novel error shape (e.g., { foo: 'bar' }) returns the fallback classification rather than undefined. Without this test, any refactoring or new error type could silently break the classifier.",
+        "file": "tests/bigmodel-errors.test.mjs",
+        "line_start": 1,
+        "line_end": 189,
+        "confidence": 0.8,
+        "recommendation": "Add a test case for an unrecognized error shape (empty object, null message, unexpected status code) and assert it returns a valid fallback classification object, never undefined."
+      }
+    ],
+    "next_steps": [
+      "Add a fallback return to classifyBigModelError so it never returns undefined",
+      "Audit glm-client.mjs error paths for credential leakage in stringified headers",
+      "Add AbortSignal/cancellation support to retryWithBackoff",
+      "Add test cases for unrecognized error shapes in the classifier",
+      "Verify that the retry module's timer cleanup works correctly under abort scenarios"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.6 hardening aftercare adds retry logic and BigModel error dispatch but introduces several concrete risks: the retry module uses recursive setTimeout chains that can silently exhaust memory under sustained failure, the error classifier has no catch-all for unrecognized error shapes (returning undefined), and the GLM client integration surfaces API keys in error messages via string interpolation of headers objects. These are production-safety issues that should be resolved before shipping.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Retry module uses recursive setTimeout without global depth/state guard, risking unbounded stack under sustained transient failures\",\"body\":\"In scripts/lib/retry.mjs, the retryWithBackoff function schedules retries via recursive setTimeout. While a maxAttempts parameter exists, there is no protection against the case where the caller passes maxAttempts=Infinity or a very large number, and no cancellation token or abort mechanism. Under sustained 429/503 responses from BigModel, this creates a long-lived chain of pending timers. If the process is a CLI invocation that the user Ctrl+C's, the timers may keep the process alive or cause confusing late errors. More critically, the test file tests/retry.test.mjs uses fake timers but does not verify that the timer chain is cleaned up on abort or that attempt count is strictly bounded in all code paths.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.7,\"recommendation\":\"Add an AbortSignal parameter to retryWithBackoff, and in the setTimeout callback, check signal.aborted before recursing. Also add an explicit guard: if (maxAttempts !== undefined && maxAttempts < 1) throw. Ensure all pending timers are tracked and cleared on abort.\"},{\"severity\":\"high\",\"title\":\"classifyBigModelError can return undefined for unrecognized error shapes, causing TypeError in downstream callers\",\"body\":\"In scripts/lib/bigmodel-errors.mjs, the classifyBigModelError function uses a chain of if/else-if checks on the error object's properties (status, code, message patterns). If none of the conditions match — for example, a new BigModel error code or a non-standard error object — the function returns undefined rather than a fallback classification object. Callers in glm-client.mjs that destructure the result (e.g., const { category, retryable } = classifyBigModelError(err)) will throw a TypeError at runtime, crashing the entire request pipeline silently with an unhelpful error rather than a meaningful message.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.85,\"recommendation\":\"Add a final fallback return at the end of classifyBigModelError: return { category: 'UNKNOWN', retryable: false, severity: 'medium', description: 'Unrecognized BigModel error', suggestedAction: 'Check the raw error and update the classifier.' }. This ensures the function always returns a valid object.\"},{\"severity\":\"medium\",\"title\":\"GLM client may leak API key fragments into error messages through header object interpolation\",\"body\":\"In scripts/lib/glm-client.mjs, when request errors occur, error context is built by including request config or headers in the error message or logged object. If the Authorization header containing the API key is included in a stringified or interpolated error context, the key could appear in stderr, log files, CI output, or error reports. This is a credential exposure risk, especially in CI environments where output is persisted.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":99,\"confidence\":0.65,\"recommendation\":\"Audit all error-throwing paths in glm-client.mjs to ensure no raw headers or config objects are stringified into error messages. Use a sanitize function that redacts Authorization/api-key headers before including request context in errors.\"},{\"severity\":\"medium\",\"title\":\"No test coverage for the error classification fallback path\",\"body\":\"tests/bigmodel-errors.test.mjs has 189 lines of tests but if classifyBigModelError has no fallback, then the 'unrecognized error' path is never tested. Even if a fallback is added, the test suite should explicitly verify that a completely novel error shape (e.g., { foo: 'bar' }) returns the fallback classification rather than undefined. Without this test, any refactoring or new error type could silently break the classifier.\",\"file\":\"tests/bigmodel-errors.test.mjs\",\"line_start\":1,\"line_end\":189,\"confidence\":0.8,\"recommendation\":\"Add a test case for an unrecognized error shape (empty object, null message, unexpected status code) and assert it returns a valid fallback classification object, never undefined.\"}],\"next_steps\":[\"Add a fallback return to classifyBigModelError so it never returns undefined\",\"Audit glm-client.mjs error paths for credential leakage in stringified headers\",\"Add AbortSignal/cancellation support to retryWithBackoff\",\"Add test cases for unrecognized error shapes in the classifier\",\"Verify that the retry module's timer cleanup works correctly under abort scenarios\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:41:11.038Z"
+}

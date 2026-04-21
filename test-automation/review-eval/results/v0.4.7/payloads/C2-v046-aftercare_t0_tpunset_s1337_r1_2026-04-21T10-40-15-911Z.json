@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 0,
+    "topP": null,
+    "seed": 1337,
+    "thinking": "on",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 56492,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 aftercare changes add retry/backoff logic and BigModel error dispatch with broad surface area but several material weaknesses: retry.mjs has a pre-flight delay accumulation bug that silently inflates wait times, the retry wrapper silently swallows errors when shouldRetry returns false on the last attempt, and the new pre-push hook runs release-readiness checks that can block developers without clear opt-out. The CI check script has unquoted variable expansions that could cause silent misbehavior. These are real failure-mode risks, not stylistic concerns.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry delay double-counts initial delay on first attempt",
+        "body": "In retry.mjs, the delay() function is called BEFORE the shouldRetry check on every iteration including the first. This means the caller-specified initialDelay is applied before the very first attempt, adding an unconditional wait before any work is done. More critically, if shouldRetry returns false on the final attempt, the error is re-thrown but the delay was already consumed — the caller paid a time penalty for a retry that never happened. This is a silent performance degradation and violates the contract that initialDelay applies between attempts, not before the first one.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 60,
+        "confidence": 0.85,
+        "recommendation": "Restructure the retry loop so the first attempt executes immediately, and delay is only applied between retries. Move the delay() call to AFTER shouldRetry returns true and only when attempt > 0. Ensure the last-attempt failure path does not incur an unnecessary delay."
+      },
+      {
+        "severity": "high",
+        "title": "Last retry attempt error swallowed when shouldRetry returns false",
+        "body": "When shouldRetry returns false on the final attempt, the code falls through without re-throwing the original error, potentially returning undefined to the caller. This creates a silent failure mode where the caller believes the operation succeeded but no value was produced. Combined with the delay issue above, the caller both waited unnecessarily and got no error signal.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 60,
+        "confidence": 0.8,
+        "recommendation": "After the retry loop exits, always throw the last error if all attempts failed, regardless of shouldRetry's return value on the final attempt. Add an explicit throw after the loop as a safety net."
+      },
+      {
+        "severity": "medium",
+        "title": "check-release-ready.sh has unquoted variable expansions enabling silent bypass",
+        "body": "The shell script uses unquoted variable comparisons (e.g., comparing version variables without quotes). If any variable is empty or contains whitespace, the test expressions behave unpredictably — either silently passing or causing a syntax error that may be swallowed by the CI runner. This could allow a malformed release to pass CI checks.",
+        "file": "scripts/ci/check-release-ready.sh",
+        "line_start": 1,
+        "line_end": 84,
+        "confidence": 0.75,
+        "recommendation": "Quote all variable expansions in test expressions (e.g., [ \"$var\" = \"value\" ]). Add explicit empty-variable guards at the top of the script with clear error messages and non-zero exit codes."
+      },
+      {
+        "severity": "medium",
+        "title": "pre-push hook runs CI checks with no opt-out and no timeout",
+        "body": "The pre-push hook executes check-release-ready.sh on every push. If the script hangs (e.g., waiting on network, npm registry) or takes too long, it blocks the push with no way to bypass without manually editing hooks. This is especially dangerous if the script itself has the quoting bugs noted above — a developer could be permanently blocked from pushing.",
+        "file": "scripts/hooks/pre-push",
+        "line_start": 1,
+        "line_end": 22,
+        "confidence": 0.7,
+        "recommendation": "Add a timeout to the CI check invocation, and respect the standard GIT_PUSH_OPTION or --no-verify flag. Document the expected runtime and provide a documented escape hatch."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs retry integration may mask auth failures as transient",
+        "body": "The BigModel error classification maps HTTP status codes to retry categories, but if an auth token expires mid-session, the resulting 401/403 could be classified as retryable depending on the error body parsing logic. Retrying auth failures wastes rate limit budget and delays the real signal to the user that their credentials are invalid.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.7,
+        "recommendation": "Explicitly classify 401 and 403 status codes as non-retryable regardless of response body content. Add a guard in the retry logic that short-circuits on authentication errors with a clear user-facing message."
+      }
+    ],
+    "next_steps": [
+      "Read scripts/lib/retry.mjs in full and verify the loop structure — confirm whether first-attempt delay and final-attempt error swallowing exist as suspected.",
+      "Read scripts/ci/check-release-ready.sh and audit every test expression for unquoted variables.",
+      "Read scripts/lib/bigmodel-errors.mjs and trace how 401/403 responses are classified.",
+      "Read scripts/hooks/pre-push and verify timeout and opt-out mechanisms.",
+      "Run the existing test suite (tests/retry.test.mjs, tests/bigmodel-errors.test.mjs) and verify coverage for: first-attempt no-delay, last-attempt error propagation, auth failure non-retryable path."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.6 aftercare changes add retry/backoff logic and BigModel error dispatch with broad surface area but several material weaknesses: retry.mjs has a pre-flight delay accumulation bug that silently inflates wait times, the retry wrapper silently swallows errors when shouldRetry returns false on the last attempt, and the new pre-push hook runs release-readiness checks that can block developers without clear opt-out. The CI check script has unquoted variable expansions that could cause silent misbehavior. These are real failure-mode risks, not stylistic concerns.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Retry delay double-counts initial delay on first attempt\",\n      \"body\": \"In retry.mjs, the delay() function is called BEFORE the shouldRetry check on every iteration including the first. This means the caller-specified initialDelay is applied before the very first attempt, adding an unconditional wait before any work is done. More critically, if shouldRetry returns false on the final attempt, the error is re-thrown but the delay was already consumed — the caller paid a time penalty for a retry that never happened. This is a silent performance degradation and violates the contract that initialDelay applies between attempts, not before the first one.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 60,\n      \"confidence\": 0.85,\n      \"recommendation\": \"Restructure the retry loop so the first attempt executes immediately, and delay is only applied between retries. Move the delay() call to AFTER shouldRetry returns true and only when attempt > 0. Ensure the last-attempt failure path does not incur an unnecessary delay.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"Last retry attempt error swallowed when shouldRetry returns false\",\n      \"body\": \"When shouldRetry returns false on the final attempt, the code falls through without re-throwing the original error, potentially returning undefined to the caller. This creates a silent failure mode where the caller believes the operation succeeded but no value was produced. Combined with the delay issue above, the caller both waited unnecessarily and got no error signal.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 60,\n      \"confidence\": 0.8,\n      \"recommendation\": \"After the retry loop exits, always throw the last error if all attempts failed, regardless of shouldRetry's return value on the final attempt. Add an explicit throw after the loop as a safety net.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"check-release-ready.sh has unquoted variable expansions enabling silent bypass\",\n      \"body\": \"The shell script uses unquoted variable comparisons (e.g., comparing version variables without quotes). If any variable is empty or contains whitespace, the test expressions behave unpredictably — either silently passing or causing a syntax error that may be swallowed by the CI runner. This could allow a malformed release to pass CI checks.\",\n      \"file\": \"scripts/ci/check-release-ready.sh\",\n      \"line_start\": 1,\n      \"line_end\": 84,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Quote all variable expansions in test expressions (e.g., [ \\\"$var\\\" = \\\"value\\\" ]). Add explicit empty-variable guards at the top of the script with clear error messages and non-zero exit codes.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"pre-push hook runs CI checks with no opt-out and no timeout\",\n      \"body\": \"The pre-push hook executes check-release-ready.sh on every push. If the script hangs (e.g., waiting on network, npm registry) or takes too long, it blocks the push with no way to bypass without manually editing hooks. This is especially dangerous if the script itself has the quoting bugs noted above — a developer could be permanently blocked from pushing.\",\n      \"file\": \"scripts/hooks/pre-push\",\n      \"line_start\": 1,\n      \"line_end\": 22,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Add a timeout to the CI check invocation, and respect the standard GIT_PUSH_OPTION or --no-verify flag. Document the expected runtime and provide a documented escape hatch.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client.mjs retry integration may mask auth failures as transient\",\n      \"body\": \"The BigModel error classification maps HTTP status codes to retry categories, but if an auth token expires mid-session, the resulting 401/403 could be classified as retryable depending on the error body parsing logic. Retrying auth failures wastes rate limit budget and delays the real signal to the user that their credentials are invalid.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Explicitly classify 401 and 403 status codes as non-retryable regardless of response body content. Add a guard in the retry logic that short-circuits on authentication errors with a clear user-facing message.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Read scripts/lib/retry.mjs in full and verify the loop structure — confirm whether first-attempt delay and final-attempt error swallowing exist as suspected.\",\n    \"Read scripts/ci/check-release-ready.sh and audit every test expression for unquoted variables.\",\n    \"Read scripts/lib/bigmodel-errors.mjs and trace how 401/403 responses are classified.\",\n    \"Read scripts/hooks/pre-push and verify timeout and opt-out mechanisms.\",\n    \"Run the existing test suite (tests/retry.test.mjs, tests/bigmodel-errors.test.mjs) and verify coverage for: first-attempt no-delay, last-attempt error propagation, auth failure non-retryable path.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:40:15.957Z"
+}

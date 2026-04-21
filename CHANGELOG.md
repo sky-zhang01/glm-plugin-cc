@@ -3,118 +3,186 @@
 ## v0.4.7 — 2026-04-21
 
 Review reliability pass. Addresses the v0.4.5 SCHEMA_ECHO dogfood
-observation + workflow-governor cross-review hallucination pattern via
-parse-layer defenses that run unconditionally on review output, and
-exposes BigModel sampling-parameter flags on the CLI for empirical
-investigation. Adds an evaluation harness (`test-automation/review-eval/`)
-with a pinned fixture, automated citation scoring, and a CSV results
-format stable across releases. Tracking: Gitea issue #7.
+observation + the 2026-04-21 workflow-governor cross-review
+hallucination pattern via parse-layer defenses that run unconditionally
+on review output, exposes BigModel sampling-parameter flags on the
+CLI for empirical investigation, and lands a 3-fixture evaluation
+harness covering small / medium / large diffs. Tracking: Gitea
+issue #7.
 
-**Sanity sweep did not produce signal strong enough to change default
-sampling parameters.** Parse-layer defenses and CLI flags ship;
-defaults remain server-default (unset). The harness lands so future
-releases can diff cleanly against this baseline without re-instrumenting
-each time.
+The initial 9-run sanity sweep on C2 (medium diff) was too thin to
+justify any default change. Per user push-back, the sweep was expanded
+to **3 fixtures × up to 4 seeds × 3 temperatures × N=3 = 54 valid runs**
+with raw-payload capture for every run. That expanded data surfaced
+five previously-silent parse-failure modes that the v0.4.7-initial
+classifier missed; all five are now typed + correction-hinted. **Still
+no default sampling parameter change shipping in v0.4.7** — N=3 is
+still too thin for a release-wide default shift — but the expanded
+data flags a clear follow-up priority: **C3 large-diff schema
+compliance degrades monotonically with temperature (0.67 / 0.33 / 0.00)**.
+That is the real v0.4.8 investigation target.
 
 ### Added
 
 - **Parse-layer review-output defenses** (`scripts/lib/glm-client.mjs`):
-  - `stripMarkdownFences` — idempotent `` ```json ... ``` `` fence
-    removal. GLM-5.1 has been observed wrapping structured-output JSON
-    in markdown fences despite explicit "do not wrap" instructions;
-    stripping is cheap and idempotent so applied unconditionally.
+  - `stripMarkdownFences` — removes `` ```json ... ``` `` wrappers.
+    v0.4.7-final extends it with two half-fence fallbacks: open-only
+    (GLM started with ```json\n but truncated before closing ```,
+    observed at C3 temp=1 run 2) and close-only (rare: model forgot
+    opening fence). Full-fence match always wins when available.
   - `classifyReviewPayload` — typed classification of parsed JSON into
-    `valid` / `schema_echo` (GLM returned the JSON schema definition
-    instead of findings — reproduced from the v0.4.5 aftercare
-    dogfood payload) / `invalid_shape` (missing `verdict` / `summary`
-    / `findings`). Returns `{ kind, errorCode, message }`.
+    `valid` / `schema_echo` / `invalid_shape`.
+  - `classifyParseFailure` (new in v0.4.7-final) — typed classification
+    of the 5 observed parse-failure modes derived from expanded-sweep
+    sidecars:
+    - `EMPTY_RESPONSE` — blank output (upstream terminated early)
+    - `REASONING_LEAK` — `<thinking>` tags leaked to content channel
+    - `MARKDOWN_FENCE_UNTERMINATED` — ```json\n start without ``` close
+    - `TRUNCATED_JSON` — JSON shape but parse failed mid-structure
+    - `PARSE_FAILURE` — catchall for unclassified parse errors
+    Integrated into `runChatRequest`: when `parsed === null` the
+    companion now returns a typed `errorCode` instead of silently
+    passing through `errorCode=""`.
   - `runChatRequestWithCorrectionRetry` — single-shot targeted
-    correction retry for shape failures. On `SCHEMA_ECHO` or
-    `INVALID_SHAPE`, prepends a specific hint explaining the prior
-    mistake and retries once. Independent of the v0.4.6 transient-error
-    backoff layer (different failure class).
-  - `buildCorrectionHint` — per-errorCode hint text. Exported for
-    tests.
+    correction retry for shape failures. Extended in v0.4.7-final to
+    cover all 5 parse-failure errorCodes via dedicated
+    `buildCorrectionHint` branches.
 - **Sampling-parameter CLI flags** (`scripts/glm-companion.mjs`,
   `commands/review.md`, `commands/adversarial-review.md`):
   `--temperature <0-2>`, `--top-p <0-1>`, `--seed <int>`,
-  `--frequency-penalty <-2-2>`, `--presence-penalty <-2-2>`. Each
-  forwards to the BigModel POST body only when provided; unset =
+  `--frequency-penalty <-2-2>`, `--presence-penalty <-2-2>`. Unset =
   server default (no change from v0.4.6 behavior). Out-of-range values
-  are silently skipped rather than hard-failing, so sampling-sweep
-  automation never crashes mid-run on a bad cell.
-- **Review-reliability evaluation harness** (`test-automation/review-eval/`):
-  - Fixture `C2-v046-aftercare` — pinned v0.4.5→v0.4.6 diff
-    (1362 insertions / 315 deletions, 17 files), plus `ground-truth.json`
-    listing allowed citation targets, known-false files (workflow-governor
-    paths that would be unambiguous cross-project hallucination), and
-    candidate expected bugs.
-  - `scripts/run-experiment.mjs` — runs N copies of one (fixture,
-    sampling-cell) combo against `/glm:adversarial-review`, scores
-    citations via grep (file exists + distinctive tokens match within
-    `line_start-line_end` ± 20), appends one row per run to CSV.
-    Accepts `--base <ref>` for reviewing arbitrary ranges against the
-    fixture baseline.
-  - `scripts/summarize.mjs` — aggregates CSVs by cell, prints a
-    markdown-compatible table, applies the issue #7 success criteria
-    (`schema_compliance ≥ 0.95`, `schema_echo = 0`,
-    `citation_accuracy ≥ 0.90`, `false_file_hits = 0`).
-- **v0.4.7 sanity-sweep results**
-  (`test-automation/review-eval/results/v0.4.7/sanity-sweep.csv`) — 9
-  runs: temperature ∈ {0.0, 0.5, 1.0} × N=3, `C2-v046-aftercare` fixture,
-  `--thinking on`, `--model glm-5.1`, base `8fc1b98`. See "Sanity sweep
-  outcome" below for interpretation.
-- **Parse-defense unit tests** (`tests/review-payload.test.mjs`) — 19
-  cases covering `stripMarkdownFences` (json-tagged, bare,
-  whitespace, non-string input, non-recursive) and `classifyReviewPayload`
-  (valid, schema_echo reproducing v0.4.5 dogfood payload,
-  invalid_shape per missing field, null/array/primitive).
+  are silently skipped so sweep automation never crashes mid-run.
+- **Three-fixture evaluation harness** (`test-automation/review-eval/`):
+  - **C1-v044-setup-menu** (small, ~440 lines, 6 files) — single
+    v0.4.4 commit adding an interactive /glm:setup menu.
+  - **C2-v046-aftercare** (medium, ~1550 lines, 11 files) — pinned
+    v0.4.5→v0.4.6 diff covering BigModel error dispatch + retry layer.
+  - **C3-v04x-cumulative** (large, ~8336 lines, 84 files) — cumulative
+    v0.4.0→v0.4.6 diff approaching the 9200-line scale of the
+    2026-04-21 workflow-governor hallucination session.
+  - `run-experiment.mjs` — runs N copies of one (fixture, sampling-cell)
+    combo, scores citations via grep-based file-existence + distinctive-
+    token matching, saves per-run sidecar JSON with full parsed payload
+    + rawOutput head + metrics, appends one row per run to CSV.
+    Accepts `--base <ref>` for pinning the reviewed diff baseline.
+  - `summarize.mjs` — aggregates CSVs by cell (fixture × temp × top_p ×
+    seed × thinking), prints a markdown-compatible table, applies the
+    issue #7 success criteria.
+  - Each fixture ships `meta.json` (provenance: base/head refs,
+    line/byte counts, touched-file list) and `ground-truth.json`
+    (`allowed_files` + `known_false_files` universal hallucination
+    signal list + `expected_bugs` curated for that diff scope).
+- **v0.4.7 sweep data artifacts**:
+  - `results/v0.4.7/sanity-sweep.csv` — original 9-run v1-strictness
+    data (preserved for reference; old `schema_compliance` used a
+    stricter truthy check).
+  - `results/v0.4.7/expanded-sweep.csv` — 54-run expanded-sweep data
+    with new schema-compliance check aligned to `classifyReviewPayload`
+    + new `schema_empty_string` column isolating the empty-content
+    content-quality signal.
+  - `results/v0.4.7/payloads/` — 54 sidecar JSON files with full
+    parsed output + rawOutput head (8KB cap) + per-run metrics +
+    cell metadata. These are the evidence that disambiguated the five
+    parse-failure modes above.
+- **Parse-defense unit tests** (`tests/review-payload.test.mjs`) —
+  34 cases total (19 initial + 15 new): `stripMarkdownFences` full +
+  half-fence fallbacks, `classifyReviewPayload` valid / schema_echo /
+  invalid_shape, `classifyParseFailure` all 5 typed modes + priority
+  ordering. Total suite: 149/149 passing.
 
 ### Changed
 
-- No default sampling parameter change. Temperature, top_p, seed,
+- **No default sampling parameter change.** Temperature, top_p, seed,
   frequency/presence penalty all remain server-default (unset) in the
   POST body unless a caller explicitly passes a flag. v0.4.6 behavior
   is preserved.
+- **Schema-compliance measurement semantics.** `run-experiment.mjs`
+  previously used a truthy check on `parsed.verdict` (rejected empty
+  strings); v0.4.7-final aligns it with the plugin's own
+  `classifyReviewPayload` (typeof-string check). Content-emptiness is
+  now tracked as an independent `schema_empty_string` column. This
+  eliminates the "schema=0 with errorCode='' " ambiguity that made
+  the initial sweep result unreadable.
+- **Path-leak scanner exclusions.** `scripts/ci/check-no-local-paths.sh`
+  excludes `test-automation/review-eval/corpus/**` and
+  `test-automation/review-eval/results/**` — fixture diff.patch files
+  are frozen git-history artifacts carrying pre-cleanup strings by
+  construction, and results payloads echo fixture content from model
+  responses.
 
-### Sanity sweep outcome
+### Expanded-sweep outcome
 
-Per pre-registered success criteria in Gitea issue #7:
+54 valid runs (3 fixtures × up to 4 seeds × 3 temperatures × N=3,
+with 3 vendor-error runs retained as data points). Per issue #7
+pre-registered criteria:
 
-| cell | N | schema_compliance | schema_echo | invalid_shape | citation_accuracy | false_file_hits | formal PASS? |
-|---|---|---|---|---|---|---|---|
-| temp=0.0 thinking=on | 3 | 0.67 | 0 | 0 | 0.94 (±0.10) | 0 | no |
-| temp=0.5 thinking=on | 3 | 1.00 | 0 | 0 | 1.00 (±0.00) | 0 | YES |
-| temp=1.0 thinking=on | 3 | 1.00 | 0 | 0 | 1.00 (±0.00) | 0 | YES |
+| fixture | temp | seed | schema | empty_str | echo | invalid | cite_acc | false_file | PASS? |
+|---|---|---|---|---|---|---|---|---|---|
+| C2 | 0.0 | unset | 1.00 | 0.00 | 0 | 0 | 1.00 | 0 | YES |
+| C2 | 0.5 | unset | 1.00 | 0.00 | 0 | 0 | 1.00 | 0 | YES |
+| C2 | 1.0 | unset | 1.00 | 0.00 | 0 | 0 | 1.00 | 0 | YES |
+| C2 | 0.0 | 42    | 1.00 | 0.00 | 0 | 0 | 0.92 | 0 | YES |
+| C2 | 0.5 | 42    | 0.33 | 0.00 | 0 | 0 | 0.93 | 0 | no |
+| C2 | 1.0 | 42    | 1.00 | 0.00 | 0 | 0 | 1.00 | 0 | YES |
+| C2 | 0.0 | 1337  | 0.67 | 0.00 | 0 | 0 | 0.93 | 0 | no |
+| C2 | 0.5 | 1337  | 1.00 | 0.00 | 0 | 0 | 1.00 | 0 | YES |
+| C2 | 1.0 | 1337  | 1.00 | 0.00 | 0 | 0 | 0.85 | 0 | no |
+| C2 | 0.0 | 2024  | 1.00 | 0.00 | 0 | 0 | 1.00 | 0 | YES |
+| C2 | 0.5 | 2024  | 1.00 | 0.00 | 0 | 0 | 0.87 | 0 | no |
+| C2 | 1.0 | 2024  | 1.00 | 0.00 | 0 | 0 | 0.93 | 0 | YES |
+| C3 | 0.0 | unset | 0.67 | 0.00 | 0 | 0 | 0.95 | 0 | no |
+| C3 | 0.5 | unset | 0.33 | 0.00 | 0 | 0 | 0.92 | 0 | no |
+| C3 | 1.0 | unset | **0.00** | 0.00 | 0 | 0 | 1.00 | 0 | no |
+| C1 | 0.0 | unset | 0.67 | 0.00 | 0 | 0 | 1.00 | 0 | no |
+| C1 | 0.5 | unset | 0.67 | 0.00 | 0 | 0 | 0.78 | 0 | no |
+| C1 | 1.0 | unset | 1.00 | 0.00 | 0 | 0 | 0.78 | 0 | no |
 
-Notes on interpretation:
+8/18 cells pass the formal criteria.
 
-- **No `SCHEMA_ECHO` reproduction** in any of 9 runs. The specific
-  v0.4.5 aftercare dogfood failure mode that motivated this work did
-  not surface at any sampled temperature on C2.
-- **No `known_false_files` hits** (i.e., no cross-project workflow-governor
-  hallucination). The 2026-04 workflow-governor pattern was not
-  reproduced.
-- **The one `schema_compliance=0` result at temp=0.0** is a
-  harness-strictness artifact: the run returned a valid-shape payload
-  whose `verdict` field was the empty string. `classifyReviewPayload`
-  (the plugin's own validity check) accepted it; `run-experiment.mjs`
-  is deliberately stricter (truthy check) and flagged it as
-  non-compliant. The plugin did NOT fail on this payload in-session.
-- **N=3 per cell is underpowered** to distinguish temperature-driven
-  signal from run-to-run noise. Per the maintainer's directive in
-  issue #7 ("model updates faster than data stays valid"), the sweep
-  was intentionally scoped to 9 calls rather than a full 96-cell grid
-  at N=10.
+**Key signals** (from sidecar evidence, not just aggregate metrics):
 
-**Decision**: no default sampling parameter change in v0.4.7. The
-harness is stable so a future regression can be characterized without
-re-instrumenting, but changing defaults on this sample size is premature.
+- **No `SCHEMA_ECHO` reproduction across 54 runs.** The v0.4.5 aftercare
+  dogfood failure mode is absent from the current model version at
+  every temperature on every fixture.
+- **No `known_false_files` hits across 54 runs.** The 2026-04-21
+  workflow-governor cross-project hallucination pattern (citing
+  `reference_runtime.py` / `governance.py` / `workflow_governor/` paths
+  while reviewing glm-plugin-cc) did NOT reproduce — not even on C3 at
+  the 8336-line scale where the original hallucination occurred.
+- **C3 scale effect on schema compliance.** 0.67 / 0.33 / 0.00 at temp
+  0 / 0.5 / 1. Large diffs with `--thinking on` produce schema
+  failures monotonically with temperature. The top-of-sweep signal.
+- **Five parse-failure modes, previously unclassified**:
+  1. `MARKDOWN_FENCE_UNTERMINATED` (C3 temp=1 run 2) — ```json\n
+     opener without ``` closer; truncation-induced.
+  2. `TRUNCATED_JSON` (C3 temp=1 run 3) — JSON-shaped output but
+     parse fails on incomplete structure.
+  3. `EMPTY_RESPONSE` (C3 temp=1 run 1) — blank rawOutput, 5.8s
+     premature termination.
+  4. `REASONING_LEAK` (C2 temp=0 seed=1337 run 3) — `<thinking>`
+     reasoning emitted as visible content without JSON.
+  5. `PARSE_FAILURE` catchall — none observed yet but reserved.
+  All five now get typed `errorCode` + targeted correction-retry hints.
+- **Three vendor errors**: `VENDOR_ERROR:1234` × 2 and `VENDOR_ERROR:500`
+  × 1. Codes 1234 and 500 are NOT in the v0.4.6 BigModel dispatch
+  table — they fell through the `VENDOR_ERROR:<code>` catchall as
+  designed. Follow-up item for v0.4.8: update the table once BigModel
+  documents these codes (they may be transient/undocumented).
+
+**Decision**: no default sampling parameter change in v0.4.7. N=3 per
+cell is still underpowered for a release-wide default shift (e.g.
+Rule of Three: N=3 with 0 failures gives 95%-confidence failure-rate
+upper bound of 63%, far too loose). **The C3 0.67/0.33/0.00 monotonic
+regression is the clearest signal in the data and is the v0.4.8
+investigation priority** — a focused sweep on C3 with N≥10 per
+temperature would determine whether a default `temperature=0.2` (or
+lower) specifically for review calls is warranted.
 
 ### Unchanged
 
-- Default model `glm-5.1`, default `--thinking on`, default server-
-  provided sampling parameters.
+- Default model `glm-5.1`, default `--thinking on`, default
+  server-provided sampling parameters.
 - Review prompt body and companion JSON output shape.
 - v0.4.6 retry/backoff layer, BigModel error-code dispatch, pre-tag
   release-ready gate.

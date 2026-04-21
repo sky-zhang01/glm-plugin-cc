@@ -17,7 +17,7 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
-import { classifyReviewPayload, stripMarkdownFences } from "../scripts/lib/glm-client.mjs";
+import { classifyParseFailure, classifyReviewPayload, stripMarkdownFences } from "../scripts/lib/glm-client.mjs";
 
 describe("stripMarkdownFences", () => {
   it("removes ```json ... ``` wrapper", () => {
@@ -180,5 +180,123 @@ describe("classifyReviewPayload — INVALID_SHAPE detection", () => {
     assert.equal(result.kind, "invalid_shape");
     assert.match(result.message, /verdict/);
     assert.match(result.message, /summary/);
+  });
+});
+
+// v0.4.7 expanded-sweep follow-ups: half-fence handling + parse-failure
+// classification. Derived from sidecar evidence at
+// test-automation/review-eval/results/v0.4.7/payloads/*.json that showed
+// 5 distinct ways parsed=null can happen; the old harness silently masked
+// them all as "schema=0 with errorCode=''".
+describe("stripMarkdownFences — half-fence fallbacks", () => {
+  it("strips open-only fence (truncated before closing ```)", () => {
+    // Observed at C3 temp=1 run 2: model started with ```json\n then
+    // produced valid-looking JSON but ran out of budget before emitting
+    // the closing ```.
+    const openOnly = '```json\n{"verdict": "approve", "findings": []}';
+    const stripped = stripMarkdownFences(openOnly);
+    assert.equal(stripped, '{"verdict": "approve", "findings": []}');
+  });
+
+  it("strips open-only fence without json tag", () => {
+    const openOnly = '```\n{"ok": true}';
+    assert.equal(stripMarkdownFences(openOnly), '{"ok": true}');
+  });
+
+  it("strips close-only fence (rare: model forgot opening ```)", () => {
+    const closeOnly = '{"verdict": "approve"}\n```';
+    const stripped = stripMarkdownFences(closeOnly);
+    assert.equal(stripped, '{"verdict": "approve"}');
+  });
+
+  it("prefers full-fence match over half-fence fallback", () => {
+    // Ensure the full-fence regex wins so existing behavior is preserved
+    // when the response is well-formed.
+    const full = '```json\n{"a":1}\n```';
+    assert.equal(stripMarkdownFences(full), '{"a":1}');
+  });
+
+  it("does not false-positive on plain prose containing triple backticks mid-line", () => {
+    // A response like "The code ``` inside ``` is wrong" should not
+    // accidentally get stripped. Our open-only regex anchors at start
+    // with `^```(?:json)?\s*\n` so mid-line backticks are safe.
+    const prose = 'Error: prose ``` inside ``` text';
+    assert.equal(stripMarkdownFences(prose), prose);
+  });
+});
+
+describe("classifyParseFailure — 5 typed modes", () => {
+  it("EMPTY_RESPONSE: blank rawOutput", () => {
+    const result = classifyParseFailure("", "", null);
+    assert.equal(result.errorCode, "EMPTY_RESPONSE");
+    assert.match(result.message, /empty response/i);
+  });
+
+  it("EMPTY_RESPONSE: whitespace-only rawOutput", () => {
+    const result = classifyParseFailure("   \n\n  ", "", null);
+    assert.equal(result.errorCode, "EMPTY_RESPONSE");
+  });
+
+  it("REASONING_LEAK: <thinking> tag with no JSON (observed C2 t0 s1337 r3)", () => {
+    const raw = "<thinking>\nLet me examine the actual code changes...\n</thinking>";
+    const result = classifyParseFailure(raw, raw, "Unexpected token <");
+    assert.equal(result.errorCode, "REASONING_LEAK");
+    assert.match(result.message, /internal reasoning/i);
+  });
+
+  it("REASONING_LEAK: <thinking> block even when followed by prose, as long as no verdict", () => {
+    const raw = "<thinking>reasoning here</thinking>\nI need to look at the files first.";
+    const result = classifyParseFailure(raw, raw, "Unexpected token <");
+    assert.equal(result.errorCode, "REASONING_LEAK");
+  });
+
+  it("REASONING_LEAK does NOT fire when the response happens to start with <thinking> but also contains verdict", () => {
+    // Edge case: GLM might put <thinking>, then still produce the JSON.
+    // In that case we don't want to misclassify — a subsequent JSON
+    // attempt should extract the JSON, not be branded REASONING_LEAK.
+    const raw = '<thinking>thinking</thinking>\n{"verdict":"approve","summary":"ok","findings":[]}';
+    const result = classifyParseFailure(raw, raw, "Unexpected token <");
+    assert.notEqual(result.errorCode, "REASONING_LEAK");
+  });
+
+  it("MARKDOWN_FENCE_UNTERMINATED: starts with ```json but no closing ```", () => {
+    const raw = '```json\n{"verdict":"approve","summary":"ok","findings":[';
+    // After stripMarkdownFences half-fence fallback:
+    const cleaned = '{"verdict":"approve","summary":"ok","findings":[';
+    const result = classifyParseFailure(raw, cleaned, "Unexpected end");
+    assert.equal(result.errorCode, "MARKDOWN_FENCE_UNTERMINATED");
+    assert.match(result.message, /unterminated markdown fence/i);
+  });
+
+  it("TRUNCATED_JSON: cleaned starts with { but JSON.parse failed", () => {
+    // No fence at all, just raw JSON that got cut off.
+    const raw = '{"verdict":"approve","summary":"midway';
+    const cleaned = raw;  // no fence to strip
+    const result = classifyParseFailure(raw, cleaned, "Unexpected end of JSON input");
+    assert.equal(result.errorCode, "TRUNCATED_JSON");
+    assert.match(result.message, /truncation/i);
+  });
+
+  it("PARSE_FAILURE: catchall for unclassified parse errors", () => {
+    // Content doesn't look like JSON, not thinking-tagged, no fence.
+    const raw = "I cannot review this code as I don't have the necessary context.";
+    const result = classifyParseFailure(raw, raw, "Unexpected token I");
+    assert.equal(result.errorCode, "PARSE_FAILURE");
+  });
+
+  it("priority: EMPTY_RESPONSE over other checks", () => {
+    // If rawOutput is empty, we return EMPTY_RESPONSE regardless of
+    // parseError value.
+    const result = classifyParseFailure("", "", "some parse error");
+    assert.equal(result.errorCode, "EMPTY_RESPONSE");
+  });
+
+  it("priority: REASONING_LEAK before MARKDOWN_FENCE (thinking tag takes precedence)", () => {
+    // Edge case: response starts with <thinking>...</thinking>```json\n
+    // — ambiguous. We prefer REASONING_LEAK since the thinking leak is
+    // the upstream root cause.
+    const raw = '<thinking>reasoning</thinking>\n```json\n{partial';
+    const result = classifyParseFailure(raw, raw, "Unexpected token");
+    assert.equal(result.errorCode, "REASONING_LEAK");
   });
 });
