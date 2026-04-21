@@ -1,0 +1,68 @@
+{
+  "command": "setup",
+  "report": {
+    "ready": false,
+    "node": {
+      "detail": "v24.14.1 (global fetch present)"
+    },
+    "npm": {
+      "detail": "not required for glm-plugin-cc (zero runtime deps)"
+    },
+    "glm": {
+      "detail": "No API key configured. Run /glm:setup and paste your key when prompted."
+    },
+    "auth": {
+      "detail": "ping skipped (pass --ping to probe)"
+    },
+    "sessionRuntime": {
+      "label": "unavailable",
+      "detail": "No API key configured. Run /glm:setup and paste your key when prompted.",
+      "ready": false
+    },
+    "reviewGateEnabled": false,
+    "state": {
+      "error": null
+    },
+    "actionsTaken": [],
+    "nextSteps": [
+      "Pick a preset: /glm:setup --preset coding-plan | pay-as-you-go | custom --base-url <url>",
+      "Set API key: /glm:setup --api-key <your-key> (or paste it in the interactive prompt)"
+    ],
+    "config": {
+      "source": "unconfigured",
+      "preset_id": null,
+      "preset_display": null,
+      "base_url": null,
+      "default_model": null,
+      "has_api_key": false,
+      "updated_at_utc": null,
+      "error": null
+    },
+    "presets": [
+      {
+        "id": "coding-plan",
+        "display": "\u667a\u8c31 BigModel Coding Plan",
+        "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
+        "default_model": "glm-5.1",
+        "notes": "Subscription-priced coding plan via \u667a\u8c31 BigModel (\u56fd\u5185).",
+        "docs_url": "https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys"
+      },
+      {
+        "id": "pay-as-you-go",
+        "display": "\u667a\u8c31 BigModel Pay-as-you-go",
+        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "default_model": "glm-5.1",
+        "notes": "Metered billing via \u667a\u8c31 BigModel (\u56fd\u5185). Pay per token.",
+        "docs_url": "https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys"
+      },
+      {
+        "id": "custom",
+        "display": "Custom endpoint",
+        "base_url": null,
+        "default_model": "glm-5.1",
+        "notes": "Bring-your-own OpenAI-compatible endpoint (e.g. \u6d77\u5916 Z.AI, self-hosted).",
+        "docs_url": null
+      }
+    ]
+  }
+}
