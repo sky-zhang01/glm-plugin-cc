@@ -181,7 +181,7 @@ regression patterns found during this release's review passes.
   invariant; a `cross-ai-review-advisory` job probes the PR
   comment thread when an AI identity authors a PR and prints an
   advisory if no counterpart AI has reviewed.
-- `.github/workflows/release-gate.yml` — tag-triggered; verifies
+- `.github/workflows/release-pipeline.yml` — tag-triggered; verifies
   `package.json` / `plugin.json` / `marketplace.json` version
   parity with the tag, CHANGELOG entry present, release card
   `Status: READY`. Does NOT publish.
