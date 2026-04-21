@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 70843,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The cumulative v0.4.0→v0.4.7 diff introduces critical runtime libraries (retry.mjs, bigmodel-errors.mjs, glm-client.mjs) and significant changes to job control, state management, and file system operations without adequate evidence of edge-case hardening. The most concerning patterns are: (1) retry/backoff logic that could amplify partial-failure scenarios or hide permanent errors, (2) BigModel error dispatch that silently falls through on unrecognized error shapes, and (3) state/job-control mutations without explicit rollback or cleanup on failure paths. I need to inspect the actual source to confirm these hypotheses.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry logic may infinitely loop or silently swallow permanent failures on non-standard error shapes",
+        "body": "The new retry.mjs module (203 lines added) is central to the v0.4.6 auto-retry/backoff feature. Without seeing explicit terminal-condition guards for unrecognized error types, there is a material risk that: (a) errors that don't match the BigModel error taxonomy fall through to a default retry path, causing excessive retries on permanent failures (e.g., 403 Forbidden, malformed request); (b) the backoff calculation could produce zero or negative delays under certain input conditions, leading to a tight retry loop. The test file retry.test.mjs (352 lines) suggests coverage exists, but the test-to-code ratio alone doesn't guarantee all failure modes are covered — specifically, interaction between retry.mjs and bigmodel-errors.mjs when error classification returns undefined/unknown.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Audit retry.mjs to confirm: (1) every error path either retries with a bounded count or terminates with a clear error, (2) unrecognized errors are NOT retried by default, (3) backoff delay has a floor > 0, (4) add a test case for an error object that doesn't match any known BigModel error code to verify it fails fast rather than retrying."
+      },
+      {
+        "severity": "high",
+        "title": "BigModel error dispatch may return undefined for unrecognized error shapes, causing silent failures downstream",
+        "body": "The new bigmodel-errors.mjs (168 lines) is responsible for classifying errors from the GLM API. If the error response shape doesn't match any known pattern (e.g., a new API version returns a different error structure, or a network-level error lacks a response body), the dispatch function may return undefined or a generic object without a retryable flag. Downstream code in glm-client.mjs and retry.mjs that branches on this classification would then take an undefined code path — either skipping retry entirely (hiding the error) or retrying indefinitely. This is especially dangerous because the v0.4.6 release specifically added this module to HANDLE errors from BigModel, meaning the error handler itself becoming a failure point is a blind spot.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.75,
+        "recommendation": "Add an explicit catch-all/default case in the error dispatcher that returns a non-retryable, well-structured error object with a clear message like 'unrecognized error shape'. Add tests for: null body, missing error code field, completely unexpected HTTP status codes (e.g., 503, 504, 418), and network errors with no response at all."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs mutations lack rollback/cleanup on partial failure, risking corrupt persisted state",
+        "body": "state.mjs was modified (32 lines changed) and manages persisted job/configuration state. If a write operation (e.g., updating tracked job state) succeeds for one field but a subsequent dependent operation fails, there is no visible transactional boundary or cleanup mechanism. Under concurrent usage (two CLI invocations racing to update the same state file), this could leave the state file in a partially-written or semantically inconsistent state — e.g., a job marked as 'running' that has actually failed. The tracked-jobs.mjs (78 lines changed) compounds this risk if it reads stale state after a concurrent write.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.6,
+        "recommendation": "Verify that state.mjs uses atomic writes (write-to-temp then rename). Add an integration test that simulates concurrent state mutations and verifies the file is never left in a parseable-but-semantically-wrong state. Consider adding a version/checksum field to detect corrupted writes."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs retry integration may double-charge or double-submit on ambiguous responses",
+        "body": "glm-client.mjs (155 lines changed) now integrates with the retry system. For non-idempotent operations (e.g., submitting a review or creating a job), a retry triggered by a timeout or ambiguous response (connection dropped after server received the request) could cause the same operation to be submitted twice. The diff doesn't show evidence of idempotency keys, request deduplication, or conditional retries based on operation type. This is a classic distributed-systems hazard that is easy to overlook in a CLI tool context.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.65,
+        "recommendation": "Classify which glm-client operations are idempotent (GET/status) vs non-idempotent (POST/create). Only apply automatic retry to idempotent operations or add idempotency-key headers to non-idempotent ones. Document the retry policy clearly so users understand the trade-off."
+      },
+      {
+        "severity": "medium",
+        "title": "render.mjs changes may silently produce empty/malformed output for edge-case inputs",
+        "body": "render.mjs (79 lines changed) handles output formatting. Changes to this module risk silently producing empty or malformed output when given unexpected input shapes — e.g., a job result with no content field, or a deeply nested error object. Since render is the primary user-visible output path, silent failures here would be hard to diagnose (the user sees nothing, no error message).",
+        "file": "scripts/lib/render.mjs",
+        "line_start": 1,
+        "line_end": 79,
+        "confidence": 0.5,
+        "recommendation": "Add defensive checks at the top of each render function to validate the input shape and throw a descriptive error if the input is null, undefined, or missing expected fields. Add tests for null input, empty object input, and input with unexpected nested structures."
+      }
+    ],
+    "next_steps": [
+      "Read scripts/lib/retry.mjs fully to confirm the retry termination and backoff floor guarantees",
+      "Read scripts/lib/bigmodel-errors.mjs to verify the default/fallthrough case in error dispatch",
+      "Read scripts/lib/glm-client.mjs to check which operations are retried and whether idempotency is handled",
+      "Read scripts/lib/state.mjs to verify atomic write patterns",
+      "Run the existing test suite (npm test) to confirm all tests pass and identify coverage gaps"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The cumulative v0.4.0→v0.4.7 diff introduces critical runtime libraries (retry.mjs, bigmodel-errors.mjs, glm-client.mjs) and significant changes to job control, state management, and file system operations without adequate evidence of edge-case hardening. The most concerning patterns are: (1) retry/backoff logic that could amplify partial-failure scenarios or hide permanent errors, (2) BigModel error dispatch that silently falls through on unrecognized error shapes, and (3) state/job-control mutations without explicit rollback or cleanup on failure paths. I need to inspect the actual source to confirm these hypotheses.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Retry logic may infinitely loop or silently swallow permanent failures on non-standard error shapes\",\"body\":\"The new retry.mjs module (203 lines added) is central to the v0.4.6 auto-retry/backoff feature. Without seeing explicit terminal-condition guards for unrecognized error types, there is a material risk that: (a) errors that don't match the BigModel error taxonomy fall through to a default retry path, causing excessive retries on permanent failures (e.g., 403 Forbidden, malformed request); (b) the backoff calculation could produce zero or negative delays under certain input conditions, leading to a tight retry loop. The test file retry.test.mjs (352 lines) suggests coverage exists, but the test-to-code ratio alone doesn't guarantee all failure modes are covered — specifically, interaction between retry.mjs and bigmodel-errors.mjs when error classification returns undefined/unknown.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.72,\"recommendation\":\"Audit retry.mjs to confirm: (1) every error path either retries with a bounded count or terminates with a clear error, (2) unrecognized errors are NOT retried by default, (3) backoff delay has a floor > 0, (4) add a test case for an error object that doesn't match any known BigModel error code to verify it fails fast rather than retrying.\"},{\"severity\":\"high\",\"title\":\"BigModel error dispatch may return undefined for unrecognized error shapes, causing silent failures downstream\",\"body\":\"The new bigmodel-errors.mjs (168 lines) is responsible for classifying errors from the GLM API. If the error response shape doesn't match any known pattern (e.g., a new API version returns a different error structure, or a network-level error lacks a response body), the dispatch function may return undefined or a generic object without a retryable flag. Downstream code in glm-client.mjs and retry.mjs that branches on this classification would then take an undefined code path — either skipping retry entirely (hiding the error) or retrying indefinitely. This is especially dangerous because the v0.4.6 release specifically added this module to HANDLE errors from BigModel, meaning the error handler itself becoming a failure point is a blind spot.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.75,\"recommendation\":\"Add an explicit catch-all/default case in the error dispatcher that returns a non-retryable, well-structured error object with a clear message like 'unrecognized error shape'. Add tests for: null body, missing error code field, completely unexpected HTTP status codes (e.g., 503, 504, 418), and network errors with no response at all.\"},{\"severity\":\"medium\",\"title\":\"state.mjs mutations lack rollback/cleanup on partial failure, risking corrupt persisted state\",\"body\":\"state.mjs was modified (32 lines changed) and manages persisted job/configuration state. If a write operation (e.g., updating tracked job state) succeeds for one field but a subsequent dependent operation fails, there is no visible transactional boundary or cleanup mechanism. Under concurrent usage (two CLI invocations racing to update the same state file), this could leave the state file in a partially-written or semantically inconsistent state — e.g., a job marked as 'running' that has actually failed. The tracked-jobs.mjs (78 lines changed) compounds this risk if it reads stale state after a concurrent write.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.6,\"recommendation\":\"Verify that state.mjs uses atomic writes (write-to-temp then rename). Add an integration test that simulates concurrent state mutations and verifies the file is never left in a parseable-but-semantically-wrong state. Consider adding a version/checksum field to detect corrupted writes.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs retry integration may double-charge or double-submit on ambiguous responses\",\"body\":\"glm-client.mjs (155 lines changed) now integrates with the retry system. For non-idempotent operations (e.g., submitting a review or creating a job), a retry triggered by a timeout or ambiguous response (connection dropped after server received the request) could cause the same operation to be submitted twice. The diff doesn't show evidence of idempotency keys, request deduplication, or conditional retries based on operation type. This is a classic distributed-systems hazard that is easy to overlook in a CLI tool context.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.65,\"recommendation\":\"Classify which glm-client operations are idempotent (GET/status) vs non-idempotent (POST/create). Only apply automatic retry to idempotent operations or add idempotency-key headers to non-idempotent ones. Document the retry policy clearly so users understand the trade-off.\"},{\"severity\":\"medium\",\"title\":\"render.mjs changes may silently produce empty/malformed output for edge-case inputs\",\"body\":\"render.mjs (79 lines changed) handles output formatting. Changes to this module risk silently producing empty or malformed output when given unexpected input shapes — e.g., a job result with no content field, or a deeply nested error object. Since render is the primary user-visible output path, silent failures here would be hard to diagnose (the user sees nothing, no error message).\",\"file\":\"scripts/lib/render.mjs\",\"line_start\":1,\"line_end\":79,\"confidence\":0.5,\"recommendation\":\"Add defensive checks at the top of each render function to validate the input shape and throw a descriptive error if the input is null, undefined, or missing expected fields. Add tests for null input, empty object input, and input with unexpected nested structures.\"}],\"next_steps\":[\"Read scripts/lib/retry.mjs fully to confirm the retry termination and backoff floor guarantees\",\"Read scripts/lib/bigmodel-errors.mjs to verify the default/fallthrough case in error dispatch\",\"Read scripts/lib/glm-client.mjs to check which operations are retried and whether idempotency is handled\",\"Read scripts/lib/state.mjs to verify atomic write patterns\",\"Run the existing test suite (npm test) to confirm all tests pass and identify coverage gaps\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T16:31:06.580Z"
+}

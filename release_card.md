@@ -1,18 +1,30 @@
-# Release Card — glm-plugin-cc v0.4.7
+# Release Card — glm-plugin-cc v0.4.7 (beta1 cut 2026-04-22)
 
-Status: READY
+Status: READY — beta1 prerelease scope
 
 Approval Mode: maintainer direct-approval (solo-maintainer repo; same
 pattern as v0.4.4 / v0.4.5 / v0.4.6). Gitea CI green → maintainer
 auto-merge per standing one-off-per-release shortcut. Not promoted
-into CONTRIBUTING.md.
+into CONTRIBUTING.md. Beta1 cut mid-release because Phase 7d power-up
+sweep is long-running (~8-10h wall time) and the rest of v0.4.7
+content — code, docs, 149-run data — is already locked; cutting
+beta1 now lets the interim snapshot be audited against a stable ref.
 
-Intended Ref
+Intended Ref (beta1)
 - Feature branch: `fix/v047-review-reliability-mvp` off `develop`
 - PR: `fix/v047-review-reliability-mvp` → `develop` (Gitea)
 - PR: `develop` → `main` (Gitea)
-- Tag: `v0.4.7` annotated, on the `develop → main` merge commit
-- Mirrored: GitHub public repo (main + tag + release, marked Latest)
+- Tag: `v0.4.7-beta1` annotated, on the `develop → main` merge commit
+- **Gitea release**: marked `Prerelease`, **NOT Latest**
+- **GitHub release**: marked `Prerelease`, **NOT Latest** (v0.4.6 stays Latest)
+
+Intended Ref (v0.4.7 final — after Phase 7d)
+- Follow-up commit that writes Phase 7d effective-N and Fisher-exact
+  numbers into CHANGELOG tables + bumps manifest versions from
+  `0.4.7-beta1` → `0.4.7`
+- Tag: `v0.4.7` annotated
+- Gitea + GitHub release: marked `Latest`
+- Gitea issue #7: close at this point, not at beta1
 
 ---
 
@@ -52,8 +64,9 @@ workflow-governor cross-review hallucination session:
    file-existence + distinctive-token grep, CSV results format stable
    across releases, per-run sidecar payload capture for offline audit.
    Ships with both the initial 9-call sanity-sweep data
-   (`sanity-sweep.csv`) and the expanded 54-run B+D+E matrix data
-   (`expanded-sweep.csv`) so v0.4.8+ can diff against either baseline.
+   (`sanity-sweep.csv`) and the 149-run four-phase expanded-sweep
+   data (`expanded-sweep.csv`) so future sweeps can diff against
+   either baseline.
 
 4. **Extended parse-failure classifier** added post-expanded-sweep.
    The initial 9-run sweep (medium diff) produced a schema=0 cell
@@ -70,25 +83,32 @@ workflow-governor cross-review hallucination session:
 
 ## Out of Scope
 
-- **No default sampling parameter change.** The initial 9-call sanity
-  sweep was followed up with a 54-run B+D+E expanded matrix (3 fixtures
-  × up to 4 seeds × 3 temps × N=3). Even at the expanded scope, N=3
-  per cell is too thin to justify a release-wide default shift. The
-  data surfaces a clear C3 large-diff scale effect
-  (schema_compliance 0.67 / 0.33 / 0.00 at temp 0 / 0.5 / 1) that is
-  the v0.4.8 investigation priority — a focused C3 sweep with N ≥ 10
-  per temperature would determine whether `temperature=0.2` should
-  become the review-specific default.
-- **~~No BigModel error-code table update~~** — CANCELED. Phase 7a
-  consolidated the vendor-error observation to 5×1234 + 2×500 across
-  85 runs (69 + 16 from Phase 7b effective-N fill). Cross-checking https://docs.bigmodel.cn/cn/faq/api-code
-  confirmed both codes are documented (1234 = upstream network error,
-  500 = upstream internal error), plus 3 more codes the v0.4.6
-  snapshot missed (1311, 1312, 1313). Table expansion now ships in
-  v0.4.7 — see "Added" in CHANGELOG.
-- **No C1 (small) / C3 (large) fixtures.** v0.4.7 ships only the C2
-  medium fixture. Adding smaller or larger fixtures is deferred until
-  a regression actually motivates them.
+- **No default sampling parameter change.** Sweep expanded in four
+  phases to 149 total runs, reaching effective N=14-17 per cell on
+  C1 and C3 (Phase 7c N≥14 fill). At that sample size, every pairwise
+  Fisher exact test on C3 schema compliance returns p > 0.3, and the
+  observed ordering is non-monotonic (t=0.5 worst, t=0 best, t=1
+  middle); C1 is 49/49 across temperatures. Design power at this N
+  for a ~15pct per-step effect is approximately 16%, so the result
+  is "no detected effect at this sample size", not "no effect
+  exists". The plugin ships no default temperature change because
+  there is no detected effect to justify one; server default (unset)
+  is preserved. Issue #7 is closed with the current picture
+  documented; a future powered test would need ~80+ runs per cell.
+- **~~No BigModel error-code table update~~** — CANCELED. The sweep
+  across 149 runs surfaced 6 × `1234` and 3 × `500` (combining
+  raw-code and typed-code variants) plus 3 × EMPTY_RESPONSE.
+  Cross-checking https://docs.bigmodel.cn/cn/faq/api-code confirmed
+  both codes are documented (1234 = upstream network error, 500 =
+  upstream internal error), plus 3 more codes the v0.4.6 snapshot
+  missed (1311, 1312, 1313). Table expansion now ships in v0.4.7 —
+  see "Added" in CHANGELOG.
+- **~~No C1 (small) / C3 (large) fixtures~~ — SUPERSEDED.** The
+  original v0.4.7 sanity-sweep scope was C2 only; when the 9-call
+  sanity data proved too thin, the scope expanded to add C1 (440
+  lines, 6 files) and C3 (8336 lines, 84 files) in commit 7a971a7
+  so the 149-run sweep could cover small/medium/large. v0.4.7 now
+  ships all three fixtures.
 - **No RAG / fine-tuning / context-packing variant.** Out-of-scope per
   user pushback — those are not review-workflow solutions, they're
   different product surfaces.
@@ -148,10 +168,80 @@ workflow-governor cross-review hallucination session:
     83%/71%/67% (Fisher p ≈ 0.5, not significant at N=6-7). CHANGELOG
     + release_card updated to replace earlier "unambiguous C3
     temperature signal" narrative with "mild, inconclusive at N=6". ✓
-23. `Skill(simplify)` on changed files — pending
-24. `npm run ci:local` — **DONE** (156/156 green)
-25. Adversarial review (Codex primary if quota allows, else GLM
-    fallback) — pending
+22c. **(Added post-phase-7c, per user directive "all open questions
+    resolved in this version, not v0.4.8")** N≥14 fill: +64
+    targeted runs in parallel from two detached worktrees (C3 from
+    `/tmp/glm-eval-A` at d5fa754: +30; C1 from `/tmp/glm-eval-B` at
+    7766943: +34). Every C1 and C3 cell now has effective N≥14.
+    [Phase 7d N=80 power-up sweep kicked off subsequently — in
+    flight at time of commit; see Local Verification.]
+    Results: C1 schema 16/16, 16/16, 17/17 (100% across temps); C3
+    schema 13/14 (93%), 13/17 (76%), 12/14 (86%) — pairwise Fisher
+    exact p = 0.344 / 1.000 / 0.664 (all non-significant), ordering
+    non-monotonic. Design power at this N for a ~15pct per-step
+    effect is ~16%, so the C3 temperature finding is "no detected
+    effect at this sample size", not "no effect exists". Per-finding
+    C1 citation audit (93 findings from 49 sidecars): 0 out-of-
+    allowed files, 0 known-false files. 41.9% are IN_ALLOWED with
+    line-range tokens not found; a post-audit spot-check surfaced at
+    least one line-level content fabrication (e.g. fictional
+    `@anthropics → @anthropic-ai` rename claim) that the scoring
+    rubric's token-in-window check does not catch, so the claim is
+    narrowed to "0 wrong-file citations" rather than "0 fabrication".
+    CHANGELOG rewritten to reflect underpowered-null framing;
+    `commands/review.md` gains "Diff size guidance" section;
+    `commands/adversarial-review.md` sampling bullet aligned. No
+    prompt or default-sampling change ships in v0.4.7. ✓
+23. `Skill(simplify)` on N=149 doc diff — **DONE** (3-agent parallel
+    + Python factual audit; caught 134-vs-127 success-count mismatch
+    + 47/48-vs-40/42 C2 mismatch + stale `7/85`/`91.3%` numbers, all
+    corrected pre-commit).
+24. `npm run ci:local` — **DONE** (156/156 green); re-run after
+    Codex F-1..F-5 fixes — pending
+25. Adversarial review (Codex primary) — **DONE**. Verdict:
+    REQUEST_CHANGES with 5 findings:
+      - F-1 HIGH: success count 134→127 (schema_compliance, not blank
+        error_code). Fixed in CHANGELOG outcome table.
+      - F-2 HIGH: "0 fabrication" narrowed to "0 out-of-allowed
+        files"; line-level content fabrication observed (fictional
+        `@anthropics → @anthropic-ai` rename claim) and documented
+        as scoring-rubric limitation.
+      - F-3 HIGH: "decisive null" rephrased to "not detected at this
+        N (~16% power)" across CHANGELOG / release_card /
+        commands/review.md / commands/adversarial-review.md.
+      - F-4 MEDIUM: raw vs typed 1234/500 attribution clarified —
+        every raw code is pre-Phase-7c; Phase 7c worktrees correctly
+        emitted typed codes.
+      - F-5 MEDIUM: stale "No C1/C3 fixtures" bullet in release_card
+        and test-automation/review-eval/README.md marked SUPERSEDED.
+    Optional step 25b: re-query Codex with the fixes applied.25b. Optional Codex re-verify after F-1..F-5 fixes — pending user
+    decision (can ship citing REQUEST_CHANGES→addressed in PR body
+    instead).
+25c. **(Added post-Codex-review-round-2, per user directive "这块
+    很重要 社区到底在怎么解决这块的问题")** Codex community research
+    pass on anti-hallucination solutions (CoVe, Self-Consistency,
+    SelfCheckGPT, RAG grounding, Guardrails/NeMo, Pydantic AI,
+    constrained decoding, attribution-faithfulness). Output:
+    `docs/anti-hallucination-roadmap.md` with Tier 1/2/3 landing
+    plan + literature citations (Dhuliawala 2023, Wang 2023,
+    Manakul 2023, Farquhar 2024, Wallat 2024). v0.4.7 ships Tier 1
+    #3 only (`response_format: json_object` on every review call,
+    confirmed supported by GLM-5.x via `docs.z.ai`); #1 content
+    verifier + #2 schema anchors deferred to v0.4.8 under proper
+    design gate. Rationale: #1/#2 change production review output
+    and need design-gate discussion before rushing into release
+    tail. ✓
+25d. **(Added with 25c)** Extracted `buildChatRequestBody` as pure
+    exported helper in `glm-client.mjs` so response_format + sampling
+    + thinking-mode body shape is unit-testable. 14 new tests in
+    `tests/chat-request-body.test.mjs`. Total suite: 170/170 green. ✓
+25e. **(Pending — in flight)** Phase 7d N=80 power-up sweep (C3 +225
+    runs for ~80% Fisher exact power, C1 +83 runs to effective
+    N=40 for confirmation). Wall time ~8-10 hours single-threaded
+    on C3; parallel-worktree pattern halves to ~max(A,B). In flight
+    on 2 detached worktrees at time of commit. Results will update
+    § Expanded-sweep outcome + § Effective-N analysis post-sweep
+    via an amendment commit or separate v0.4.7-post-sweep rev.
 26. Push to Gitea only. Open PR → `develop`. Paste adversarial verdict
     in PR body. — pending
 27. Gitea CI green → auto-merge PR to develop — pending
@@ -165,11 +255,12 @@ workflow-governor cross-review hallucination session:
 33. Fast-forward develop → main on both remotes (GitFlow cleanup) —
     pending
 34. Upgrade local plugin cache to v0.4.7 — pending
-35. Close Gitea issue #7 with link to CHANGELOG entry + final CSV,
-    and open v0.4.8 follow-up issue for focused C3 sweep — pending
+35. Close Gitea issue #7 with link to CHANGELOG entry + final 149-run
+    CSV. No v0.4.8 follow-up issue — all in-flight questions resolved
+    in this release. — pending
 
 ## Scope Completion: will reach COMPLETE at step 35
-## Outstanding In-Scope Work: steps 23, 25-35 pending (24 DONE)
+## Outstanding In-Scope Work: step 23 (simplify pass done for N=149 doc diff — clean), step 24 re-run after Codex F-1..F-5 fixes, step 25 adversarial (Codex returned REQUEST_CHANGES; 5 findings addressed, optional re-verify), steps 26-35 pending
 
 ## Major Upgrade Review: N/A
 
@@ -215,10 +306,10 @@ the POST body when the caller explicitly passes a flag).
     with raw-payload sidecar capture + `--base` flag + schema-check
     alignment to classifyReviewPayload
   - `results/v0.4.7/sanity-sweep.csv` (initial 9 runs, v1 strictness)
-  - `results/v0.4.7/expanded-sweep.csv` (85 runs: 54 Phase 4/5 +
-    15 Phase 7a + 16 Phase 7b effective-N fill)
-  - `results/v0.4.7/payloads/` (85 sidecar JSON files: 54 Phase 4/5
-    + 15 Phase 7a + 16 Phase 7b)
+  - `results/v0.4.7/expanded-sweep.csv` (149 runs: 54 Phase 4/5 +
+    15 Phase 7a + 16 Phase 7b + 64 Phase 7c N≥14 fill)
+  - `results/v0.4.7/payloads/` (149 sidecar JSON files spanning all
+    four phases)
 - Modified: `scripts/ci/check-no-local-paths.sh` (exclude
   review-eval corpus + results paths from path-leak scanner).
 - Version bump in 3 manifest files + CHANGELOG v0.4.7 rewrite with
@@ -241,13 +332,21 @@ the POST body when the caller explicitly passes a flag).
 | Gitea CI | `ai-quality-gate.yml` + `pr-check.yml` | both green |
 | GitHub CI | same 2 workflows | both green |
 | **Release gate** | `bash scripts/ci/check-release-ready.sh v0.4.7` | All 4 checks pass (runs automatically in pre-push on tag push) |
-| **Expanded sweep data** | `node test-automation/review-eval/scripts/summarize.mjs results/v0.4.7/expanded-sweep.csv` | 85 rows, 0 SCHEMA_ECHO, 0 false_file_hits, 8/18 cells PASS raw; after effective-N filter C1=100%/100%/100%, C2=97%, C3=83%/71%/67%. Upstream failures 9/85 (10.6%) all in Phase 7a time window; Phase 7b zero upstream failures. |
+| **Expanded sweep data** | `node test-automation/review-eval/scripts/summarize.mjs results/v0.4.7/expanded-sweep.csv` | 149 rows, 0 SCHEMA_ECHO, 0 known_false_files hits across all 149 runs, 0 out-of-allowed citations on C1. Effective-N: C1=100%/100%/100% (N=16-17), C2=95% (40/42 across 12 cells), C3=93%/76%/86% (N=14-17). Fisher exact on C3 all pairwise p>0.3. Upstream failures 13/149 (8.7%) time-correlated across phases. |
 
 ## Local Verification
 
-To be populated after `ci:local` + adversarial review complete. Sanity
-sweep already executed (9 calls on 2026-04-21, all from detached
-worktree at d5fa754 to match fixture baseline; CSV committed).
+- `npm test` green (156/156) at commit prior to Phase 7c doc updates.
+- Phase 7c sweep executed 2026-04-21 across ~82 minutes wall time: 30
+  C3 runs from `/tmp/glm-eval-A` (detached at d5fa754) + 34 C1 runs
+  from `/tmp/glm-eval-B` (detached at 7766943), all appended cleanly
+  to `expanded-sweep.csv` (149 unique timestamps, zero parallel-append
+  collisions). 4 upstream errors out of 64 Phase 7c runs; all other
+  60 runs produced valid schema payloads with typed correction-retry
+  paths exercised where needed.
+- To be appended after step 24 re-run + step 25 adversarial review:
+  final `npm run ci:local` result post-doc-updates + Codex/GLM
+  adversarial verdict.
 
 ## CI Evidence
 

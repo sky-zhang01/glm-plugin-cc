@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 26
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 81654,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit bundles an npm scope rename with a functional change to the setup command. The scope rename alters the plugin's published identity across package.json, marketplace.json, and plugin.json, which is a potentially breaking change for existing installations. The interactive menu added to commands/setup.md introduces new decision paths when the system is 'already configured,' but without evidence that all edge cases (partial config, corrupted state, interrupted setup) are handled, this creates risk of silent misconfiguration. These two concerns should be validated before shipping.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking identity change for existing users",
+        "body": "The scope/package name is changed across package.json, .claude-plugin/marketplace.json, and .claude-plugin/plugin.json. Any existing user who installed the plugin under the old scope will not receive this update through normal channels. Their lockfiles, dependency trees, and plugin registries will still reference the old scope. If the old-scoped package is not maintained in parallel (or republished as a redirect), this is an implicit breaking change masquerading as a minor version bump (v0.4.7). There is no migration guide or deprecation notice visible in the diff.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 10,
+        "confidence": 0.72,
+        "recommendation": "Either (a) publish the old scope as a deprecated stub that points to the new scope, (b) add a postinstall/migration notice, or (c) bump to a major version and document the scope change as a breaking change in CHANGELOG.md with explicit migration steps."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive menu on already-configured state may silently overwrite valid config",
+        "body": "commands/setup.md gains an interactive menu when the system is 'already configured.' Since this is a prompt-driven command, the menu behavior depends on Claude's interpretation of the markdown instructions. If a user selects 'reconfigure' or an equivalent option, the existing valid configuration could be overwritten without a clear backup or rollback path. There is no visible guard against partial reconfiguration (e.g., updating one field but failing on another), which could leave the system in an inconsistent state. The prompt-based nature makes deterministic testing difficult.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.65,
+        "recommendation": "Before allowing reconfiguration, the setup command should: (a) display the current configuration, (b) confirm explicitly before overwriting, (c) ideally snapshot the prior config so the user can restore it. Add these guards as explicit instructions in the markdown prompt."
+      },
+      {
+        "severity": "low",
+        "title": "CHANGELOG and release_card may misrepresent scope as non-breaking",
+        "body": "The CHANGELOG.md entry for v0.4.7 and the substantial release_card.md changes (326 lines changed) appear to describe the interactive menu addition and scope rename. If the changelog does not explicitly call out the scope rename as a potentially breaking action for existing installations, users scanning the changelog will not be alerted to the migration need. A large documentation change bundled with an identity change increases the risk that reviewers overlook the breaking nature of the rename.",
+        "file": "CHANGELOG.md",
+        "line_start": 1,
+        "line_end": 21,
+        "confidence": 0.55,
+        "recommendation": "Ensure the CHANGELOG entry explicitly calls out the npm scope rename and its impact on existing installations. Separate the scope rename from the feature addition in the changelog so users can assess each independently."
+      }
+    ],
+    "next_steps": [
+      "Inspect the full diff of package.json and plugin.json to confirm the exact old-to-new scope mapping and verify no stale references to the old scope remain in any file.",
+      "Read commands/setup.md in full to verify the interactive menu includes explicit confirmation before overwriting existing configuration and handles partial/invalid config states.",
+      "Verify whether the old-scoped package will remain available or redirect to the new scope; if not, draft a migration guide.",
+      "Confirm the CHANGELOG entry explicitly documents the scope rename as a potentially breaking change."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"This commit bundles an npm scope rename with a functional change to the setup command. The scope rename alters the plugin's published identity across package.json, marketplace.json, and plugin.json, which is a potentially breaking change for existing installations. The interactive menu added to commands/setup.md introduces new decision paths when the system is 'already configured,' but without evidence that all edge cases (partial config, corrupted state, interrupted setup) are handled, this creates risk of silent misconfiguration. These two concerns should be validated before shipping.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename is a breaking identity change for existing users\",\n      \"body\": \"The scope/package name is changed across package.json, .claude-plugin/marketplace.json, and .claude-plugin/plugin.json. Any existing user who installed the plugin under the old scope will not receive this update through normal channels. Their lockfiles, dependency trees, and plugin registries will still reference the old scope. If the old-scoped package is not maintained in parallel (or republished as a redirect), this is an implicit breaking change masquerading as a minor version bump (v0.4.7). There is no migration guide or deprecation notice visible in the diff.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 10,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Either (a) publish the old scope as a deprecated stub that points to the new scope, (b) add a postinstall/migration notice, or (c) bump to a major version and document the scope change as a breaking change in CHANGELOG.md with explicit migration steps.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Interactive menu on already-configured state may silently overwrite valid config\",\n      \"body\": \"commands/setup.md gains an interactive menu when the system is 'already configured.' Since this is a prompt-driven command, the menu behavior depends on Claude's interpretation of the markdown instructions. If a user selects 'reconfigure' or an equivalent option, the existing valid configuration could be overwritten without a clear backup or rollback path. There is no visible guard against partial reconfiguration (e.g., updating one field but failing on another), which could leave the system in an inconsistent state. The prompt-based nature makes deterministic testing difficult.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Before allowing reconfiguration, the setup command should: (a) display the current configuration, (b) confirm explicitly before overwriting, (c) ideally snapshot the prior config so the user can restore it. Add these guards as explicit instructions in the markdown prompt.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"CHANGELOG and release_card may misrepresent scope as non-breaking\",\n      \"body\": \"The CHANGELOG.md entry for v0.4.7 and the substantial release_card.md changes (326 lines changed) appear to describe the interactive menu addition and scope rename. If the changelog does not explicitly call out the scope rename as a potentially breaking action for existing installations, users scanning the changelog will not be alerted to the migration need. A large documentation change bundled with an identity change increases the risk that reviewers overlook the breaking nature of the rename.\",\n      \"file\": \"CHANGELOG.md\",\n      \"line_start\": 1,\n      \"line_end\": 21,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Ensure the CHANGELOG entry explicitly calls out the npm scope rename and its impact on existing installations. Separate the scope rename from the feature addition in the changelog so users can assess each independently.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect the full diff of package.json and plugin.json to confirm the exact old-to-new scope mapping and verify no stale references to the old scope remain in any file.\",\n    \"Read commands/setup.md in full to verify the interactive menu includes explicit confirmation before overwriting existing configuration and handles partial/invalid config states.\",\n    \"Verify whether the old-scoped package will remain available or redirect to the new scope; if not, draft a migration guide.\",\n    \"Confirm the CHANGELOG entry explicitly documents the scope rename as a potentially breaking change.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:41:09.982Z"
+}

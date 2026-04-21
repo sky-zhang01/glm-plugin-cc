@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 5
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 64517,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces critical infrastructure (retry logic, BigModel error dispatch, job tracking) with insufficient guards against partial failure and state corruption. The retry.mjs module has no test coverage for concurrent retry storms, glm-client.mjs silently mutates shared state on retry exhaustion, and the new bigmodel-errors.mjs error classification can misclassify unknown errors into retryable categories. The sweep focus (v0.4.7 sampling-sweep run 5) is testing a tag that doesn't exist yet — this review targets the shipping edge at v0.4.6.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry exhaustion silently corrupts tracked job state without marking failure",
+        "body": "In glm-client.mjs, when retry.mjs exhausts all attempts, the error propagates but the tracked job in tracked-jobs.mjs may remain in a 'running' or 'pending' state indefinitely. There is no guaranteed cleanup path on final retry failure — the retry wrapper catches and re-throws but the caller in glm-client.mjs does not unconditionally finalize the job state in a finally block. Under concurrent load or process interruption, jobs accumulate in limbo states that never resolve, requiring manual state file cleanup. This is a data integrity issue that degrades silently.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.78,
+        "recommendation": "Wrap the retry call in glm-client.mjs with a try/finally that unconditionally transitions the tracked job to a terminal state (failed/completed) regardless of whether retry succeeds, throws, or the process is interrupted. Add a state.mjs recovery function that garbage-collects stale 'running' jobs older than a configurable TTL on startup."
+      },
+      {
+        "severity": "high",
+        "title": "bigmodel-errors.mjs default error classification is overly broad — unknown errors retry indefinitely",
+        "body": "The classifyError function in bigmodel-errors.mjs maps HTTP status codes and error patterns to retryable/non-retryable categories. However, any error that doesn't match a known pattern falls through to a default that appears to classify it as retryable (to be safe). This means network-level errors (DNS failures, proxy errors, malformed responses) and programming bugs (TypeError, ReferenceError) will be retried with exponential backoff, wasting API quota and masking real failures. A misconfigured proxy or bad endpoint would burn through all retry attempts over minutes before surfacing the real error, and the user sees only a generic timeout rather than the root cause.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.82,
+        "recommendation": "Change the default classification to non-retryable. Only explicitly whitelisted error codes and patterns should trigger retries. Log the full error details at each retry attempt so that misclassified errors are diagnosable. Add a test case for TypeError/ReferenceError/syntax-error classification confirming they are non-retryable."
+      },
+      {
+        "severity": "medium",
+        "title": "retry.mjs has no concurrency guard — multiple callers can exhaust shared rate limits",
+        "body": "The retry module implements exponential backoff with jitter per-call, but it has no awareness of concurrent in-flight retries. If glm-client.mjs is called from multiple async contexts simultaneously (e.g., parallel review commands), each independently retries on 429/rate-limit responses, compounding the rate limit violation. The backoff is per-retry-instance, not global. Under the stated use case of sampling sweeps (run 5 implies repeated automated invocations), this can trigger cascading rate limit bans from the upstream API.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Add a shared semaphore or token-bucket rate limiter that retry.mjs consults before each attempt. At minimum, add an opt-in global cooldown counter that blocks new retries while a 429 is being handled. Document the concurrency limitation clearly so users know to serialize calls during sweeps."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs state file writes are not atomic — crash during write corrupts all job state",
+        "body": "The tracked-jobs module persists job state to a JSON file. If the process crashes (SIGKILL, OOM, power loss) during a JSON.stringify + write operation, the state file can be left truncated or empty. On next startup, JSON.parse will throw, and all historical job state is lost. This is especially likely during long sampling sweeps where process lifetime is extended and crash probability accumulates.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.85,
+        "recommendation": "Use atomic write-then-rename: write to a temporary file in the same directory, fsync, then rename over the target file. On read, if the primary file is corrupt, attempt to read the previous file or the temp file as fallback. Add a corruption-recovery test."
+      },
+      {
+        "severity": "medium",
+        "title": "Missing v0.4.6 UAT evidence — gap between last tested version and shipping version",
+        "body": "The test-automation/uat-reports directory contains evidence for v0.4.4 and v0.4.5 only. There is no v0.4.6 report directory. The v0.4.6 release introduced BigModel error dispatch, auto retry/backoff, and other significant changes to the core client path. Shipping v0.4.6 (the base for the v0.4.7 sweep) without UAT evidence for the retry/error-handling paths means the most critical new code paths are untested under realistic conditions.",
+        "file": "test-automation/uat-reports/v0.4.5/report.md",
+        "line_start": 1,
+        "line_end": 125,
+        "confidence": 0.9,
+        "recommendation": "Execute and document UAT for v0.4.6 before proceeding with the v0.4.7 sampling sweep. At minimum, test: (1) retry behavior on simulated 429/500 responses, (2) job state integrity after retry exhaustion, (3) concurrent invocation rate limit handling, (4) crash recovery of tracked-jobs state file."
+      }
+    ],
+    "next_steps": [
+      "Audit glm-client.mjs for missing finally-block cleanup on retry exhaustion and add unconditional job state finalization",
+      "Flip the default error classification in bigmodel-errors.mjs to non-retryable and add explicit whitelist tests",
+      "Implement atomic write-then-rename in tracked-jobs.mjs state persistence",
+      "Run and document v0.4.6 UAT before trusting results from the v0.4.7 sampling sweep",
+      "Add a global rate-limit awareness mechanism to retry.mjs or document the single-concurrency limitation"
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff introduces critical infrastructure (retry logic, BigModel error dispatch, job tracking) with insufficient guards against partial failure and state corruption. The retry.mjs module has no test coverage for concurrent retry storms, glm-client.mjs silently mutates shared state on retry exhaustion, and the new bigmodel-errors.mjs error classification can misclassify unknown errors into retryable categories. The sweep focus (v0.4.7 sampling-sweep run 5) is testing a tag that doesn't exist yet — this review targets the shipping edge at v0.4.6.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Retry exhaustion silently corrupts tracked job state without marking failure\",\n      \"body\": \"In glm-client.mjs, when retry.mjs exhausts all attempts, the error propagates but the tracked job in tracked-jobs.mjs may remain in a 'running' or 'pending' state indefinitely. There is no guaranteed cleanup path on final retry failure — the retry wrapper catches and re-throws but the caller in glm-client.mjs does not unconditionally finalize the job state in a finally block. Under concurrent load or process interruption, jobs accumulate in limbo states that never resolve, requiring manual state file cleanup. This is a data integrity issue that degrades silently.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Wrap the retry call in glm-client.mjs with a try/finally that unconditionally transitions the tracked job to a terminal state (failed/completed) regardless of whether retry succeeds, throws, or the process is interrupted. Add a state.mjs recovery function that garbage-collects stale 'running' jobs older than a configurable TTL on startup.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"bigmodel-errors.mjs default error classification is overly broad — unknown errors retry indefinitely\",\n      \"body\": \"The classifyError function in bigmodel-errors.mjs maps HTTP status codes and error patterns to retryable/non-retryable categories. However, any error that doesn't match a known pattern falls through to a default that appears to classify it as retryable (to be safe). This means network-level errors (DNS failures, proxy errors, malformed responses) and programming bugs (TypeError, ReferenceError) will be retried with exponential backoff, wasting API quota and masking real failures. A misconfigured proxy or bad endpoint would burn through all retry attempts over minutes before surfacing the real error, and the user sees only a generic timeout rather than the root cause.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.82,\n      \"recommendation\": \"Change the default classification to non-retryable. Only explicitly whitelisted error codes and patterns should trigger retries. Log the full error details at each retry attempt so that misclassified errors are diagnosable. Add a test case for TypeError/ReferenceError/syntax-error classification confirming they are non-retryable.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"retry.mjs has no concurrency guard — multiple callers can exhaust shared rate limits\",\n      \"body\": \"The retry module implements exponential backoff with jitter per-call, but it has no awareness of concurrent in-flight retries. If glm-client.mjs is called from multiple async contexts simultaneously (e.g., parallel review commands), each independently retries on 429/rate-limit responses, compounding the rate limit violation. The backoff is per-retry-instance, not global. Under the stated use case of sampling sweeps (run 5 implies repeated automated invocations), this can trigger cascading rate limit bans from the upstream API.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Add a shared semaphore or token-bucket rate limiter that retry.mjs consults before each attempt. At minimum, add an opt-in global cooldown counter that blocks new retries while a 429 is being handled. Document the concurrency limitation clearly so users know to serialize calls during sweeps.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"tracked-jobs.mjs state file writes are not atomic — crash during write corrupts all job state\",\n      \"body\": \"The tracked-jobs module persists job state to a JSON file. If the process crashes (SIGKILL, OOM, power loss) during a JSON.stringify + write operation, the state file can be left truncated or empty. On next startup, JSON.parse will throw, and all historical job state is lost. This is especially likely during long sampling sweeps where process lifetime is extended and crash probability accumulates.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.85,\n      \"recommendation\": \"Use atomic write-then-rename: write to a temporary file in the same directory, fsync, then rename over the target file. On read, if the primary file is corrupt, attempt to read the previous file or the temp file as fallback. Add a corruption-recovery test.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Missing v0.4.6 UAT evidence — gap between last tested version and shipping version\",\n      \"body\": \"The test-automation/uat-reports directory contains evidence for v0.4.4 and v0.4.5 only. There is no v0.4.6 report directory. The v0.4.6 release introduced BigModel error dispatch, auto retry/backoff, and other significant changes to the core client path. Shipping v0.4.6 (the base for the v0.4.7 sweep) without UAT evidence for the retry/error-handling paths means the most critical new code paths are untested under realistic conditions.\",\n      \"file\": \"test-automation/uat-reports/v0.4.5/report.md\",\n      \"line_start\": 1,\n      \"line_end\": 125,\n      \"confidence\": 0.9,\n      \"recommendation\": \"Execute and document UAT for v0.4.6 before proceeding with the v0.4.7 sampling sweep. At minimum, test: (1) retry behavior on simulated 429/500 responses, (2) job state integrity after retry exhaustion, (3) concurrent invocation rate limit handling, (4) crash recovery of tracked-jobs state file.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Audit glm-client.mjs for missing finally-block cleanup on retry exhaustion and add unconditional job state finalization\",\n    \"Flip the default error classification in bigmodel-errors.mjs to non-retryable and add explicit whitelist tests\",\n    \"Implement atomic write-then-rename in tracked-jobs.mjs state persistence\",\n    \"Run and document v0.4.6 UAT before trusting results from the v0.4.7 sampling sweep\",\n    \"Add a global rate-limit awareness mechanism to retry.mjs or document the single-concurrency limitation\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:32:18.709Z"
+}

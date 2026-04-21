@@ -1,18 +1,66 @@
 # Changelog
 
-## v0.4.7 — 2026-04-21
+## v0.4.7-beta1 — 2026-04-22
+
+**Prerelease snapshot — 途中版本 (interim / in-transit).** This tag
+captures the v0.4.7 work-in-progress at the point where:
+
+- all review-reliability **code changes are locked in** (parse-layer
+  defenses, `response_format: json_object`, BigModel error-table
+  expansion, `buildChatRequestBody` extraction, sampling CLI flags),
+- all **docs are locked in** (this CHANGELOG, "Diff size guidance" in
+  `commands/review.md`, `docs/anti-hallucination-roadmap.md`),
+- **170/170 unit tests pass** (156 baseline + 14 new),
+- the **149-run pre-Phase-7d baseline data is committed** as is the
+  149 sidecar JSONs under `test-automation/review-eval/results/v0.4.7/`.
+
+At commit time the **Phase 7d power-up sweep** (C3 to effective
+N=80 per temperature cell for ~80% Fisher exact power; C1 to N=40
+for confirmation) is **still in flight** in two parallel worktrees
+(`/tmp/glm-eval-A` at d5fa754 for C3, `/tmp/glm-eval-B` at 7766943
+for C1). `test-automation/review-eval/results/v0.4.7/expanded-sweep.csv`
+and `payloads/` at this tag therefore contain the 149-run baseline
+**plus whatever partial Phase 7d progress happened to be written to
+disk at the exact moment of the beta1 commit** — the two sweep
+processes append as they run, so `wc -l` on the CSV at this ref
+will exceed 149. Do not read these partial Phase 7d rows as a
+coherent dataset; the v0.4.7 final tag will refresh the CSV with
+the complete Phase 7d sweep.
+
+Cut as a prerelease — **NOT marked `Latest`** on Gitea / GitHub —
+so the finalized code + docs + 149-run analysis can be audited
+against a stable ref without waiting for the remaining ~7-8 hours
+of C3 sweep wall time. v0.4.6 remains `Latest` until v0.4.7 final.
+
+v0.4.7 final will be tagged on a follow-up commit that writes the
+Phase 7d effective-N and Fisher-exact results into the tables
+below + bumps `0.4.7-beta1 → 0.4.7` in the three manifests.
+Behavior between beta1 and final is identical except for the
+updated outcome numbers; no code or prompt change is planned
+between these tags.
+
+The rest of this section describes the v0.4.7 final scope. Read it
+as "what beta1 already delivers + what Phase 7d will confirm".
+
+---
 
 Review reliability pass. Addresses the v0.4.5 SCHEMA_ECHO dogfood
 observation + the 2026-04-21 workflow-governor cross-review
 hallucination pattern via parse-layer defenses that run unconditionally
 on review output, exposes BigModel sampling-parameter flags on the
-CLI for empirical investigation, and lands a 3-fixture evaluation
-harness covering small / medium / large diffs. Tracking: Gitea
-issue #7.
+CLI, lands a 3-fixture evaluation harness covering small / medium /
+large diffs, and runs a 149-run empirical sweep across four adaptive
+phases. Within the sweep's sample size (effective N=14-17 per
+C1/C3 temperature cell) no sampling-parameter effect reaches
+statistical significance — underpowered for ~15pct differences —
+so the release ships no sampling-parameter default. Closes Gitea
+issue #7 with this as the observed-but-non-significant state;
+future sweeps needing decisive resolution of the temperature
+contrast would need ~80+ runs per cell.
 
 The initial 9-run sanity sweep on C2 (medium diff) was too thin to
 justify any default change. Per user push-back, the sweep was expanded
-in three adaptive phases:
+in four adaptive phases:
 
 1. **Phase 4/5 B+D+E matrix** — 3 fixtures × up to 4 seeds × 3
    temperatures × N=3 = 54 valid runs with raw-payload capture.
@@ -23,13 +71,21 @@ in three adaptive phases:
    500) occurring during a period of upstream instability.
 3. **Phase 7b effective-N fill** — 16 targeted runs filling cells
    that had been polluted by Phase 7a upstream failures, so every
-   cell could be compared at **effective model-N ≥ 5** (runs that
-   weren't upstream-layer rejections). Crucially, Phase 7b itself
-   hit **zero upstream errors**, confirming the vendor errors are
-   time-correlated BigModel transient instability, not cell- or
-   parameter-correlated.
+   cell could be compared at **effective model-N ≥ 5**. Crucially,
+   Phase 7b itself hit **zero upstream errors**, confirming vendor
+   errors are time-correlated BigModel transient instability, not
+   cell- or parameter-correlated.
+4. **Phase 7c N≥14 fill** — 64 additional runs (C3 ×3 temps × +10
+   each = 30; C1 ×3 temps × +10/+10/+14 = 34) delivered in parallel
+   from two detached worktrees, taking every C1 and C3 cell to
+   effective N≥14 per temperature. Fisher exact tests at this N are
+   underpowered (~16% power for detecting a ~15pct difference at
+   alpha=0.05), so the result is reported as observed-but-not-
+   significant rather than a proof of no effect. A per-finding C1
+   citation root-cause audit confirms 0 out-of-allowed-files
+   fabrication (see § C1 citation audit).
 
-Total evidence base: **85 valid runs with complete sidecar JSON for
+Total evidence base: **149 valid runs with complete sidecar JSON for
 each**. The data surfaced three categories of previously-silent
 failures:
 
@@ -38,41 +94,101 @@ failures:
 - **5 BigModel vendor error codes** (500, 1234, 1311, 1312, 1313) that
   the v0.4.6 dispatch table missed — all now added with correct retry
   semantics.
-- **9 upstream-layer failures across 85 runs (10.6%)** — 7 vendor
-  errors + 1 network timeout + 1 empty response. Distributed in time
-  (concentrated during Phase 7a), not across cells, and now handled
-  by the expanded dispatch table for automatic retry.
+- **13 upstream-layer failures across 149 runs (8.7%)** — vendor
+  errors + network timeout + empty-response cases. Distributed in
+  time (concentrated in Phase 7a; Phase 7b had zero; Phase 7c had
+  4/64 = 6.3%), not across cells, and now handled by the expanded
+  dispatch table for automatic retry.
 
-**No default sampling parameter change ships in v0.4.7.** After
-effective-N filtering (excluding upstream-layer failures), the
-temperature-vs-scale picture is much softer than the N=3 view
-suggested:
+**No default sampling parameter change ships in v0.4.7**. At
+effective N=14-17 per cell on C3, every pairwise Fisher exact test
+returns p > 0.3; the result is observed-but-not-significant.
+Power for detecting a ~15pct per-step difference at this N is
+approximately 0.16, so this is not a proof of no effect — it is
+absence of evidence at the current sample size. A decisive answer
+would need ~80+ runs per cell, which is out of scope for a personal
+Coding Plan in one session:
 
-| fixture | temp | effective N | schema pass | vs N=3 raw |
+| fixture | temp | effective N | schema pass | Wilson 95% CI |
 |---|---|---|---|---|
-| C3 | 0.0 | 6 | **5/6 (83%)** | was 0.67 raw → ~same |
-| C3 | 0.5 | 7 | 5/7 (71%) | was 0.33 raw (3 upstream contaminated) |
-| C3 | 1.0 | 6 | 4/6 (67%) | was 0.00 raw (4 failures, 2 upstream) |
-| C2 | all | 36 | 35/36 (97%) | ≈ same |
-| C1 | 0.0 | 6 | **6/6 (100%)** | was 0.67 raw (1 upstream contaminated) |
-| C1 | 0.5 | 6 | **6/6 (100%)** | was 0.67 raw (1 upstream contaminated) |
-| C1 | 1.0 | 3 | 3/3 (100%) | same |
+| C3 | 0.0 | 14 | **13/14 (92.9%)** | [68.5%, 98.7%] |
+| C3 | 0.5 | 17 | 13/17 (76.5%) | [52.7%, 90.4%] |
+| C3 | 1.0 | 14 | 12/14 (85.7%) | [60.1%, 96.0%] |
+| C2 | all 12 cells | 42 | 40/42 (95.2%) | 2 parse-layer failures |
+| C1 | 0.0 | 16 | **16/16 (100%)** | [80.6%, 100%] |
+| C1 | 0.5 | 16 | **16/16 (100%)** | [80.6%, 100%] |
+| C1 | 1.0 | 17 | **17/17 (100%)** | [81.6%, 100%] |
 
-C1 "looks bad at low temp" was **entirely** upstream pollution. C3
-temperature effect is real but mild (83% → 71% → 67% ≈ -15pct per
-step). Wilson 95% CI on C3 temp=0 (5/6) vs temp=1 (4/6):
-[36%-100%] vs [22%-96%], substantially overlapping. Fisher exact
-test p ≈ 0.5 — **not statistically significant at N=6**.
+**Fisher exact 2×2 on C3 schema compliance across temperature**:
 
-The maintainer's "model updates faster than data stays valid"
-directive applies strongly: decisively resolving C3 temperature
-would require N≥15 per cell focused sweep, which is v0.4.8 follow-up
-scope. The real shipping wins are: vendor-error dispatch gap (now
-fixed), parse-failure classifier (5 modes captured), and a
-3-fixture baseline that future sweeps can diff against.
+| contrast | table | p (two-sided) | interpretation |
+|---|---|---:|---|
+| C3 t=0 vs t=0.5 | 13/14 vs 13/17 | **0.344** | not significant |
+| C3 t=0 vs t=1 | 13/14 vs 12/14 | **1.000** | not significant |
+| C3 t=0.5 vs t=1 | 13/17 vs 12/14 | **0.664** | not significant |
+
+Three things the N≥14 data clarifies relative to the N=6 view:
+
+1. **Large-diff temperature effect — not detectable at this N.**
+   The N=5-7 view showed a mild monotone 83%→71%→67% trend. At
+   N=14-17 it flattens to a non-monotone 93%→76%→86% pattern (t=0.5
+   worst, t=0 best, t=1 middle), and every pairwise Fisher contrast
+   is non-significant (p=0.344 / 1.000 / 0.664). At the observed
+   effect size this design has ~16% power, so this is "no
+   significant effect detected at current N", not "no effect
+   exists". The plugin ships no default temperature change because
+   there is no detected effect to justify one; a future sweep that
+   wanted to decisively rule in or out a ~15pct-per-step effect
+   would need ~80+ runs per cell.
+2. **Small-diff citation-accuracy root cause — scoring-harness
+   artifact.** C1 schema is 100% across all three temps at
+   N=16-17. The `citation_accuracy = 0.66-0.78` on C1 is explained
+   by a per-finding audit of all 93 parsed findings: 0/93 cite
+   out-of-diff files, 0/93 cite `known_false_files`, and the
+   41.9% "LINE_MISMATCH" cases are all "diff-meta" findings
+   (finding.body talks about commit-message / CHANGELOG entry /
+   scope-rename, so reviewer meta-language tokens like `commit`,
+   `CHANGELOG`, `rename`, `scope` don't appear as literal tokens
+   in the cited file's content). The model is **not** fabricating
+   citations — the scoring rubric is too strict for legitimate
+   meta-findings on small diffs. No prompt or model change is
+   needed. Optional harness refinement is v0.5.x scope.
+3. **Diff-size usage matrix — documented in commands/review.md.**
+   The `/glm:review` command's "Diff size guidance" section now
+   summarises small / medium / large behavior and practical
+   invocation notes (background preferred >1500 lines; no
+   opinionated sampling default; expected latency bands).
+
+The closing observation from the N=85 view still stands and is
+sharpened by Phase 7c: **0/149 runs cite `known_false_files`** (the
+2026-04-21 workflow-governor cross-project hallucination pattern).
+That pattern is confidently not a GLM-5.1 failure mode at any
+temperature under the current model snapshot.
 
 ### Added
 
+- **`response_format: { type: "json_object" }` on every review call**
+  (`scripts/lib/glm-client.mjs:buildChatRequestBody`). BigModel GLM-5.x
+  supports this on the OpenAI-compatible endpoint (confirmed 2026-04
+  via `docs.z.ai`; `json_schema` is NOT supported, only `text` and
+  `json_object`). Previously the client relied on prompt-only JSON
+  instructions — Codex's v0.4.7 adversarial review caught that gap.
+  This is parser-hardening only; it does NOT defend against
+  content-level fabrication ("correctness without faithfulness" per
+  Wallat et al., arXiv 2412.18004, 2024). See the full menu of
+  considered mitigations in `docs/anti-hallucination-roadmap.md`.
+- **`buildChatRequestBody` extracted as a pure exported function** so
+  request-shape behavior (response_format, thinking mode, sampling
+  forwarding) is unit-testable without a mock HTTP endpoint. 14 new
+  tests in `tests/chat-request-body.test.mjs`. Total suite now 170/170.
+- **`docs/anti-hallucination-roadmap.md`** — captures Codex's v0.4.7
+  research pass on Chain-of-Verification, Self-Consistency,
+  SelfCheckGPT, RAG + attribution-faithfulness, constrained
+  decoding, Guardrails/NeMo/Pydantic AI, and structures the
+  v0.4.7/v0.4.8/v0.5+ landing plan. Primary sources: Dhuliawala
+  2023, Wang 2023, Manakul 2023, Farquhar 2024, Rashkin 2023, Wallat
+  2024. Community consensus on the rename-fabrication class:
+  external grounding + claim-level verification + abstention.
 - **Parse-layer review-output defenses** (`scripts/lib/glm-client.mjs`):
   - `stripMarkdownFences` — removes `` ```json ... ``` `` wrappers.
     v0.4.7-final extends it with two half-fence fallbacks: open-only
@@ -126,15 +242,17 @@ fixed), parse-failure classifier (5 modes captured), and a
   - `results/v0.4.7/sanity-sweep.csv` — original 9-run v1-strictness
     data (preserved for reference; old `schema_compliance` used a
     stricter truthy check).
-  - `results/v0.4.7/expanded-sweep.csv` — 85-row CSV merging Phase 4/5
-    B+D+E matrix (54 rows) + Phase 7a adaptive follow-up (15 rows) +
-    Phase 7b effective-N fill (16 rows). New schema-compliance check
-    aligned to `classifyReviewPayload`; `schema_empty_string` column
-    isolates the empty-content content-quality signal.
-  - `results/v0.4.7/payloads/` — 85 sidecar JSON files with full
+  - `results/v0.4.7/expanded-sweep.csv` — 149-row CSV merging Phase
+    4/5 B+D+E matrix (54 rows) + Phase 7a adaptive follow-up (15 rows)
+    + Phase 7b effective-N fill (16 rows) + Phase 7c N≥14 fill
+    (64 rows). New schema-compliance check aligned to
+    `classifyReviewPayload`; `schema_empty_string` column isolates
+    the empty-content content-quality signal.
+  - `results/v0.4.7/payloads/` — 149 sidecar JSON files with full
     parsed output + rawOutput head (8KB cap) + per-run metrics +
-    cell metadata. These are the evidence that disambiguated the five
-    parse-failure modes above AND the five new vendor error codes.
+    cell metadata. Evidence for the five parse-failure modes, the
+    five new vendor error codes, the (underpowered) C3 temperature
+    picture, and the C1 citation diff-meta pattern.
 - **5 new BigModel vendor error codes** (`scripts/lib/bigmodel-errors.mjs`)
   — empirically caught in the v0.4.7 expanded sweep + confirmed
   against the current official docs at
@@ -149,11 +267,12 @@ fixed), parse-failure classifier (5 modes captured), and a
     traffic spike with alt-model suggestion).
   - `1313` → `FAIR_USE_LIMIT`, retry=never (fair-use policy trip,
     requires unlock via personal center).
-  Table grew from 7 to 12 known codes. 7 of the 69 sweep runs hit
-  one of the new codes (5× 1234 + 2× 500) — adding them to the
-  dispatch table means retry.mjs now handles these via the same
-  exponential-backoff path as 1302 / 1305 rather than falling through
-  to `VENDOR_ERROR:<code>` with `retry=unknown`.
+  Table grew from 7 to 12 known codes. 9 of the 149 sweep runs hit
+  one of the new codes (combined 1234 + 500 count across raw and
+  typed forms: 6+3=9) — adding them to the dispatch table means
+  retry.mjs now handles these via the same exponential-backoff path
+  as 1302 / 1305 rather than falling through to
+  `VENDOR_ERROR:<code>` with `retry=unknown`.
 - **Parse-defense unit tests** (`tests/review-payload.test.mjs`) —
   34 cases total (19 initial + 15 new): `stripMarkdownFences` full +
   half-fence fallbacks, `classifyReviewPayload` valid / schema_echo /
@@ -194,126 +313,218 @@ fixed), parse-failure classifier (5 modes captured), and a
 
 ### Expanded-sweep outcome
 
-85 valid runs total across three phases (54 + 15 + 16). Per issue #7
-pre-registered criteria, **raw aggregate view** (what summarize.mjs
-reports by default):
+149 valid runs total across four phases (54 + 15 + 16 + 64).
 
-| fixture | temp | seed | raw N | schema | cite_acc | false_file | PASS? |
-|---|---|---|---|---|---|---|---|
-| C2 | 0.0 | unset | 3 | 1.00 | 1.00 | 0 | YES |
-| C2 | 0.5 | unset | 3 | 1.00 | 1.00 | 0 | YES |
-| C2 | 1.0 | unset | 3 | 1.00 | 1.00 | 0 | YES |
-| C2 | 0.0 | 42    | 3 | 1.00 | 0.92 | 0 | YES |
-| C2 | 0.5 | 42    | 8 | 0.75 | 0.97 | 0 | no |
-| C2 | 1.0 | 42    | 3 | 1.00 | 1.00 | 0 | YES |
-| C2 | 0.0 | 1337  | 6 | 0.83 | 0.97 | 0 | no |
-| C2 | 0.5 | 1337  | 3 | 1.00 | 1.00 | 0 | YES |
-| C2 | 1.0 | 1337  | 3 | 1.00 | 0.85 | 0 | no |
-| C2 | 0.0 | 2024  | 3 | 1.00 | 1.00 | 0 | YES |
-| C2 | 0.5 | 2024  | 3 | 1.00 | 0.87 | 0 | no |
-| C2 | 1.0 | 2024  | 3 | 1.00 | 0.93 | 0 | YES |
-| C3 | 0.0 | unset | 6 | 0.83 | 0.91 | 0 | no |
-| C3 | 0.5 | unset | 10 | 0.80 | 0.91 | 0 | no |
-| C3 | 1.0 | unset | 8 | 0.75 | 0.93 | 0 | no |
-| C1 | 0.0 | unset | 7 | 0.86 | 0.90 | 0 | no |
-| C1 | 0.5 | unset | 7 | 0.86 | 0.58 | 0 | no |
-| C1 | 1.0 | unset | 3 | 1.00 | 0.78 | 0 | no |
+**outcome distribution across 149 runs** (counted by
+`schema_compliance` and `error_code` jointly — see row notes):
 
-**error_code distribution across 85 runs**:
-
-| errorCode | count | rate | interpretation |
+| bucket | count | rate | interpretation |
 |---|---:|---:|---|
-| `""` (success) | 76 | 89.4% | plugin produced a valid schema-compliant payload |
-| `VENDOR_ERROR:1234` | 5 | 5.9% | BigModel upstream network error (now handled) |
-| `VENDOR_ERROR:500` | 2 | 2.4% | BigModel upstream internal error (now handled) |
-| `NETWORK_ERROR` | 1 | 1.2% | local 303s timeout on a long response |
-| `EMPTY_RESPONSE` | 1 | 1.2% | BigModel terminated before emitting content |
+| schema-compliant success (schema=1, error_code="") | 127 | 85.2% | plugin produced a valid schema-compliant payload |
+| stealthy schema-0 with blank error_code (Phase 4/5 pre-classifier) | 7 | 4.7% | raw `<thinking>…</thinking>` prose, extra data after JSON, tool-call text — would be typed under v0.4.7 if replayed |
+| BigModel 1234 upstream network (pre-7c raw + Phase 7c typed) | 6 | 4.0% | 5× raw `VENDOR_ERROR:1234` from Phase 4/5/7a/7b + 1× typed `UPSTREAM_NETWORK_ERROR` from Phase 7c |
+| BigModel 500 upstream internal (pre-7c raw + Phase 7c typed) | 3 | 2.0% | 2× raw `VENDOR_ERROR:500` from pre-7c + 1× typed `UPSTREAM_INTERNAL_ERROR` from Phase 7c |
+| EMPTY_RESPONSE | 3 | 2.0% | BigModel terminated before emitting content |
+| NETWORK_ERROR | 1 | 0.7% | local 303s timeout on a long C3 response |
+| MARKDOWN_FENCE_UNTERMINATED (Phase 7c typed) | 1 | 0.7% | parse-layer classifier caught an open-fence truncation |
+| PARSE_FAILURE (Phase 7c typed) | 1 | 0.7% | parse-layer classifier catchall — schema JSON failed all five typed modes |
 
-**9 of 85 runs (10.6%) were upstream-layer failures**. Critical
-observation: **8 of the 9 occurred during Phase 7a** (a ~25-minute
-window around 13:00 UTC), while **Phase 7b (16 runs spanning 13:40-14:04
-UTC) hit zero upstream errors**. This is strong evidence that the
-vendor errors are **time-correlated BigModel transient instability**,
-not cell-correlated (temperature or fixture or seed-triggered) behavior.
-v0.4.7's BigModel table expansion (500, 1234 added) means 7 of those 9
-will now trigger the retry/backoff pipeline instead of falling through
-to `VENDOR_ERROR:<code>` with `retry=unknown`.
+Phase attribution for raw-vs-typed vendor codes: **every raw
+`VENDOR_ERROR:1234` and `VENDOR_ERROR:500` payload in the CSV
+timestamps into Phase 4/5 or Phase 7a** (pre-dispatch-table-expansion
+harness). Every Phase 7c (>=14:21 UTC) upstream BigModel failure
+surfaced as a typed code, confirming the v0.4.7 worktrees both
+loaded the expanded `bigmodel-errors.mjs` correctly. The histogram
+collapses raw + typed rows for readability only; they are not
+co-mingled within a single phase.
+
+**13 of 149 runs (8.7%) were upstream-layer BigModel failures**
+(rows 3-6). Phase 7a had a dense ~25-minute burst around 13:00 UTC
+(5/15 runs ≈ 33%); Phase 7c spread across ~1 hour ran at ~6%;
+Phase 4/5 and Phase 7b were low. That by-time structure rules out
+any per-cell explanation — the vendor errors are **time-correlated
+BigModel transient instability**, not temperature-, fixture-, or
+seed-triggered behavior. v0.4.7's dispatch-table expansion (500,
+1234, 1311, 1312, 1313) means all observed codes now trigger the
+retry/backoff pipeline instead of falling through to
+`VENDOR_ERROR:<code>` with `retry=unknown`.
+
+**2 of 149 runs (1.3%) were Phase-7c parse-layer-classified
+failures** (rows 7-8) — the invisible-pre-v0.4.7 failure class this
+release targets, caught by the classifier in deployment. Plus an
+additional **7 Phase 4/5 runs** (row 2) which are the same class of
+failure captured before the classifier merged, so they surface with
+`schema_compliance=0` and blank `error_code`. Under the v0.4.7 path
+those would also be typed.
+
+> **Baseline caveat**: the 149-run sweep and the 1.3% / 4.7% parse-
+> failure rates measure the **pre-`response_format: json_object`**
+> code path. v0.4.7 ships `response_format: json_object` on every
+> review call (see § Added), which is expected to reduce these rates
+> further. A future diff against this 149-run baseline will quantify
+> the post-response_format improvement.
 
 ### Effective-N analysis (model-behavior isolation)
 
-Re-aggregating after excluding upstream failures gives the true
-model-behavior rates:
+Re-aggregating after excluding upstream-layer failures gives the
+model-only behavior rates. At effective N=14-17 per cell on C1 and
+C3 (Phase 7c), the picture sharpens considerably:
 
-| cell | effective N | schema pass | vs raw reading |
+| cell | effective N | schema pass | Wilson 95% CI |
 |---|---|---|---|
-| C1 temp=0.0 | 6 | **6/6 (100%)** | raw 0.86 was 100% after excluding 1 upstream |
-| C1 temp=0.5 | 6 | **6/6 (100%)** | raw 0.86 was 100% after excluding 1 upstream |
-| C1 temp=1.0 | 3 | 3/3 (100%) | no change |
-| C2 (all 12 cells) | 36 | 35/36 (97%) | 1 REASONING_LEAK at seed=1337 temp=0 |
-| **C3 temp=0.0** | 6 | **5/6 (83%)** | raw 0.83, no upstream |
-| **C3 temp=0.5** | 7 | **5/7 (71%)** | raw 0.80, 3 upstream excluded |
-| **C3 temp=1.0** | 6 | **4/6 (67%)** | raw 0.75, 2 upstream excluded |
+| **C1 temp=0.0** | 16 | **16/16 (100%)** | [80.6%, 100%] |
+| **C1 temp=0.5** | 16 | **16/16 (100%)** | [80.6%, 100%] |
+| **C1 temp=1.0** | 17 | **17/17 (100%)** | [81.6%, 100%] |
+| C2 (all 12 cells) | 42 | 40/42 (95.2%) | 2 parse-layer failures (one REASONING_LEAK, one extra-data-after-JSON) |
+| **C3 temp=0.0** | 14 | **13/14 (92.9%)** | [68.5%, 98.7%] |
+| **C3 temp=0.5** | 17 | 13/17 (76.5%) | [52.7%, 90.4%] |
+| **C3 temp=1.0** | 14 | 12/14 (85.7%) | [60.1%, 96.0%] |
 
-Re-reading with effective-N:
+Re-reading at N≥14:
 
-- **C1 is near-perfect on model behavior.** The "C1 small-diff failure"
-  signal from N=3 data was entirely vendor-error pollution. The real
-  small-diff issue is `citation_accuracy` (0.58±0.38 at temp=0.5),
-  NOT `schema_compliance`. Deferred to v0.4.8 — small-diff citation
-  noise is a different problem from the workflow-governor hallucination
-  pattern this release targeted.
-- **C2 is robust across the full temperature × seed matrix.** 35/36
-  effective runs pass; the one failure is a single REASONING_LEAK on
-  C2 seed=1337 temp=0 run 3 which did not recur on the Phase 7a N=6
-  consolidation of that cell. Medium diffs are essentially unaffected
-  by sampling choice.
-- **C3 temperature effect exists but is mild and statistically
-  inconclusive at N=5-7.** The degradation 83% → 71% → 67% is ~-15pct
-  per step. Wilson 95% CI: C3 temp=0 [36%, 100%] vs C3 temp=1
-  [22%, 96%] — substantially overlapping. Fisher exact test
-  5/6 vs 4/6 → p ≈ 0.5, not significant. **Decisively resolving
-  this signal requires N ≥ 15 per cell**, which is v0.4.8 scope.
+- **C1 schema is perfect.** 49/49 across three temperature cells. The
+  earlier "C1 small-diff failure" signal from N=3 data was entirely
+  upstream-error pollution. The small-diff concern that remained
+  (C1 `citation_accuracy` at 0.66-0.78, vs C2/C3 at 0.83-1.00) is
+  resolved by the per-finding audit below: it is a scoring-harness
+  artifact on diff-meta findings, not a model regression.
+- **C2 is robust across the full temperature × seed matrix.** 40/42
+  effective runs pass across 12 cells. The two failures are both
+  Phase 4/5 runs (before `classifyParseFailure` was merged, so they
+  surfaced as `error_code=""` rather than typed): one REASONING_LEAK
+  on seed=1337 temp=0 (193-char `<thinking>...</thinking>` leak, no
+  JSON) and one trailing-content parse failure on seed=42 temp=0.5
+  (JSON emitted, then model continued with "Let me examine..."
+  extra prose, breaking `JSON.parse`). Neither recurred in the
+  Phase 7a N=6 consolidation of its cell. Both would surface as
+  typed `errorCode` under the v0.4.7 path. Medium diffs are
+  effectively temperature-insensitive.
+- **C3 temperature effect is not detected at this N** (but not
+  disproved either). Fisher exact p-values for every pairwise
+  contrast are > 0.3, ordering is non-monotonic (t=0.5 worst, t=0
+  best, t=1 middle). Design power at N=14-17 for a ~15pct per-step
+  difference at alpha=0.05 is only ~16% — the test is underpowered,
+  so "no detected effect" is the correct claim, not "no effect
+  exists". The Decision block at the end of this section records the
+  final call.
+
+### C1 citation audit (per-finding root cause)
+
+49 C1 sidecars with parsed output contribute 93 findings. Classifying
+each `finding.file` against the C1 ground truth:
+
+| category | count | % | interpretation |
+|---|---:|---:|---|
+| IN_ALLOWED_LINE_OK | 54 | 58.1% | correct file + distinctive tokens from body appear within ±20 lines |
+| IN_ALLOWED_LINE_MISMATCH | 39 | 41.9% | correct file, tokens not found near cited lines |
+| OUT_OF_ALLOWED | 0 | 0% | would mean citing a file outside the diff (wrong-file fabrication) |
+| KNOWN_FALSE | 0 | 0% | would mean workflow-governor cross-project hallucination |
+
+**0/93 findings cite a file outside the C1 diff and 0/93 cite a
+cross-project known-false path** — the "wrong-file" dimension of
+fabrication does not appear in this dataset.
+
+The 39 mismatch cases are dominated by "diff-meta" findings: the
+reviewer cites `package.json` or `CHANGELOG.md` while the
+finding.body describes the file's role in the diff ("the commit
+message confirms the scope rename", "the CHANGELOG entry combines
+two concerns"). The distinctive tokens extracted from such bodies
+— `commit`, `CHANGELOG`, `scope`, `rename`, `package`, `confirms`
+— don't appear as literal text in those files' content, so the
+scoring harness registers a miss even though the critique itself
+is legitimate review surface (commit-message-vs-diff alignment).
+
+**Caveat: the scoring rubric does NOT validate line-level content
+claims.** A spot-check of IN_ALLOWED_LINE_MISMATCH sidecars surfaces
+at least one line-level content fabrication — e.g. a `package.json`
+finding claiming the rename was `@anthropics/claude-code` →
+`@anthropic-ai/claude-code` when the actual C1 v0.4.4 rename was
+`@skylab/glm-plugin-cc` → `glm-plugin-cc`. The current
+`scoreCitation` function only checks (file-in-allowed-set) +
+(any token from finding.body appears within ±20 lines) — it cannot
+detect when an allowed-file citation makes a factually wrong
+claim about file content. So the stronger interpretation is:
+"0/93 wrong-file citations", not "0/93 fabrications".
+
+Shipping action: none in v0.4.7 code. The scoring-rubric
+limitation is documented here and in `commands/review.md`
+"Diff size guidance". Upgrading the audit to check quoted entity
+claims against fixture content is v0.5.x scope.
 
 ### Key findings (evidence-backed claims)
 
-- **No `SCHEMA_ECHO` reproduction across 85 runs.** The v0.4.5 aftercare
-  dogfood failure mode is absent from the current model version at
-  every temperature × seed × fixture combination tested.
-- **No `known_false_files` hits across 85 runs.** The 2026-04-21
+- **No `SCHEMA_ECHO` reproduction across 149 runs.** The v0.4.5
+  aftercare dogfood failure mode is absent from the current model
+  version at every temperature × seed × fixture combination tested.
+- **No `known_false_files` hits across 149 runs.** The 2026-04-21
   workflow-governor cross-project hallucination pattern (citing
-  `reference_runtime.py` / `governance.py` / `workflow_governor/` paths
-  while reviewing glm-plugin-cc) did NOT reproduce — not even on C3 at
-  the 8336-line scale that matched the original hallucination session.
-- **Four parse-failure modes empirically observed + now classified**:
-  1. `MARKDOWN_FENCE_UNTERMINATED` (C3 temp=1 run 2, 56s).
-  2. `TRUNCATED_JSON` (C3 temp=1 run 3, 70s).
-  3. `EMPTY_RESPONSE` (C3 temp=1 run 1, 5.8s — upstream-layer variant).
-  4. `REASONING_LEAK` (C2 temp=0 seed=1337 run 3, 9.5s) — unreproduced
-     on that cell's N=6 consolidation, appears to be extremely low-rate
-     intermittent.
-  5. `PARSE_FAILURE` catchall — reserved for unclassified parse
-     errors; none observed yet.
-  All five now get typed `errorCode` + targeted correction-retry hints.
-- **Five vendor error codes classified**: `500`, `1234` observed in
-  Phase 7a; `1311`, `1312`, `1313` added from current official docs
-  that were missing from the v0.4.6 snapshot.
+  `reference_runtime.py` / `governance.py` / `workflow_governor/`
+  paths while reviewing glm-plugin-cc) did NOT reproduce — not even
+  on C3 at the 8336-line scale that matched the original session,
+  not at any temperature, not at any seed, not at any N up to 17
+  per cell.
+- **Zero out-of-allowed C1 citations across 93 parsed findings.**
+  On the small-diff fixture the model correctly identifies the
+  cited file in 100% of its findings. The scoring rubric does NOT
+  validate line-level content claims, so "0 out-of-allowed" is not
+  the same as "0 fabrication" — at least one confabulated content
+  claim (fictional package-name rename) was surfaced in a
+  spot-check (see § C1 citation audit).
+- **Parse-failure modes empirically observed across 149 runs**:
+  - `EMPTY_RESPONSE` — 3/149 (upstream-layer variants where BigModel
+    terminated before any content).
+  - `MARKDOWN_FENCE_UNTERMINATED` — 1/149 (C3 temp=0.5 run 6, Phase 7c,
+    typed by v0.4.7 classifier).
+  - `PARSE_FAILURE` catchall — 1/149 (C3 temp=0.5 run 10, Phase 7c;
+    model emitted a 108-char plain-English "Let me read the key
+    files." message with no JSON structure, no fence, no `<thinking>`
+    tag — a "declining to emit structured output" pattern not
+    captured by the other typed modes).
+  - `REASONING_LEAK` pattern — 1/149 (C2 temp=0 seed=1337 run 3,
+    Phase 4/5; surfaced as `error_code=""` because it predates the
+    classifier merge; `<thinking>...</thinking>` + plain prose).
+  - Trailing-content-after-JSON pattern — 1/149 (C2 temp=0.5 seed=42
+    run 3, Phase 4/5; 1158-char output with JSON complete at char
+    1068 then extra prose, `JSON.parse` "Extra data" error; also
+    predates classifier merge).
+  The last two (Phase 4/5) would now surface as typed `errorCode`
+  under the v0.4.7 path. `TRUNCATED_JSON` is defined in the classifier
+  but was not observed — it is reserved for genuine mid-structure
+  JSON truncation, a mode the sweep did not exercise.
+  All five typed modes ship with targeted correction-retry hints.
+- **Five vendor error codes classified**: `500`, `1234` observed
+  empirically in Phase 7a/7c; `1311`, `1312`, `1313` added from the
+  current official docs that were missing from the v0.4.6 snapshot.
 - **Adaptive-sampling methodology paid off.** Phase 7a (15 targeted
-  runs) + Phase 7b (16 effective-N fill runs) = 31 follow-up runs vs.
-  the uniform-expansion alternative of 54+ runs to get all cells to
-  N=6. The targeted approach surfaced the vendor-error-time-correlation
-  finding AND revealed that C1 "looked bad" entirely because of
-  upstream pollution — both of which uniform re-sampling would have
-  missed.
+  runs) + Phase 7b (16 effective-N fill runs) + Phase 7c (64 N≥14
+  fill runs) = 95 follow-up runs total. The targeted approach
+  surfaced the vendor-error-time-correlation finding, pushed
+  effective N high enough to separate schema-compliance noise from
+  signal, and kept the total sweep under ~3.5 hours of wall time on
+  a personal Coding Plan. It was NOT enough to make the
+  temperature-effect test conclusive — for that, ~80+ runs per cell
+  would be required.
 
-**Decision**: no default sampling parameter change in v0.4.7. At
-effective N=6-7 on C3 the temperature signal is mild (-15pct per step)
-and Wilson CI overlap substantial; Fisher p ≈ 0.5 indicates no
-significance. Small/medium diffs are effectively temperature-insensitive
-at these N levels. The real actionable wins in v0.4.7 are
-(a) parse-failure classifier, (b) BigModel dispatch table expansion,
-(c) 85-run baseline data for future diffing. C3 temperature resolution
-+ C1 citation-accuracy investigation both deferred to v0.4.8 with
-clear N-requirements.
+**Decision**: no default sampling parameter change in v0.4.7.
+Relative to the N=6 version of this statement, the Phase 7c N=14-17
+data shows every pairwise Fisher exact p > 0.3 on C3 and C1 at 49/49
+across temperatures — but Fisher power at this N for a ~15pct
+per-step effect is ~16%, so "no detected effect" is the claim, not
+"no effect exists". Without a detected effect there is no temperature
+setting justified as a default. The actionable wins in v0.4.7 are:
+
+  (a) parse-failure classifier + correction-retry (5 modes),
+  (b) BigModel dispatch table expansion (+5 codes to 12 total),
+  (c) 149-run baseline + 149 sidecar JSONs future sweeps can diff against,
+  (d) "Diff size guidance" section in `commands/review.md` capturing
+      the observational model-behavior-vs-diff-size matrix.
+
+Gitea issue #7 is closed by this changelog with the
+observed-but-not-significant temperature picture documented. If a
+future investigation wants a powered test, ~80+ runs per cell would
+be required; no follow-up issue is opened because the existing
+CHANGELOG + 149 sidecar JSONs are enough to re-enter that work
+when / if it becomes motivated.
 
 ### Unchanged
 

@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 5
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 54800,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit bundles an npm scope rename with a new interactive setup menu. The scope rename is a breaking change for existing installations with no migration path, and the interactive menu in commands/setup.md introduces configuration branching logic without apparent safeguards against partial failure or config corruption during reconfiguration.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change with no migration path",
+        "body": "The package.json scope rename changes the package identity. Any existing installation referencing the old scope name will break on update. There is no deprecation notice, migration script, or compat shim visible in this diff. Users who update in-place will have dangling references to the old package name. Combined with the setup menu change that reconfigures existing installs, a user hitting this during an update could end up with a broken plugin that cannot be reconfigured through the new menu because the package identity has shifted.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 6,
+        "confidence": 0.75,
+        "recommendation": "Add a migration note in CHANGELOG.md and/or a postinstall script that detects the old scope and warns. Consider publishing a transitional package under the old name that points to the new one, or document explicit uninstall/reinstall steps."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive reconfiguration menu has no config backup or rollback",
+        "body": "The commands/setup.md change adds an interactive menu when the plugin is already configured, implying the user can reconfigure. If reconfiguration fails partway through (e.g., user cancels, API call to write config fails, partial write), the previous working configuration is likely overwritten or corrupted. There is no evidence of config snapshotting or rollback logic in the diff. For a setup command, leaving the user in a broken state with no way to recover the previous config is a high-cost failure mode.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.65,
+        "recommendation": "Before any destructive reconfiguration step, snapshot the existing config (copy to a .bak file or similar). If reconfiguration fails, restore the snapshot. Alternatively, write the new config to a temporary location and swap atomically."
+      },
+      {
+        "severity": "medium",
+        "title": "marketplace.json and plugin.json changes may break plugin discovery",
+        "body": "Both .claude-plugin/marketplace.json and plugin.json are modified alongside the scope rename. If the plugin identifier or package reference in these files changed to match the new scope but existing installs still reference the old identifier, plugin loading or marketplace resolution could silently fail or present duplicate entries. This is a version-skew issue between the published plugin metadata and what users already have installed.",
+        "file": ".claude-plugin/marketplace.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.6,
+        "recommendation": "Verify that the plugin identifier fields in marketplace.json and plugin.json remain stable across the scope rename, or document that a clean reinstall is required. Test that an existing installation can discover and load the plugin after updating."
+      }
+    ],
+    "next_steps": [
+      "Show the full diff for package.json and commands/setup.md so the scope rename and menu logic can be inspected line by line.",
+      "Confirm whether the old npm scope package has been deprecated or if both will exist simultaneously.",
+      "Verify there is a config backup/restore mechanism in the setup command's reconfiguration path.",
+      "Test the upgrade path: install the old version, then update to this commit, and confirm the plugin still loads and the setup menu works correctly."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"This commit bundles an npm scope rename with a new interactive setup menu. The scope rename is a breaking change for existing installations with no migration path, and the interactive menu in commands/setup.md introduces configuration branching logic without apparent safeguards against partial failure or config corruption during reconfiguration.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename is a breaking change with no migration path\",\n      \"body\": \"The package.json scope rename changes the package identity. Any existing installation referencing the old scope name will break on update. There is no deprecation notice, migration script, or compat shim visible in this diff. Users who update in-place will have dangling references to the old package name. Combined with the setup menu change that reconfigures existing installs, a user hitting this during an update could end up with a broken plugin that cannot be reconfigured through the new menu because the package identity has shifted.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 6,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Add a migration note in CHANGELOG.md and/or a postinstall script that detects the old scope and warns. Consider publishing a transitional package under the old name that points to the new one, or document explicit uninstall/reinstall steps.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Interactive reconfiguration menu has no config backup or rollback\",\n      \"body\": \"The commands/setup.md change adds an interactive menu when the plugin is already configured, implying the user can reconfigure. If reconfiguration fails partway through (e.g., user cancels, API call to write config fails, partial write), the previous working configuration is likely overwritten or corrupted. There is no evidence of config snapshotting or rollback logic in the diff. For a setup command, leaving the user in a broken state with no way to recover the previous config is a high-cost failure mode.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Before any destructive reconfiguration step, snapshot the existing config (copy to a .bak file or similar). If reconfiguration fails, restore the snapshot. Alternatively, write the new config to a temporary location and swap atomically.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"marketplace.json and plugin.json changes may break plugin discovery\",\n      \"body\": \"Both .claude-plugin/marketplace.json and plugin.json are modified alongside the scope rename. If the plugin identifier or package reference in these files changed to match the new scope but existing installs still reference the old identifier, plugin loading or marketplace resolution could silently fail or present duplicate entries. This is a version-skew issue between the published plugin metadata and what users already have installed.\",\n      \"file\": \".claude-plugin/marketplace.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Verify that the plugin identifier fields in marketplace.json and plugin.json remain stable across the scope rename, or document that a clean reinstall is required. Test that an existing installation can discover and load the plugin after updating.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Show the full diff for package.json and commands/setup.md so the scope rename and menu logic can be inspected line by line.\",\n    \"Confirm whether the old npm scope package has been deprecated or if both will exist simultaneously.\",\n    \"Verify there is a config backup/restore mechanism in the setup command's reconfiguration path.\",\n    \"Test the upgrade path: install the old version, then update to this commit, and confirm the plugin still loads and the setup menu works correctly.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:25:21.116Z"
+}

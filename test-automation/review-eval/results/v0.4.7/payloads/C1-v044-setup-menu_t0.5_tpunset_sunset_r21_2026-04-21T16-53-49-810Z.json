@@ -1,0 +1,58 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 21
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 2,
+    "citation_accuracy": 0.5,
+    "citation_false_file_hits": 0,
+    "latency_ms": 20818,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The commit adds an interactive menu to /glm:setup when already configured and renames the npm scope. The setup.md command change introduces user-facing interactive behavior without guardrails for non-interactive/silent failure modes, and the release_card.md changes are substantial but unvalidated documentation. The setup command silently proceeds on user dismissal which could leave users in a confused state.",
+    "findings": [
+      {
+        "severity": "medium",
+        "title": "Interactive menu in setup command lacks non-interactive fallback handling",
+        "body": "The updated commands/setup.md adds an interactive choice menu when the project is already configured. If the hosting environment does not support interactive prompts (e.g., CI/CD, headless usage, or certain Claude client configurations), the user receives no clear error or fallback. This creates a silent failure path where setup appears to hang or no-op without feedback. The conditional branches based on user choice also mean a wrong selection could overwrite existing valid configuration with no confirmation or backup.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 40,
+        "confidence": 0.65,
+        "recommendation": "Add an explicit non-interactive path or early-exit message when interactivity is unavailable. Consider prompting the user with a warning before overwriting existing configuration and document the expected behavior for non-interactive environments."
+      },
+      {
+        "severity": "low",
+        "title": "npm scope rename may break existing installations referencing old scope",
+        "body": "The package.json changes the npm scope name. Any existing users who have the package installed under the old scope, or any documentation/scripts/references that depend on the old scope name, will break. There is no migration path or compatibility shim visible in the diff.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 10,
+        "confidence": 0.6,
+        "recommendation": "Verify that all references to the old scope name have been updated across the repository. If this is a published package, consider publishing a deprecation notice under the old name or documenting a migration step in CHANGELOG.md for existing users."
+      }
+    ],
+    "next_steps": [
+      "Verify the setup command behavior in a non-interactive Claude environment to confirm it degrades gracefully rather than silently no-oping.",
+      "Confirm all references to the old npm scope name have been updated in any external documentation, CI configs, or dependent repositories.",
+      "Test the 'reconfigure' path end-to-end to ensure existing valid configuration is not silently lost on a menu mis-selection."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The commit adds an interactive menu to /glm:setup when already configured and renames the npm scope. The setup.md command change introduces user-facing interactive behavior without guardrails for non-interactive/silent failure modes, and the release_card.md changes are substantial but unvalidated documentation. The setup command silently proceeds on user dismissal which could leave users in a confused state.\",\n  \"findings\": [\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Interactive menu in setup command lacks non-interactive fallback handling\",\n      \"body\": \"The updated commands/setup.md adds an interactive choice menu when the project is already configured. If the hosting environment does not support interactive prompts (e.g., CI/CD, headless usage, or certain Claude client configurations), the user receives no clear error or fallback. This creates a silent failure path where setup appears to hang or no-op without feedback. The conditional branches based on user choice also mean a wrong selection could overwrite existing valid configuration with no confirmation or backup.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 40,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Add an explicit non-interactive path or early-exit message when interactivity is unavailable. Consider prompting the user with a warning before overwriting existing configuration and document the expected behavior for non-interactive environments.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"npm scope rename may break existing installations referencing old scope\",\n      \"body\": \"The package.json changes the npm scope name. Any existing users who have the package installed under the old scope, or any documentation/scripts/references that depend on the old scope name, will break. There is no migration path or compatibility shim visible in the diff.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 10,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Verify that all references to the old scope name have been updated across the repository. If this is a published package, consider publishing a deprecation notice under the old name or documenting a migration step in CHANGELOG.md for existing users.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Verify the setup command behavior in a non-interactive Claude environment to confirm it degrades gracefully rather than silently no-oping.\",\n    \"Confirm all references to the old npm scope name have been updated in any external documentation, CI configs, or dependent repositories.\",\n    \"Test the 'reconfigure' path end-to-end to ensure existing valid configuration is not silently lost on a menu mis-selection.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:53:49.824Z"
+}

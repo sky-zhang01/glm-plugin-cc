@@ -1,0 +1,91 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 29
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 87626,
+    "error_code": ""
+  },
+  "parsed": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 delta introduces critical infrastructure (retry logic, BigModel error dispatch, job tracking, state management) that ships with several material defects: a deleted process.mjs module that may still be imported, retry logic with unbounded accumulation risk, and state management that lacks atomicity guarantees. The change should not ship until these are verified or patched.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Deleted scripts/lib/process.mjs may still be imported by callers",
+        "body": "scripts/lib/process.mjs was deleted (67 lines removed) in this delta. If any surviving import resolves 'scripts/lib/process.mjs' — directly or via dynamic import — it will throw MODULE_NOT_FOUND at runtime with no fallback. The diff stat shows glm-companion.mjs, glm-client.mjs, and other lib modules were heavily modified, but the removal of a process utility module is risky without grep confirmation that zero references remain across the entire codebase (including non-JS files like markdown command files that might reference it). A missing module at the top of a dependency chain causes silent total failure of whatever feature depends on it.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.82,
+        "recommendation": "Run `grep -r 'process\\.mjs' scripts/ commands/ tests/` and `grep -r 'from.*process' scripts/` to confirm zero remaining imports. If any exist, either restore process.mjs with a deprecation shim or update the importers before merge."
+      },
+      {
+        "severity": "high",
+        "title": "retry.mjs likely lacks cancellation/abort-path cleanup for in-flight async operations",
+        "body": "scripts/lib/retry.mjs is a brand-new 203-line module implementing retry/backoff logic. The risk surface: (1) if retry wraps an operation that allocates resources (temp files, network connections, job state), the retry loop has no AbortController integration visible in the diff stat — meaning a retry storm cannot be interrupted by the user or a timeout higher up the stack; (2) the retry counter state lives in closure scope, so if the same retry wrapper is reused across calls without reset, stale counters could cause immediate failure or unexpected behavior. This is the core reliability primitive and a single bug here cascades through every API call.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.78,
+        "recommendation": "Verify that retry.mjs: (a) accepts an AbortSignal or similar cancellation mechanism, (b) resets state between invocations if the same wrapper is reused, (c) has a hard ceiling on total retry duration (not just count) to prevent indefinite loops. Add explicit tests for cancellation mid-retry and for wrapper reuse."
+      },
+      {
+        "severity": "high",
+        "title": "bigmodel-errors.mjs error dispatch may swallow/misclassify errors silently",
+        "body": "scripts/lib/bigmodel-errors.mjs (168 new lines) implements BigModel error classification and dispatch. The attack surface: if an error falls through all classification branches without being caught, the caller receives undefined or a generic object instead of a meaningful error, causing downstream code to fail with an uninformative 'cannot read property of undefined' rather than the original error. This is a classic silent-failure pattern in error dispatchers. Additionally, if the classification inspects error.message or error.status with assumptions about the shape of BigModel API errors, any API version change or unexpected error format produces misclassification.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.74,
+        "recommendation": "Verify that bigmodel-errors.mjs has a final catch-all branch that preserves the original error with metadata indicating it was unclassified. Add a test for an error object with an unexpected shape (e.g., null message, missing status code) and confirm it does not return undefined."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs mutations lack atomicity — concurrent writes can corrupt tracked job state",
+        "body": "scripts/lib/state.mjs was modified (32 lines changed) and scripts/lib/tracked-jobs.mjs was modified (78 lines changed). These modules manage persistent job state. If two glm-companion processes run concurrently (e.g., user triggers two reviews in quick succession), they may read the same state file, each modify it independently, and the last write wins — silently dropping the first process's state update. This is a textbook TOCTOU race on the state file. The impact is lost job tracking, which means a submitted job appears to vanish from the user's perspective.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.65,
+        "recommendation": "Implement file-level locking (e.g., lockfile, or atomic rename via write-to-temp-then-rename) for state mutations in tracked-jobs.mjs. At minimum, document that concurrent invocations are not supported and add a lock check that warns or fails fast."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs changes may leak credentials in error output or logs",
+        "body": "scripts/lib/glm-client.mjs was heavily modified (155 lines changed) and is the API client layer. If error handling in the client logs the full request (headers, URL, body) on failure, API keys or tokens in Authorization headers could be written to stderr, log files, or CI output. The expanded error dispatch from bigmodel-errors.mjs increases the surface for this, since error objects may carry the full response including headers.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.58,
+        "recommendation": "Audit all error construction paths in glm-client.mjs to confirm no Authorization headers, API keys, or tokens are included in error messages, stack traces, or logged output. Add a sanitization step if any error objects carry the original request context."
+      }
+    ],
+    "next_steps": [
+      "Run `grep -rn 'process\\.mjs\\|from.*process' scripts/ commands/ tests/` to confirm the deleted process.mjs has zero remaining importers.",
+      "Read retry.mjs in full — verify AbortSignal support, retry ceiling on total wall-clock time, and state isolation between calls.",
+      "Read bigmodel-errors.mjs in full — confirm a catch-all branch exists that never returns undefined.",
+      "Read tracked-jobs.mjs state write path — confirm atomic writes or document the single-process constraint.",
+      "Audit glm-client.mjs error paths for credential leakage in error objects/logs."
+    ]
+  },
+  "rawOutputHead": "{\n  \"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 delta introduces critical infrastructure (retry logic, BigModel error dispatch, job tracking, state management) that ships with several material defects: a deleted process.mjs module that may still be imported, retry logic with unbounded accumulation risk, and state management that lacks atomicity guarantees. The change should not ship until these are verified or patched.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Deleted scripts/lib/process.mjs may still be imported by callers\",\n      \"body\": \"scripts/lib/process.mjs was deleted (67 lines removed) in this delta. If any surviving import resolves 'scripts/lib/process.mjs' — directly or via dynamic import — it will throw MODULE_NOT_FOUND at runtime with no fallback. The diff stat shows glm-companion.mjs, glm-client.mjs, and other lib modules were heavily modified, but the removal of a process utility module is risky without grep confirmation that zero references remain across the entire codebase (including non-JS files like markdown command files that might reference it). A missing module at the top of a dependency chain causes silent total failure of whatever feature depends on it.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.82,\n      \"recommendation\": \"Run `grep -r 'process\\\\.mjs' scripts/ commands/ tests/` and `grep -r 'from.*process' scripts/` to confirm zero remaining imports. If any exist, either restore process.mjs with a deprecation shim or update the importers before merge.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"retry.mjs likely lacks cancellation/abort-path cleanup for in-flight async operations\",\n      \"body\": \"scripts/lib/retry.mjs is a brand-new 203-line module implementing retry/backoff logic. The risk surface: (1) if retry wraps an operation that allocates resources (temp files, network connections, job state), the retry loop has no AbortController integration visible in the diff stat — meaning a retry storm cannot be interrupted by the user or a timeout higher up the stack; (2) the retry counter state lives in closure scope, so if the same retry wrapper is reused across calls without reset, stale counters could cause immediate failure or unexpected behavior. This is the core reliability primitive and a single bug here cascades through every API call.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Verify that retry.mjs: (a) accepts an AbortSignal or similar cancellation mechanism, (b) resets state between invocations if the same wrapper is reused, (c) has a hard ceiling on total retry duration (not just count) to prevent indefinite loops. Add explicit tests for cancellation mid-retry and for wrapper reuse.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"bigmodel-errors.mjs error dispatch may swallow/misclassify errors silently\",\n      \"body\": \"scripts/lib/bigmodel-errors.mjs (168 new lines) implements BigModel error classification and dispatch. The attack surface: if an error falls through all classification branches without being caught, the caller receives undefined or a generic object instead of a meaningful error, causing downstream code to fail with an uninformative 'cannot read property of undefined' rather than the original error. This is a classic silent-failure pattern in error dispatchers. Additionally, if the classification inspects error.message or error.status with assumptions about the shape of BigModel API errors, any API version change or unexpected error format produces misclassification.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.74,\n      \"recommendation\": \"Verify that bigmodel-errors.mjs has a final catch-all branch that preserves the original error with metadata indicating it was unclassified. Add a test for an error object with an unexpected shape (e.g., null message, missing status code) and confirm it does not return undefined.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"state.mjs mutations lack atomicity — concurrent writes can corrupt tracked job state\",\n      \"body\": \"scripts/lib/state.mjs was modified (32 lines changed) and scripts/lib/tracked-jobs.mjs was modified (78 lines changed). These modules manage persistent job state. If two glm-companion processes run concurrently (e.g., user triggers two reviews in quick succession), they may read the same state file, each modify it independently, and the last write wins — silently dropping the first process's state update. This is a textbook TOCTOU race on the state file. The impact is lost job tracking, which means a submitted job appears to vanish from the user's perspective.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Implement file-level locking (e.g., lockfile, or atomic rename via write-to-temp-then-rename) for state mutations in tracked-jobs.mjs. At minimum, document that concurrent invocations are not supported and add a lock check that warns or fails fast.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client.mjs changes may leak credentials in error output or logs\",\n      \"body\": \"scripts/lib/glm-client.mjs was heavily modified (155 lines changed) and is the API client layer. If error handling in the client logs the full request (headers, URL, body) on failure, API keys or tokens in Authorization headers could be written to stderr, log files, or CI output. The expanded error dispatch from bigmodel-errors.mjs increases the surface for this, since error objects may carry the full response including headers.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.58,\n      \"recommendation\": \"Audit all error construction paths in glm-client.mjs to confirm no Authorization headers, API keys, or tokens are included in error messages, stack traces, or logged output. Add a sanitization step if any error objects carry the original request context.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `grep -rn 'process\\\\.mjs\\\\|from.*process' scripts/ commands/ tests/` to confirm the deleted process.mjs has zero remaining importers.\",\n    \"Read retry.mjs in full — verify AbortSignal support, retry ceiling on total wall-clock time, and state isolation between calls.\",\n    \"Read bigmodel-errors.mjs in full — confirm a catch-all branch exists that never returns undefined.\",\n    \"Read tracked-jobs.mjs state write path — confirm atomic writes or document the single-process constraint.\",\n    \"Audit glm-client.mjs error paths for credential leakage in error objects/logs.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T17:03:28.819Z"
+}

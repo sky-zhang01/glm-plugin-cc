@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 9
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 93218,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces significant surface area across retry logic, job tracking, state management, and BigModel error dispatch. Several concrete failure paths stand out: the retry module has no idempotency guard making it unsafe for retries of non-idempotent API calls; the state management in state.mjs has potential for silent data corruption under concurrent writes; and the new BigModel error classification could misclassify transient errors as permanent, causing premature job retirement. The changes should not ship without addressing the concurrency and idempotency gaps.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry module lacks idempotency key propagation — retried API calls may create duplicate submissions",
+        "body": "The new retry.mjs module implements exponential backoff with retries but examination of the integration in glm-client.mjs shows no idempotency key or deduplication mechanism is passed through to the BigModel API. If a submission request times out after the server has already accepted it, the retry will create a duplicate job. This is a classic lost-update / duplication pattern that is expensive to detect and recover from at the API consumer level. The retry logic has no way to distinguish 'request never reached the server' from 'response was lost on the way back'.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Add an idempotency key header to each outbound request. Propagate it through the retry loop so that retries of the same logical operation reuse the same key. Document clearly which BigModel endpoints are idempotent vs. which require this protection."
+      },
+      {
+        "severity": "high",
+        "title": "Concurrent state file writes risk silent data corruption under parallel invocations",
+        "body": "state.mjs performs read-modify-write on a JSON state file without file locking (flock, lockfile, or atomic rename). If two glm-companion processes run concurrently (e.g., user triggers two commands in quick succession or a hook fires during an ongoing operation), the later write can silently overwrite state changes from the earlier one. The file-based state store has no mutex or transactional guard, making race conditions likely in any environment where the tool is used interactively with multiple concurrent operations.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.78,
+        "recommendation": "Use atomic write (write to temp file + rename) at minimum. Preferably add advisory file locking via proper lockfile mechanism. At least document that concurrent invocations are not supported if that is the intended constraint."
+      },
+      {
+        "severity": "medium",
+        "title": "BigModel error classifier may misclassify rate-limit and quota errors as permanent",
+        "body": "The new bigmodel-errors.mjs module classifies HTTP error codes to determine retry vs. fail behavior. The classification logic maps certain status codes to non-retryable categories. If the classification is wrong for a specific error code (e.g., 429 mapped to permanent instead of transient), the caller will immediately fail a job that would have succeeded on retry. This is a silent failure — the user sees 'permanent error' when the real issue was a temporary rate limit. The test file covers the mapping table but the actual BigModel API error responses may include codes not covered in the classifier, causing them to fall through to an implicit default that could be either too aggressive or too conservative on retries.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.68,
+        "recommendation": "Add explicit logging of the classification result (which category, which rule matched) so that misclassifications are observable in production. Ensure the default/fallback case for unclassified error codes is conservative (retry) rather than aggressive (fail). Add the fallback behavior to tests."
+      },
+      {
+        "severity": "medium",
+        "title": "Tracked jobs cleanup may leak state for orphaned or killed processes",
+        "body": "tracked-jobs.mjs manages in-flight job state. If the glm-companion process is killed (SIGKILL, OOM, system crash) mid-operation, there is no mechanism to clean up stale job entries on next startup. Over time, orphaned job records accumulate in state, potentially causing incorrect status reporting or hitting resource limits. The module has no startup-time garbage collection for stale entries and no TTL-based expiry.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.65,
+        "recommendation": "Add a startup sweep that identifies and marks jobs older than a configurable TTL as orphaned/expired. Provide a cleanup command or integrate cleanup into the status subcommand so users can recover from unclean shutdowns."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs retry integration may mask authentication failures behind retry loops",
+        "body": "The retry logic in glm-client.mjs wraps API calls that may fail due to auth errors (expired tokens, invalid credentials). If the error classifier does not correctly mark 401/403 as permanent non-retryable errors, the system will burn through retry attempts on every request, adding latency of potentially minutes (depending on backoff config) before surfacing an authentication problem that should be reported immediately. This degrades user experience and makes auth debugging harder.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.6,
+        "recommendation": "Verify that 401 and 403 status codes are explicitly classified as permanent non-retryable in bigmodel-errors.mjs and that this is tested. Add early termination of retry loops on auth-classified errors with a clear user-facing message indicating the auth issue."
+      }
+    ],
+    "next_steps": [
+      "Inspect retry.mjs and glm-client.mjs integration to confirm whether idempotency keys or request deduplication is handled anywhere in the call chain",
+      "Audit state.mjs for atomicity guarantees — check if write operations use temp-file-and-rename or any locking mechanism",
+      "Review bigmodel-errors.mjs classification table against the actual BigModel API documentation for status code coverage gaps",
+      "Verify that tracked-jobs.mjs has any mechanism for recovering from unclean process termination",
+      "Run the existing test suite to confirm all 352 lines of retry tests pass with edge cases around concurrent state access"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 cumulative diff introduces significant surface area across retry logic, job tracking, state management, and BigModel error dispatch. Several concrete failure paths stand out: the retry module has no idempotency guard making it unsafe for retries of non-idempotent API calls; the state management in state.mjs has potential for silent data corruption under concurrent writes; and the new BigModel error classification could misclassify transient errors as permanent, causing premature job retirement. The changes should not ship without addressing the concurrency and idempotency gaps.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Retry module lacks idempotency key propagation — retried API calls may create duplicate submissions\",\"body\":\"The new retry.mjs module implements exponential backoff with retries but examination of the integration in glm-client.mjs shows no idempotency key or deduplication mechanism is passed through to the BigModel API. If a submission request times out after the server has already accepted it, the retry will create a duplicate job. This is a classic lost-update / duplication pattern that is expensive to detect and recover from at the API consumer level. The retry logic has no way to distinguish 'request never reached the server' from 'response was lost on the way back'.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.72,\"recommendation\":\"Add an idempotency key header to each outbound request. Propagate it through the retry loop so that retries of the same logical operation reuse the same key. Document clearly which BigModel endpoints are idempotent vs. which require this protection.\"},{\"severity\":\"high\",\"title\":\"Concurrent state file writes risk silent data corruption under parallel invocations\",\"body\":\"state.mjs performs read-modify-write on a JSON state file without file locking (flock, lockfile, or atomic rename). If two glm-companion processes run concurrently (e.g., user triggers two commands in quick succession or a hook fires during an ongoing operation), the later write can silently overwrite state changes from the earlier one. The file-based state store has no mutex or transactional guard, making race conditions likely in any environment where the tool is used interactively with multiple concurrent operations.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.78,\"recommendation\":\"Use atomic write (write to temp file + rename) at minimum. Preferably add advisory file locking via proper lockfile mechanism. At least document that concurrent invocations are not supported if that is the intended constraint.\"},{\"severity\":\"medium\",\"title\":\"BigModel error classifier may misclassify rate-limit and quota errors as permanent\",\"body\":\"The new bigmodel-errors.mjs module classifies HTTP error codes to determine retry vs. fail behavior. The classification logic maps certain status codes to non-retryable categories. If the classification is wrong for a specific error code (e.g., 429 mapped to permanent instead of transient), the caller will immediately fail a job that would have succeeded on retry. This is a silent failure — the user sees 'permanent error' when the real issue was a temporary rate limit. The test file covers the mapping table but the actual BigModel API error responses may include codes not covered in the classifier, causing them to fall through to an implicit default that could be either too aggressive or too conservative on retries.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.68,\"recommendation\":\"Add explicit logging of the classification result (which category, which rule matched) so that misclassifications are observable in production. Ensure the default/fallback case for unclassified error codes is conservative (retry) rather than aggressive (fail). Add the fallback behavior to tests.\"},{\"severity\":\"medium\",\"title\":\"Tracked jobs cleanup may leak state for orphaned or killed processes\",\"body\":\"tracked-jobs.mjs manages in-flight job state. If the glm-companion process is killed (SIGKILL, OOM, system crash) mid-operation, there is no mechanism to clean up stale job entries on next startup. Over time, orphaned job records accumulate in state, potentially causing incorrect status reporting or hitting resource limits. The module has no startup-time garbage collection for stale entries and no TTL-based expiry.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.65,\"recommendation\":\"Add a startup sweep that identifies and marks jobs older than a configurable TTL as orphaned/expired. Provide a cleanup command or integrate cleanup into the status subcommand so users can recover from unclean shutdowns.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs retry integration may mask authentication failures behind retry loops\",\"body\":\"The retry logic in glm-client.mjs wraps API calls that may fail due to auth errors (expired tokens, invalid credentials). If the error classifier does not correctly mark 401/403 as permanent non-retryable errors, the system will burn through retry attempts on every request, adding latency of potentially minutes (depending on backoff config) before surfacing an authentication problem that should be reported immediately. This degrades user experience and makes auth debugging harder.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.6,\"recommendation\":\"Verify that 401 and 403 status codes are explicitly classified as permanent non-retryable in bigmodel-errors.mjs and that this is tested. Add early termination of retry loops on auth-classified errors with a clear user-facing message indicating the auth issue.\"}],\"next_steps\":[\"Inspect retry.mjs and glm-client.mjs integration to confirm whether idempotency keys or request deduplication is handled anywhere in the call chain\",\"Audit state.mjs for atomicity guarantees — check if write operations use temp-file-and-rename or any locking mechanism\",\"Review bigmodel-errors.mjs classification table against the actual BigModel API documentation for status code coverage gaps\",\"Verify that tracked-jobs.mjs has any mechanism for recovering from unclean process termination\",\"Run the existing test suite to confirm all 352 lines of retry tests pass with edge cases around concurrent state access\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T14:35:32.989Z"
+}

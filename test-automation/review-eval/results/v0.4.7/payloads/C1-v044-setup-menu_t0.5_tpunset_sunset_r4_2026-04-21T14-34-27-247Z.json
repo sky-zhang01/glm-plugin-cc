@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 4
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.333,
+    "citation_false_file_hits": 0,
+    "latency_ms": 65947,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The commit renames the npm package scope and modifies the setup command flow. The scope rename in package.json is a breaking change for existing consumers with no visible migration path or deprecation strategy. The setup.md changes add an interactive menu for already-configured state but without the actual diff content available for deep inspection, the risk of misconfigured state transitions (user runs setup twice, partial config) cannot be fully assessed. The large rewrite of release_card.md (~270 lines added) and changelog additions suggest this is a release commit bundling multiple concerns together.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change with no visible migration path",
+        "body": "package.json shows 4 lines changed, consistent with renaming the npm package scope (referenced in commit message). Existing users who installed the plugin under the old scope will have broken references. There is no visible deprecation notice, migration guide, or compatibility shim. If the old scoped package is not deprecated on npm, users may install a stale version indefinitely. This is a user-visible failure that is silent until they try to update or reinstall.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.7,
+        "recommendation": "Ensure the old scoped package is published with a deprecation notice pointing to the new scope. Add a migration note to the changelog and release card. If there are automated install scripts or documentation referencing the old scope, update them in the same commit."
+      },
+      {
+        "severity": "medium",
+        "title": "Setup menu for already-configured state may lack idempotency guardrails",
+        "body": "commands/setup.md has 19 lines changed to add an interactive menu when the tool is already configured. Without visibility into the actual logic, the concern is: if a user runs setup twice and selects different options, does partial state from the first run persist? Can re-running setup leave the configuration in an inconsistent or partially-overwritten state? Markdown-based command files for Claude plugins define prompt behavior, not code with transactional guarantees, so partial failure or mid-configuration abandonment is a real risk.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.55,
+        "recommendation": "Verify the setup command handles re-configuration atomically: either fully apply the new configuration or leave the previous one intact. Consider adding explicit guidance in the command markdown to warn users about overwriting existing config and to back up before reconfiguring."
+      },
+      {
+        "severity": "medium",
+        "title": "Release commit bundles scope rename with feature changes, complicating rollback",
+        "body": "This single commit includes a breaking npm scope rename, a new interactive setup menu, changelog updates, and a large rewrite of release_card.md (326 lines changed). If any part of this release needs to be rolled back, the tight coupling means reverting the feature also reverts the scope rename, or vice versa. This violates single-responsibility for release commits and makes targeted rollback impossible.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.7,
+        "recommendation": "Separate the npm scope rename into its own commit or release, distinct from the setup menu feature addition. This allows independent rollback if either change causes issues."
+      }
+    ],
+    "next_steps": [
+      "Inspect the full diff of package.json to confirm the old and new scope names and verify all references are updated.",
+      "Review commands/setup.md in full to trace the re-configuration flow and confirm idempotent behavior.",
+      "Verify the old npm scope package is deprecated or redirects to the new one.",
+      "Consider splitting this commit into separate changes: scope rename, setup menu feature, and documentation updates."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The commit renames the npm package scope and modifies the setup command flow. The scope rename in package.json is a breaking change for existing consumers with no visible migration path or deprecation strategy. The setup.md changes add an interactive menu for already-configured state but without the actual diff content available for deep inspection, the risk of misconfigured state transitions (user runs setup twice, partial config) cannot be fully assessed. The large rewrite of release_card.md (~270 lines added) and changelog additions suggest this is a release commit bundling multiple concerns together.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename is a breaking change with no visible migration path\",\n      \"body\": \"package.json shows 4 lines changed, consistent with renaming the npm package scope (referenced in commit message). Existing users who installed the plugin under the old scope will have broken references. There is no visible deprecation notice, migration guide, or compatibility shim. If the old scoped package is not deprecated on npm, users may install a stale version indefinitely. This is a user-visible failure that is silent until they try to update or reinstall.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Ensure the old scoped package is published with a deprecation notice pointing to the new scope. Add a migration note to the changelog and release card. If there are automated install scripts or documentation referencing the old scope, update them in the same commit.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Setup menu for already-configured state may lack idempotency guardrails\",\n      \"body\": \"commands/setup.md has 19 lines changed to add an interactive menu when the tool is already configured. Without visibility into the actual logic, the concern is: if a user runs setup twice and selects different options, does partial state from the first run persist? Can re-running setup leave the configuration in an inconsistent or partially-overwritten state? Markdown-based command files for Claude plugins define prompt behavior, not code with transactional guarantees, so partial failure or mid-configuration abandonment is a real risk.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Verify the setup command handles re-configuration atomically: either fully apply the new configuration or leave the previous one intact. Consider adding explicit guidance in the command markdown to warn users about overwriting existing config and to back up before reconfiguring.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Release commit bundles scope rename with feature changes, complicating rollback\",\n      \"body\": \"This single commit includes a breaking npm scope rename, a new interactive setup menu, changelog updates, and a large rewrite of release_card.md (326 lines changed). If any part of this release needs to be rolled back, the tight coupling means reverting the feature also reverts the scope rename, or vice versa. This violates single-responsibility for release commits and makes targeted rollback impossible.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Separate the npm scope rename into its own commit or release, distinct from the setup menu feature addition. This allows independent rollback if either change causes issues.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect the full diff of package.json to confirm the old and new scope names and verify all references are updated.\",\n    \"Review commands/setup.md in full to trace the re-configuration flow and confirm idempotent behavior.\",\n    \"Verify the old npm scope package is deprecated or redirects to the new one.\",\n    \"Consider splitting this commit into separate changes: scope rename, setup menu feature, and documentation updates.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:34:27.265Z"
+}

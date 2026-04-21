@@ -1,0 +1,58 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 6
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 2,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 30186,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The commit renames the npm scope and adds an interactive menu to the setup command. The scope rename from @anthropic to @openai (or similar) in package.json and plugin config is a breaking change for existing users — published packages, cached installs, and existing lockfiles will break. The setup command logic branch for 'already configured' state lacks clear documentation of what happens on cancel/abort, and the release_card.md has significant restructuring that should be verified for accuracy. No critical security defects, but the scope rename is a real compatibility concern that needs explicit migration guidance.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change with no migration path documented",
+        "body": "The package.json and .claude-plugin files change the npm scope. Any existing users with the old package name in their lockfiles, global installs, or dependent configs will be unable to update without manual intervention. There is no migration guide, deprecation notice, or compat shim visible in the diff. This can cause silent installation failures or users unknowingly running outdated versions.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 10,
+        "confidence": 0.85,
+        "recommendation": "Add a deprecation/migration notice to the README or CHANGELOG explicitly calling out the scope rename. Consider publishing a compat stub under the old name that depends on the new name, or at minimum document the manual steps users must take."
+      },
+      {
+        "severity": "medium",
+        "title": "Setup command interactive menu may fail non-interactively with no fallback",
+        "body": "The setup.md changes add an interactive menu when already configured. If this command is invoked in a non-interactive context (CI/CD, piped input, headless terminal), the interactive prompt may hang indefinitely or fail silently. The diff does not show a guard for TTY detection or a --yes/--skip flag for non-interactive use.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.7,
+        "recommendation": "Ensure the interactive menu has a non-interactive fallback path (e.g., default choice, --force flag, or TTY detection with a clear error message). Document the expected behavior in non-interactive contexts."
+      }
+    ],
+    "next_steps": [
+      "Inspect the full diff of commands/setup.md to verify the interactive menu handles abort/cancel gracefully and does not corrupt existing configuration.",
+      "Verify the old npm scope package is either deprecated with a redirect or that users are given clear migration instructions.",
+      "Check if the release_card.md changes accurately reflect all breaking changes and upgrade steps for v0.4.7."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The commit renames the npm scope and adds an interactive menu to the setup command. The scope rename from @anthropic to @openai (or similar) in package.json and plugin config is a breaking change for existing users — published packages, cached installs, and existing lockfiles will break. The setup command logic branch for 'already configured' state lacks clear documentation of what happens on cancel/abort, and the release_card.md has significant restructuring that should be verified for accuracy. No critical security defects, but the scope rename is a real compatibility concern that needs explicit migration guidance.\",\"findings\":[{\"severity\":\"high\",\"title\":\"npm scope rename is a breaking change with no migration path documented\",\"body\":\"The package.json and .claude-plugin files change the npm scope. Any existing users with the old package name in their lockfiles, global installs, or dependent configs will be unable to update without manual intervention. There is no migration guide, deprecation notice, or compat shim visible in the diff. This can cause silent installation failures or users unknowingly running outdated versions.\",\"file\":\"package.json\",\"line_start\":1,\"line_end\":10,\"confidence\":0.85,\"recommendation\":\"Add a deprecation/migration notice to the README or CHANGELOG explicitly calling out the scope rename. Consider publishing a compat stub under the old name that depends on the new name, or at minimum document the manual steps users must take.\"},{\"severity\":\"medium\",\"title\":\"Setup command interactive menu may fail non-interactively with no fallback\",\"body\":\"The setup.md changes add an interactive menu when already configured. If this command is invoked in a non-interactive context (CI/CD, piped input, headless terminal), the interactive prompt may hang indefinitely or fail silently. The diff does not show a guard for TTY detection or a --yes/--skip flag for non-interactive use.\",\"file\":\"commands/setup.md\",\"line_start\":1,\"line_end\":19,\"confidence\":0.7,\"recommendation\":\"Ensure the interactive menu has a non-interactive fallback path (e.g., default choice, --force flag, or TTY detection with a clear error message). Document the expected behavior in non-interactive contexts.\"}],\"next_steps\":[\"Inspect the full diff of commands/setup.md to verify the interactive menu handles abort/cancel gracefully and does not corrupt existing configuration.\",\"Verify the old npm scope package is either deprecated with a redirect or that users are given clear migration instructions.\",\"Check if the release_card.md changes accurately reflect all breaking changes and upgrade steps for v0.4.7.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:45:01.732Z"
+}

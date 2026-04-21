@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 13
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 47550,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "Commit 7766943 renames the npm package scope and overhauls /glm:setup with an interactive menu for already-configured state. The scope rename is a breaking change for any existing install referencing the old package name — no migration path or deprecation notice is visible. The interactive setup menu introduces branching logic in a markdown-based command definition where silent misrouting or misparse could leave the user in an undefined configuration state without clear feedback.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change with no migration path",
+        "body": "package.json shows 4 lines changed, consistent with an npm scope rename (e.g., @oldscope → @newscope). Any existing user with the plugin installed under the old scope, or any lockfile, script, or documentation referencing the old package name, will break at install time. The CHANGELOG and release_card.md updates do not clearly indicate whether a deprecation or migration guide is provided for users on the old scope. A silent 404 at npm install is a high-friction failure with no diagnostic trail in the plugin itself.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.78,
+        "recommendation": "Verify that the old scope package either remains published as a redirect/deprecated stub or that the release notes and setup docs explicitly instruct users to uninstall the old package and reinstall under the new scope. Add a deprecation notice to the old package if it still exists on the registry."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive menu in setup.md may silently skip or misroute on non-interactive invocations",
+        "body": "commands/setup.md adds ~19 lines to introduce an interactive menu when the system is already configured. If the command is invoked in a non-interactive or scripted context (CI, piping, constrained terminal), the branching logic may either hang waiting for input, default to a no-op, or silently proceed with the wrong branch. Markdown-based command definitions often lack explicit stdin/TTY guards, making this a latent failure that only surfaces in automation.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.65,
+        "recommendation": "Ensure the interactive menu has an explicit default/fallback path when no TTY is detected or when input is unavailable. Document the expected behavior for non-interactive invocations and test that edge case."
+      },
+      {
+        "severity": "medium",
+        "title": "release_card.md rewrite may contain stale or inconsistent instructions referencing old scope",
+        "body": "release_card.md has 326 lines changed (273 additions, 103 deletions), indicating a substantial rewrite. Given the npm scope rename, any residual references to the old scope in this user-facing document would produce copy-paste install failures. A partial find-and-replace could miss embedded code snippets, example commands, or inline links that still use the old scope.",
+        "file": "release_card.md",
+        "line_start": 1,
+        "line_end": 326,
+        "confidence": 0.72,
+        "recommendation": "Audit release_card.md for any remaining references to the old npm scope. Grep for the old scope string across the entire file and verify every install instruction, code block, and link uses the new scope consistently."
+      }
+    ],
+    "next_steps": [
+      "Run `git show 7766943 -- package.json` and confirm the exact scope change; search the entire diff for residual old-scope references.",
+      "Verify the old npm package is either deprecated with a pointer to the new name or that a migration section exists in the release notes.",
+      "Test /glm:setup in a non-interactive context to confirm it does not hang or silently misconfigure.",
+      "Grep the full repository for the old scope string to catch any missed references in docs, configs, or scripts."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"Commit 7766943 renames the npm package scope and overhauls /glm:setup with an interactive menu for already-configured state. The scope rename is a breaking change for any existing install referencing the old package name — no migration path or deprecation notice is visible. The interactive setup menu introduces branching logic in a markdown-based command definition where silent misrouting or misparse could leave the user in an undefined configuration state without clear feedback.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename is a breaking change with no migration path\",\n      \"body\": \"package.json shows 4 lines changed, consistent with an npm scope rename (e.g., @oldscope → @newscope). Any existing user with the plugin installed under the old scope, or any lockfile, script, or documentation referencing the old package name, will break at install time. The CHANGELOG and release_card.md updates do not clearly indicate whether a deprecation or migration guide is provided for users on the old scope. A silent 404 at npm install is a high-friction failure with no diagnostic trail in the plugin itself.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Verify that the old scope package either remains published as a redirect/deprecated stub or that the release notes and setup docs explicitly instruct users to uninstall the old package and reinstall under the new scope. Add a deprecation notice to the old package if it still exists on the registry.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Interactive menu in setup.md may silently skip or misroute on non-interactive invocations\",\n      \"body\": \"commands/setup.md adds ~19 lines to introduce an interactive menu when the system is already configured. If the command is invoked in a non-interactive or scripted context (CI, piping, constrained terminal), the branching logic may either hang waiting for input, default to a no-op, or silently proceed with the wrong branch. Markdown-based command definitions often lack explicit stdin/TTY guards, making this a latent failure that only surfaces in automation.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Ensure the interactive menu has an explicit default/fallback path when no TTY is detected or when input is unavailable. Document the expected behavior for non-interactive invocations and test that edge case.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"release_card.md rewrite may contain stale or inconsistent instructions referencing old scope\",\n      \"body\": \"release_card.md has 326 lines changed (273 additions, 103 deletions), indicating a substantial rewrite. Given the npm scope rename, any residual references to the old scope in this user-facing document would produce copy-paste install failures. A partial find-and-replace could miss embedded code snippets, example commands, or inline links that still use the old scope.\",\n      \"file\": \"release_card.md\",\n      \"line_start\": 1,\n      \"line_end\": 326,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Audit release_card.md for any remaining references to the old npm scope. Grep for the old scope string across the entire file and verify every install instruction, code block, and link uses the new scope consistently.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `git show 7766943 -- package.json` and confirm the exact scope change; search the entire diff for residual old-scope references.\",\n    \"Verify the old npm package is either deprecated with a pointer to the new name or that a migration section exists in the release notes.\",\n    \"Test /glm:setup in a non-interactive context to confirm it does not hang or silently misconfigure.\",\n    \"Grep the full repository for the old scope string to catch any missed references in docs, configs, or scripts.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:49:16.594Z"
+}

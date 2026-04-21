@@ -1,0 +1,91 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 8
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 50112,
+    "error_code": ""
+  },
+  "parsed": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces significant new infrastructure (retry with backoff, BigModel error dispatch, tracked jobs, process management refactor) that carries several material risks: retry.mjs has no circuit-breaker or max-wall-clock guard meaning a flaky dependency can stall jobs indefinitely; tracked-jobs.mjs state files can be orphaned on SIGKILL/SIGTERM without cleanup; process.mjs was deleted but may still have import consumers; and the configure-gitea-protection.sh script handles branch protection with no dry-run or rollback. These are sufficient to warrant a hold until guards are added.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry loop has no circuit-breaker or wall-clock timeout",
+        "body": "scripts/lib/retry.mjs implements exponential backoff with jitter but lacks a max-wall-clock or circuit-breaker mechanism. If the downstream BigModel API begins returning retryable errors consistently (e.g. 429 or 503), the retry loop will continue for up to maxAttempts iterations. With large maxAttempts and growing backoff delays, a single call can block the Claude Code agent's thread for many minutes with no feedback to the user and no way to break out except a force-kill. This is a silent degradation scenario that is expensive to detect in production.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.82,
+        "recommendation": "Add a maxWallClockMs parameter (default e.g. 5 minutes) that causes retryWithBackoff to reject with a distinct timeout error once elapsed, regardless of remaining attempts. Propagate this error through bigmodel-errors.mjs dispatch so the caller can surface it to the user."
+      },
+      {
+        "severity": "high",
+        "title": "Tracked job state files orphaned on unclean process exit",
+        "body": "scripts/lib/tracked-jobs.mjs writes persistent state files to track running jobs but relies on callers to call cleanup/complete. If the process is SIGKILL'd (OOM, CI timeout, user force-quit) or crashes, the state file remains on disk with a 'running' status. On next invocation, this stale state could cause the companion to report ghost jobs as still running, or worse, skip submitting new work because it believes a conflicting job is in progress. No startup reconciliation or stale-entry TTL is visible in the diff.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.78,
+        "recommendation": "Add a startup reconciliation pass that scans state files and marks any 'running' entries older than a configurable TTL (e.g. 30 minutes) as 'orphaned' or 'lost', then logs a warning. Also consider registering a process signal handler (SIGTERM/SIGINT) that attempts cleanup before exit."
+      },
+      {
+        "severity": "medium",
+        "title": "Deleted process.mjs may still be imported by external consumers or scripts",
+        "body": "scripts/lib/process.mjs was deleted (67 lines removed) in this cumulative diff. While internal consumers may have been migrated, the companion plugin has a public API surface (scripts/glm-companion.mjs exports) that third-party integrations or user customizations may reference transitively. If any dynamic import or re-export chain still references process.mjs, it will throw at runtime with a ModuleNotFound error — a silent failure that only manifests when the affected code path is exercised.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.65,
+        "recommendation": "Verify through grep across the entire codebase that no import or require references process.mjs. If any external API could have exposed it, add a shim that re-exports from the replacement module with a deprecation warning rather than a hard delete."
+      },
+      {
+        "severity": "medium",
+        "title": "configure-gitea-protection.sh modifies branch protection with no dry-run or rollback",
+        "body": "scripts/setup/configure-gitea-protection.sh (126 lines) makes mutating API calls to configure branch protection rules on a Gitea instance. There is no --dry-run flag, no backup of existing rules before overwriting, and no rollback path on failure. If the script fails partway through (e.g. network error after setting some rules), the repository is left in a partially-protected state that is hard to diagnose. Additionally, the script appears to handle credentials/tokens — any error output may leak tokens in CI logs.",
+        "file": "scripts/setup/configure-gitea-protection.sh",
+        "line_start": 1,
+        "line_end": 126,
+        "confidence": 0.72,
+        "recommendation": "Add a --dry-run flag that prints the API calls without executing them. Before applying changes, fetch and save the current branch protection config. On script failure, attempt to restore the saved config. Ensure all curl error output is redacted or suppressed to prevent token leakage."
+      },
+      {
+        "severity": "medium",
+        "title": "BigModel error dispatch may swallow unknown error shapes silently",
+        "body": "scripts/lib/bigmodel-errors.mjs (168 lines) introduces a classify/dispatch system for BigModel API errors. If the error response has an unexpected shape (e.g. a new API version returns a different error format), the classifier likely falls through to a default case that may return a generic error with no actionable context. This makes debugging production failures very difficult because the original error structure is lost. The tests in bigmodel-errors.test.mjs cover known shapes but there is no evidence of a catch-all that preserves the raw response.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.7,
+        "recommendation": "Ensure the default/unknown error branch in the classifier preserves the full original error response (headers, status, body) attached to the thrown error as a .raw property. Add a test case for a completely unexpected error shape that verifies no information is lost."
+      }
+    ],
+    "next_steps": [
+      "Add max-wall-clock guard to retry.mjs and verify with a test that simulates slow retries exceeding the limit",
+      "Add stale-entry reconciliation to tracked-jobs.mjs startup and test with an artificially aged state file",
+      "Grep the entire repo for any remaining references to process.mjs and verify the deletion is safe",
+      "Add --dry-run and token-redaction to configure-gitea-protection.sh before any user runs it against a real instance",
+      "Run the full test suite against a live BigModel API stub returning unexpected error shapes to verify the error dispatch catch-all behavior"
+    ]
+  },
+  "rawOutputHead": "{\n  \"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff introduces significant new infrastructure (retry with backoff, BigModel error dispatch, tracked jobs, process management refactor) that carries several material risks: retry.mjs has no circuit-breaker or max-wall-clock guard meaning a flaky dependency can stall jobs indefinitely; tracked-jobs.mjs state files can be orphaned on SIGKILL/SIGTERM without cleanup; process.mjs was deleted but may still have import consumers; and the configure-gitea-protection.sh script handles branch protection with no dry-run or rollback. These are sufficient to warrant a hold until guards are added.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Retry loop has no circuit-breaker or wall-clock timeout\",\n      \"body\": \"scripts/lib/retry.mjs implements exponential backoff with jitter but lacks a max-wall-clock or circuit-breaker mechanism. If the downstream BigModel API begins returning retryable errors consistently (e.g. 429 or 503), the retry loop will continue for up to maxAttempts iterations. With large maxAttempts and growing backoff delays, a single call can block the Claude Code agent's thread for many minutes with no feedback to the user and no way to break out except a force-kill. This is a silent degradation scenario that is expensive to detect in production.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.82,\n      \"recommendation\": \"Add a maxWallClockMs parameter (default e.g. 5 minutes) that causes retryWithBackoff to reject with a distinct timeout error once elapsed, regardless of remaining attempts. Propagate this error through bigmodel-errors.mjs dispatch so the caller can surface it to the user.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"Tracked job state files orphaned on unclean process exit\",\n      \"body\": \"scripts/lib/tracked-jobs.mjs writes persistent state files to track running jobs but relies on callers to call cleanup/complete. If the process is SIGKILL'd (OOM, CI timeout, user force-quit) or crashes, the state file remains on disk with a 'running' status. On next invocation, this stale state could cause the companion to report ghost jobs as still running, or worse, skip submitting new work because it believes a conflicting job is in progress. No startup reconciliation or stale-entry TTL is visible in the diff.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Add a startup reconciliation pass that scans state files and marks any 'running' entries older than a configurable TTL (e.g. 30 minutes) as 'orphaned' or 'lost', then logs a warning. Also consider registering a process signal handler (SIGTERM/SIGINT) that attempts cleanup before exit.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Deleted process.mjs may still be imported by external consumers or scripts\",\n      \"body\": \"scripts/lib/process.mjs was deleted (67 lines removed) in this cumulative diff. While internal consumers may have been migrated, the companion plugin has a public API surface (scripts/glm-companion.mjs exports) that third-party integrations or user customizations may reference transitively. If any dynamic import or re-export chain still references process.mjs, it will throw at runtime with a ModuleNotFound error — a silent failure that only manifests when the affected code path is exercised.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Verify through grep across the entire codebase that no import or require references process.mjs. If any external API could have exposed it, add a shim that re-exports from the replacement module with a deprecation warning rather than a hard delete.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"configure-gitea-protection.sh modifies branch protection with no dry-run or rollback\",\n      \"body\": \"scripts/setup/configure-gitea-protection.sh (126 lines) makes mutating API calls to configure branch protection rules on a Gitea instance. There is no --dry-run flag, no backup of existing rules before overwriting, and no rollback path on failure. If the script fails partway through (e.g. network error after setting some rules), the repository is left in a partially-protected state that is hard to diagnose. Additionally, the script appears to handle credentials/tokens — any error output may leak tokens in CI logs.\",\n      \"file\": \"scripts/setup/configure-gitea-protection.sh\",\n      \"line_start\": 1,\n      \"line_end\": 126,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Add a --dry-run flag that prints the API calls without executing them. Before applying changes, fetch and save the current branch protection config. On script failure, attempt to restore the saved config. Ensure all curl error output is redacted or suppressed to prevent token leakage.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"BigModel error dispatch may swallow unknown error shapes silently\",\n      \"body\": \"scripts/lib/bigmodel-errors.mjs (168 lines) introduces a classify/dispatch system for BigModel API errors. If the error response has an unexpected shape (e.g. a new API version returns a different error format), the classifier likely falls through to a default case that may return a generic error with no actionable context. This makes debugging production failures very difficult because the original error structure is lost. The tests in bigmodel-errors.test.mjs cover known shapes but there is no evidence of a catch-all that preserves the raw response.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Ensure the default/unknown error branch in the classifier preserves the full original error response (headers, status, body) attached to the thrown error as a .raw property. Add a test case for a completely unexpected error shape that verifies no information is lost.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Add max-wall-clock guard to retry.mjs and verify with a test that simulates slow retries exceeding the limit\",\n    \"Add stale-entry reconciliation to tracked-jobs.mjs startup and test with an artificially aged state file\",\n    \"Grep the entire repo for any remaining references to process.mjs and verify the deletion is safe\",\n    \"Add --dry-run and token-redaction to configure-gitea-protection.sh before any user runs it against a real instance\",\n    \"Run the full test suite against a live BigModel API stub returning unexpected error shapes to verify the error dispatch catch-all behavior\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:35:40.423Z"
+}

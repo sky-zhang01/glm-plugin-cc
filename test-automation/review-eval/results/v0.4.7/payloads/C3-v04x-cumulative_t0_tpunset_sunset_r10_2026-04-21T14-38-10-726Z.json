@@ -1,0 +1,70 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 10
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 157736,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff adds ~6600 lines across 84 files, including deletion of a core utility module (process.mjs), a new 203-line retry subsystem, new BigModel error dispatch, and significant changes to state management and job tracking. The commit history itself documents a ReferenceError that resulted from the process.mjs deletion (Bundle F fix), raising the question of whether all import sites were caught. I cannot fully verify the retry logic's idempotency guarantees, state-file concurrency safety, or error-classification completeness without inspecting the actual diff content. The structural profile of these changes—core infrastructure removal + new retry + state mutations—is a classic vector for subtle, hard-to-detect failures. Blocking on manual inspection of the critical-path modules before ship.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Deleted process.mjs may leave lingering import sites that crash at runtime",
+        "body": "scripts/lib/process.mjs was entirely removed (67 lines deleted, 0 added). The commit log explicitly documents a subsequent 'ReferenceError + full thread/resume scaffolding purge' fix (225401a), confirming the deletion caused runtime crashes. That a separate fix commit was required strongly suggests the removal was not fully traced to all consumers initially. The question is whether Bundle F caught every remaining import path. Any missed dynamic import, re-export, or conditional code path that still references process.mjs will throw an unrecoverable ModuleNotFoundError or ReferenceError at runtime — not during startup, but at the code path's first execution, which could be in production under stress. This inference is drawn from the commit log and diff stat; the actual import graph cannot be verified from the provided context alone.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.72,
+        "recommendation": "Run `grep -r 'process\\.mjs\\|from.*process' scripts/ commands/ tests/` against the full tree to confirm zero remaining import sites. Also search for dynamic imports (`import()` strings) referencing 'process'. Add a CI gate that fails if any module resolves a dependency to the deleted file."
+      },
+      {
+        "severity": "high",
+        "title": "New retry.mjs module (203 lines) — retry without idempotency can duplicate side effects",
+        "body": "A new 203-line retry module was introduced (scripts/lib/retry.mjs). Retry logic is a well-known source of duplicate side effects when applied to non-idempotent operations. The glm-client.mjs module (155 lines changed) is the API client and likely now consumes retry.mjs. If retries are applied to POST/PUT calls that create resources or mutate state — without idempotency keys or deduplication guards — transient network failures will cause duplicate job submissions, duplicate state transitions, or duplicate billable API calls. The impact is data duplication and incorrect state, not just wasted resources. This finding is inferred from the module's existence and size; the actual implementation cannot be verified from the provided context.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.6,
+        "recommendation": "Audit retry.mjs to confirm: (1) which operations are retried, (2) whether retries are limited to idempotent HTTP methods (GET, HEAD, OPTIONS) or include state-mutating calls, (3) whether idempotency keys or request deduplication are implemented for non-idempotent retries, and (4) whether the retry predicate in bigmodel-errors.mjs correctly classifies retryable vs non-retryable errors. Add tests for retry-on-partial-write scenarios."
+      },
+      {
+        "severity": "medium",
+        "title": "State management changes across multiple modules may lack concurrency safety",
+        "body": "Three state-related modules were modified simultaneously: state.mjs (32 lines changed), tracked-jobs.mjs (78 lines changed), and job-control.mjs (20 lines changed). Combined with the new retry logic, there is a plausible scenario where concurrent or retried operations perform overlapping reads-modify-writes on shared state files (e.g., job tracking data). Without file locking or optimistic concurrency control, a retry that reads stale state, modifies it, and writes it back will silently overwrite a concurrent write — corrupting job tracking state. The glm-companion.mjs (139 lines changed) likely orchestrates these modules. This is an inference from the change footprint; the actual locking strategy cannot be verified.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.55,
+        "recommendation": "Verify that all state-mutating operations in state.mjs and tracked-jobs.mjs use atomic write patterns (write-to-temp-then-rename) and that concurrent access is either impossible by design (single-process guarantee) or protected by advisory locks. Add a test that performs concurrent state mutations and asserts no data loss."
+      }
+    ],
+    "next_steps": [
+      "Inspect the full diff of scripts/lib/process.mjs deletion and search the entire codebase for remaining references to prevent runtime ReferenceErrors.",
+      "Audit scripts/lib/retry.mjs to verify idempotency guarantees on all retried operations, especially in glm-client.mjs API calls.",
+      "Verify that scripts/lib/state.mjs and scripts/lib/tracked-jobs.mjs have concurrency-safe write patterns (atomic rename, file locking, or single-process invariant).",
+      "Review scripts/lib/bigmodel-errors.mjs error classification completeness — ensure every possible BigModel error response is either retried correctly or surfaced to the user, not silently swallowed.",
+      "Run the existing test suite (tests/retry.test.mjs, tests/state.test.mjs, tests/bigmodel-errors.test.mjs) and verify coverage of failure paths, not just happy-path scenarios."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff adds ~6600 lines across 84 files, including deletion of a core utility module (process.mjs), a new 203-line retry subsystem, new BigModel error dispatch, and significant changes to state management and job tracking. The commit history itself documents a ReferenceError that resulted from the process.mjs deletion (Bundle F fix), raising the question of whether all import sites were caught. I cannot fully verify the retry logic's idempotency guarantees, state-file concurrency safety, or error-classification completeness without inspecting the actual diff content. The structural profile of these changes—core infrastructure removal + new retry + state mutations—is a classic vector for subtle, hard-to-detect failures. Blocking on manual inspection of the critical-path modules before ship.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Deleted process.mjs may leave lingering import sites that crash at runtime\",\n      \"body\": \"scripts/lib/process.mjs was entirely removed (67 lines deleted, 0 added). The commit log explicitly documents a subsequent 'ReferenceError + full thread/resume scaffolding purge' fix (225401a), confirming the deletion caused runtime crashes. That a separate fix commit was required strongly suggests the removal was not fully traced to all consumers initially. The question is whether Bundle F caught every remaining import path. Any missed dynamic import, re-export, or conditional code path that still references process.mjs will throw an unrecoverable ModuleNotFoundError or ReferenceError at runtime — not during startup, but at the code path's first execution, which could be in production under stress. This inference is drawn from the commit log and diff stat; the actual import graph cannot be verified from the provided context alone.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Run `grep -r 'process\\\\.mjs\\\\|from.*process' scripts/ commands/ tests/` against the full tree to confirm zero remaining import sites. Also search for dynamic imports (`import()` strings) referencing 'process'. Add a CI gate that fails if any module resolves a dependency to the deleted file.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"New retry.mjs module (203 lines) — retry without idempotency can duplicate side effects\",\n      \"body\": \"A new 203-line retry module was introduced (scripts/lib/retry.mjs). Retry logic is a well-known source of duplicate side effects when applied to non-idempotent operations. The glm-client.mjs module (155 lines changed) is the API client and likely now consumes retry.mjs. If retries are applied to POST/PUT calls that create resources or mutate state — without idempotency keys or deduplication guards — transient network failures will cause duplicate job submissions, duplicate state transitions, or duplicate billable API calls. The impact is data duplication and incorrect state, not just wasted resources. This finding is inferred from the module's existence and size; the actual implementation cannot be verified from the provided context.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Audit retry.mjs to confirm: (1) which operations are retried, (2) whether retries are limited to idempotent HTTP methods (GET, HEAD, OPTIONS) or include state-mutating calls, (3) whether idempotency keys or request deduplication are implemented for non-idempotent retries, and (4) whether the retry predicate in bigmodel-errors.mjs correctly classifies retryable vs non-retryable errors. Add tests for retry-on-partial-write scenarios.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"State management changes across multiple modules may lack concurrency safety\",\n      \"body\": \"Three state-related modules were modified simultaneously: state.mjs (32 lines changed), tracked-jobs.mjs (78 lines changed), and job-control.mjs (20 lines changed). Combined with the new retry logic, there is a plausible scenario where concurrent or retried operations perform overlapping reads-modify-writes on shared state files (e.g., job tracking data). Without file locking or optimistic concurrency control, a retry that reads stale state, modifies it, and writes it back will silently overwrite a concurrent write — corrupting job tracking state. The glm-companion.mjs (139 lines changed) likely orchestrates these modules. This is an inference from the change footprint; the actual locking strategy cannot be verified.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Verify that all state-mutating operations in state.mjs and tracked-jobs.mjs use atomic write patterns (write-to-temp-then-rename) and that concurrent access is either impossible by design (single-process guarantee) or protected by advisory locks. Add a test that performs concurrent state mutations and asserts no data loss.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect the full diff of scripts/lib/process.mjs deletion and search the entire codebase for remaining references to prevent runtime ReferenceErrors.\",\n    \"Audit scripts/lib/retry.mjs to verify idempotency guarantees on all retried operations, especially in glm-client.mjs API calls.\",\n    \"Verify that scripts/lib/state.mjs and scripts/lib/tracked-jobs.mjs have concurrency-safe write patterns (atomic rename, file locking, or single-process invariant).\",\n    \"Review scripts/lib/bigmodel-errors.mjs error classification completeness — ensure every possible BigModel error response is either retried correctly or surfaced to the user, not silently swallowed.\",\n    \"Run the existing test suite (tests/retry.test.mjs, tests/state.test.mjs, tests/bigmodel-errors.test.mjs) and verify coverage of failure paths, not just happy-path scenarios.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:38:10.750Z"
+}

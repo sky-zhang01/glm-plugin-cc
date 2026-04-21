@@ -1,0 +1,59 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 22
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 2,
+    "citation_accuracy": 0.5,
+    "citation_false_file_hits": 0,
+    "latency_ms": 47921,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit renames the npm package scope and adds an interactive menu to the setup command, but the diff cannot be fully inspected from the provided context alone. The npm scope rename in package.json is a breaking change for any existing installation referencing the old package name. Without verifying that the new scope is published and that the old scope is either still available or properly deprecated, this change risks breaking existing users on upgrade.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change for existing installations",
+        "body": "The diff stat shows 4 lines changed in package.json, consistent with an npm package name/scope rename (commit message confirms 'rename npm scope'). If users have installed the plugin under the old scope or have lockfiles/scripts referencing the old package name, upgrading will silently fail to resolve the dependency. There is no evidence in the diff of a deprecation path, backward-compatible alias, or migration guide for the old scope. Combined with changes to .claude-plugin/plugin.json (2 lines), this appears to be an identity rename without a transition plan.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.72,
+        "recommendation": "Verify that the new scoped package is published and installable. Add a deprecation notice or postinstall message on the old package if it still exists. Update any documentation, README, or installation instructions that reference the old scope. Consider whether a major version bump is warranted per semver."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive menu in setup may block non-interactive or automated environments",
+        "body": "The commit message states 'add interactive menu to /glm:setup when already configured' and commands/setup.md shows 19 lines changed. If the setup command now prompts interactively when run in a non-TTY context (CI, scripting, headless environments), it will hang indefinitely with no output and no timeout. This is a common failure mode for CLI tools that add interactive prompts without a --yes or --non-interactive flag. The CHANGELOG entry (21 new lines) should be checked for whether this behavioral change is documented as potentially breaking automated workflows.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.65,
+        "recommendation": "Ensure the interactive menu detects non-TTY environments and either skips the menu with a sensible default or exits with a clear error message. Add a --non-interactive or --force flag to allow scripted usage. Document this behavioral change in the CHANGELOG."
+      }
+    ],
+    "next_steps": [
+      "Run `git show 7766943 -- package.json` to confirm the exact scope rename and verify the new package name is published on npm.",
+      "Run `git show 7766943 -- commands/setup.md` to inspect the interactive menu logic for non-TTY handling.",
+      "Check if .claude-plugin/plugin.json and marketplace.json are consistent with the new scope name and contain no stale references.",
+      "Verify the CHANGELOG documents the scope rename as a potentially breaking change for existing installations."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"This commit renames the npm package scope and adds an interactive menu to the setup command, but the diff cannot be fully inspected from the provided context alone. The npm scope rename in package.json is a breaking change for any existing installation referencing the old package name. Without verifying that the new scope is published and that the old scope is either still available or properly deprecated, this change risks breaking existing users on upgrade.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename is a breaking change for existing installations\",\n      \"body\": \"The diff stat shows 4 lines changed in package.json, consistent with an npm package name/scope rename (commit message confirms 'rename npm scope'). If users have installed the plugin under the old scope or have lockfiles/scripts referencing the old package name, upgrading will silently fail to resolve the dependency. There is no evidence in the diff of a deprecation path, backward-compatible alias, or migration guide for the old scope. Combined with changes to .claude-plugin/plugin.json (2 lines), this appears to be an identity rename without a transition plan.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Verify that the new scoped package is published and installable. Add a deprecation notice or postinstall message on the old package if it still exists. Update any documentation, README, or installation instructions that reference the old scope. Consider whether a major version bump is warranted per semver.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Interactive menu in setup may block non-interactive or automated environments\",\n      \"body\": \"The commit message states 'add interactive menu to /glm:setup when already configured' and commands/setup.md shows 19 lines changed. If the setup command now prompts interactively when run in a non-TTY context (CI, scripting, headless environments), it will hang indefinitely with no output and no timeout. This is a common failure mode for CLI tools that add interactive prompts without a --yes or --non-interactive flag. The CHANGELOG entry (21 new lines) should be checked for whether this behavioral change is documented as potentially breaking automated workflows.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Ensure the interactive menu detects non-TTY environments and either skips the menu with a sensible default or exits with a clear error message. Add a --non-interactive or --force flag to allow scripted usage. Document this behavioral change in the CHANGELOG.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `git show 7766943 -- package.json` to confirm the exact scope rename and verify the new package name is published on npm.\",\n    \"Run `git show 7766943 -- commands/setup.md` to inspect the interactive menu logic for non-TTY handling.\",\n    \"Check if .claude-plugin/plugin.json and marketplace.json are consistent with the new scope name and contain no stale references.\",\n    \"Verify the CHANGELOG documents the scope rename as a potentially breaking change for existing installations.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:54:37.763Z"
+}

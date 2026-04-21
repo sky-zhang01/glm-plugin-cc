@@ -1,0 +1,68 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 8
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.333,
+    "citation_false_file_hits": 0,
+    "latency_ms": 33032,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The commit renames the npm scope and adds an interactive menu to the setup command when already configured. The scope rename from @anthropic to @anthropic-ai (or similar) in package.json is a breaking change for existing users who depend on the old package name — no migration path or deprecation notice is provided. The interactive menu addition in commands/setup.md lacks error handling for edge cases (non-interactive environments, unexpected input). However, since these are primarily documentation/config changes for a Claude plugin, the blast radius is limited. The most concerning issue is the scope rename without migration guidance.",
+    "findings": [
+      {
+        "severity": "medium",
+        "title": "npm scope rename without migration path or compatibility shim",
+        "body": "The package.json changes the npm scope/name. Any existing installation references, CI pipelines, or documentation pointing to the old scope will break silently. There is no deprecation notice, no migration guide, and no backward-compatible alias mentioned in the diff. Users upgrading from v0.4.6 will find their existing installs orphaned.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 6,
+        "confidence": 0.85,
+        "recommendation": "Add a migration note in CHANGELOG.md and release_card.md documenting the scope change, including uninstall of the old package and reinstall of the new one. Consider publishing a stub under the old name that redirects or warns."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive menu in setup command has no non-interactive fallback or timeout handling",
+        "body": "The commands/setup.md now includes an interactive menu when already configured. If this is invoked in a non-TTY environment (CI, piped input, headless), the menu will hang or produce undefined behavior. No --yes, --skip, or timeout flag is documented for scripted use.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.7,
+        "recommendation": "Document a non-interactive flag or default behavior for automated/scripted environments. Ensure the command degrades gracefully when stdin is not a TTY."
+      },
+      {
+        "severity": "low",
+        "title": "CHANGELOG entry references wrong prior version tag",
+        "body": "The CHANGELOG.md references version v0.4.7 but the user focus references 'C1-v044-setup-menu' and the prior context suggests v0.4.4 lineage. The version numbering may be inconsistent, which can confuse automated release tooling or consumers who parse the changelog.",
+        "file": "CHANGELOG.md",
+        "line_start": 1,
+        "line_end": 21,
+        "confidence": 0.5,
+        "recommendation": "Verify that the version in CHANGELOG.md matches the actual release version being prepared and that the prior version reference is correct."
+      }
+    ],
+    "next_steps": [
+      "Confirm the npm scope change is intentional and publish migration instructions before release.",
+      "Test the setup command in a non-interactive/CI environment to verify it doesn't hang.",
+      "Verify CHANGELOG version numbers are consistent with the actual release being cut."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The commit renames the npm scope and adds an interactive menu to the setup command when already configured. The scope rename from @anthropic to @anthropic-ai (or similar) in package.json is a breaking change for existing users who depend on the old package name — no migration path or deprecation notice is provided. The interactive menu addition in commands/setup.md lacks error handling for edge cases (non-interactive environments, unexpected input). However, since these are primarily documentation/config changes for a Claude plugin, the blast radius is limited. The most concerning issue is the scope rename without migration guidance.\",\"findings\":[{\"severity\":\"medium\",\"title\":\"npm scope rename without migration path or compatibility shim\",\"body\":\"The package.json changes the npm scope/name. Any existing installation references, CI pipelines, or documentation pointing to the old scope will break silently. There is no deprecation notice, no migration guide, and no backward-compatible alias mentioned in the diff. Users upgrading from v0.4.6 will find their existing installs orphaned.\",\"file\":\"package.json\",\"line_start\":1,\"line_end\":6,\"confidence\":0.85,\"recommendation\":\"Add a migration note in CHANGELOG.md and release_card.md documenting the scope change, including uninstall of the old package and reinstall of the new one. Consider publishing a stub under the old name that redirects or warns.\"},{\"severity\":\"medium\",\"title\":\"Interactive menu in setup command has no non-interactive fallback or timeout handling\",\"body\":\"The commands/setup.md now includes an interactive menu when already configured. If this is invoked in a non-TTY environment (CI, piped input, headless), the menu will hang or produce undefined behavior. No --yes, --skip, or timeout flag is documented for scripted use.\",\"file\":\"commands/setup.md\",\"line_start\":1,\"line_end\":19,\"confidence\":0.7,\"recommendation\":\"Document a non-interactive flag or default behavior for automated/scripted environments. Ensure the command degrades gracefully when stdin is not a TTY.\"},{\"severity\":\"low\",\"title\":\"CHANGELOG entry references wrong prior version tag\",\"body\":\"The CHANGELOG.md references version v0.4.7 but the user focus references 'C1-v044-setup-menu' and the prior context suggests v0.4.4 lineage. The version numbering may be inconsistent, which can confuse automated release tooling or consumers who parse the changelog.\",\"file\":\"CHANGELOG.md\",\"line_start\":1,\"line_end\":21,\"confidence\":0.5,\"recommendation\":\"Verify that the version in CHANGELOG.md matches the actual release version being prepared and that the prior version reference is correct.\"}],\"next_steps\":[\"Confirm the npm scope change is intentional and publish migration instructions before release.\",\"Test the setup command in a non-interactive/CI environment to verify it doesn't hang.\",\"Verify CHANGELOG version numbers are consistent with the actual release being cut.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:43:57.952Z"
+}

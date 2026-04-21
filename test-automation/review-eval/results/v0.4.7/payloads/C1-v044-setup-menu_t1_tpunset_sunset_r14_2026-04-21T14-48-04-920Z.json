@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 14
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.333,
+    "citation_false_file_hits": 0,
+    "latency_ms": 44708,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The change adds an interactive menu to the setup command when already configured and renames the npm scope from @anthropic to @anthropics. The setup.md change introduces user-facing interactive prompts but has no error handling for invalid input, no documentation of what the menu options actually do, and the rename of the npm scope is a breaking change for existing users. The release_card.md is heavily reworked but appears to be documentation only.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Interactive menu in setup.md lacks invalid input handling and silent fallback behavior",
+        "body": "The setup command now presents an interactive menu when already configured (new conditional block in commands/setup.md). However, the prompt logic appears to rely on user selection without documented handling for: (1) unexpected/empty input values, (2) the case where the user dismisses or cancels the prompt, or (3) the case where the menu system itself is unavailable. If the user provides an unexpected value, the command may silently proceed with a default or no-op path, leaving the system in an ambiguous state without informing the user that their selection was ignored.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.72,
+        "recommendation": "Add explicit guard logic for unrecognized menu selections. Ensure that if the user cancels or provides no input, the command exits with a clear message rather than silently continuing. Document what each menu option does and what state it leaves the system in."
+      },
+      {
+        "severity": "high",
+        "title": "npm scope rename from @anthropic to @anthropics is an undeclared breaking change",
+        "body": "package.json changes the npm scope. Any existing users who have installed the previous scoped package, or any scripts/documentation referencing the old scope, will break. The CHANGELOG does not explicitly call out this as a breaking change or provide migration instructions. Existing installations may fail to update or may install a duplicate under the new scope, leading to stale/conflicting versions.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.85,
+        "recommendation": "Either revert the scope rename or explicitly document it as a breaking change in CHANGELOG.md with migration steps. If the rename is intentional for v0.4.7, ensure the old package is deprecated on npm with a pointer to the new one."
+      },
+      {
+        "severity": "medium",
+        "title": "CHANGELOG entry lacks structured breaking change annotation",
+        "body": "The CHANGELOG.md update for v0.4.7 describes adding the interactive menu and scope rename, but does not use a conventional 'BREAKING CHANGE' footer or section. Given that the npm scope rename affects how users install and reference the package, burying this in a generic changelog entry increases the risk that users and downstream tooling miss it entirely.",
+        "file": "CHANGELOG.md",
+        "line_start": 1,
+        "line_end": 21,
+        "confidence": 0.78,
+        "recommendation": "Add a 'BREAKING CHANGE' section to the v0.4.7 changelog entry that explicitly calls out the npm scope rename and provides before/after install commands."
+      }
+    ],
+    "next_steps": [
+      "Inspect the full diff of commands/setup.md to verify the exact menu prompt logic and confirm whether invalid/empty input is handled.",
+      "Verify whether the old npm scope (@anthropic) has been deprecated and whether both scopes currently resolve to the same package.",
+      "Add explicit breaking change documentation for the scope rename before shipping.",
+      "Test the setup command interactively with: (a) no input, (b) invalid selection, (c) cancellation, and confirm the behavior in each case."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The change adds an interactive menu to the setup command when already configured and renames the npm scope from @anthropic to @anthropics. The setup.md change introduces user-facing interactive prompts but has no error handling for invalid input, no documentation of what the menu options actually do, and the rename of the npm scope is a breaking change for existing users. The release_card.md is heavily reworked but appears to be documentation only.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Interactive menu in setup.md lacks invalid input handling and silent fallback behavior\",\n      \"body\": \"The setup command now presents an interactive menu when already configured (new conditional block in commands/setup.md). However, the prompt logic appears to rely on user selection without documented handling for: (1) unexpected/empty input values, (2) the case where the user dismisses or cancels the prompt, or (3) the case where the menu system itself is unavailable. If the user provides an unexpected value, the command may silently proceed with a default or no-op path, leaving the system in an ambiguous state without informing the user that their selection was ignored.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Add explicit guard logic for unrecognized menu selections. Ensure that if the user cancels or provides no input, the command exits with a clear message rather than silently continuing. Document what each menu option does and what state it leaves the system in.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename from @anthropic to @anthropics is an undeclared breaking change\",\n      \"body\": \"package.json changes the npm scope. Any existing users who have installed the previous scoped package, or any scripts/documentation referencing the old scope, will break. The CHANGELOG does not explicitly call out this as a breaking change or provide migration instructions. Existing installations may fail to update or may install a duplicate under the new scope, leading to stale/conflicting versions.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.85,\n      \"recommendation\": \"Either revert the scope rename or explicitly document it as a breaking change in CHANGELOG.md with migration steps. If the rename is intentional for v0.4.7, ensure the old package is deprecated on npm with a pointer to the new one.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"CHANGELOG entry lacks structured breaking change annotation\",\n      \"body\": \"The CHANGELOG.md update for v0.4.7 describes adding the interactive menu and scope rename, but does not use a conventional 'BREAKING CHANGE' footer or section. Given that the npm scope rename affects how users install and reference the package, burying this in a generic changelog entry increases the risk that users and downstream tooling miss it entirely.\",\n      \"file\": \"CHANGELOG.md\",\n      \"line_start\": 1,\n      \"line_end\": 21,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Add a 'BREAKING CHANGE' section to the v0.4.7 changelog entry that explicitly calls out the npm scope rename and provides before/after install commands.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect the full diff of commands/setup.md to verify the exact menu prompt logic and confirm whether invalid/empty input is handled.\",\n    \"Verify whether the old npm scope (@anthropic) has been deprecated and whether both scopes currently resolve to the same package.\",\n    \"Add explicit breaking change documentation for the scope rename before shipping.\",\n    \"Test the setup command interactively with: (a) no input, (b) invalid selection, (c) cancellation, and confirm the behavior in each case.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:48:04.942Z"
+}

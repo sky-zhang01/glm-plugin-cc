@@ -1,0 +1,28 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 0,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 13334,
+    "error_code": "UPSTREAM_INTERNAL_ERROR"
+  },
+  "parsed": null,
+  "rawOutputHead": "",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "UPSTREAM_INTERNAL_ERROR",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:58:52.817Z"
+}

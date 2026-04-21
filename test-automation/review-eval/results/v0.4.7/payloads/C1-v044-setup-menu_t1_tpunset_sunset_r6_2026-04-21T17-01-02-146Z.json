@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 6
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 86277,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The commit bundles an npm scope rename with a setup-command behavioral change. The scope rename is a breaking change for every existing installation — any reference to the old package name becomes invalid — and there is no visible migration shim, deprecation notice on the old package, or uninstall/reinstall guidance in the changelog entry. The interactive menu addition to setup.md (19 lines changed) introduces new branching behavior in a command that previously had a simpler flow, but without seeing the full markdown content the edge-case handling cannot be confirmed safe.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is an unguarded breaking change for existing installations",
+        "body": "The commit message explicitly states 'rename npm scope.' This changes the package identity in package.json (4 lines changed), marketplace.json (4 lines changed), and plugin.json (2 lines changed). Any user or system referencing the old scoped package name will silently resolve to a stale or missing package. The CHANGELOG adds 21 lines but the diff stat does not indicate a migration section, deprecation notice, or uninstall-old/reinstall-new instructions. In a pre-1.0 plugin ecosystem this can strand users who pinned or cached the old scope.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.78,
+        "recommendation": "Add explicit migration guidance to the CHANGELOG and release_card.md: (1) note the old scope name, (2) instruct users to uninstall the old package before installing the new one, (3) if possible, publish a stub under the old scope that prints a deprecation warning and exits. Confirm the old scope name is either deprecated on the registry or redirected."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive menu in setup command adds branching without visible input-validation guards",
+        "body": "commands/setup.md gained 19 lines of changes to add an interactive menu when the system is already configured. In the Claude-plugin command model, setup.md is a prompt template — the menu logic is expressed in natural-language instructions to the model. If the prompt does not defensively handle out-of-range selections, empty input, or a partially-written config file, the model may produce confusing output or corrupt the existing configuration. The change is not trivially reversible because it alters the command contract for returning users.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.55,
+        "recommendation": "Inspect the full diff of commands/setup.md and confirm the prompt instructions include: (1) a fallback/default branch for unrecognized menu choices, (2) a cancel/abort option, (3) explicit instructions to back up the existing config before overwriting. If any of these are missing, add them before shipping."
+      },
+      {
+        "severity": "low",
+        "title": "release_card.md rewrite may embed stale scope references",
+        "body": "release_card.md has 326 lines changed (a near-complete rewrite). If any installation snippets, badges, or example commands in this file still reference the old npm scope, new users following the release card will install the wrong package. The scope rename affects three config files but a 326-line documentation rewrite creates a high surface area for stale references.",
+        "file": "release_card.md",
+        "line_start": 1,
+        "line_end": 326,
+        "confidence": 0.45,
+        "recommendation": "Grep release_card.md for the old scope name and confirm every occurrence is updated to the new scope. Treat this as a blocking check before merge."
+      }
+    ],
+    "next_steps": [
+      "Inspect the full diff of package.json to confirm the exact old and new scope names and verify the new scope is already published or will be published atomically with this merge.",
+      "Read commands/setup.md in full and walk the interactive menu paths for: (a) already-configured happy path, (b) invalid menu selection, (c) user cancellation, (d) partially-corrupt existing config.",
+      "Search release_card.md and CHANGELOG.md for any remaining references to the old scope name.",
+      "If the old scope already has published versions, publish a deprecation stub before or simultaneously with this change."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The commit bundles an npm scope rename with a setup-command behavioral change. The scope rename is a breaking change for every existing installation — any reference to the old package name becomes invalid — and there is no visible migration shim, deprecation notice on the old package, or uninstall/reinstall guidance in the changelog entry. The interactive menu addition to setup.md (19 lines changed) introduces new branching behavior in a command that previously had a simpler flow, but without seeing the full markdown content the edge-case handling cannot be confirmed safe.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename is an unguarded breaking change for existing installations\",\n      \"body\": \"The commit message explicitly states 'rename npm scope.' This changes the package identity in package.json (4 lines changed), marketplace.json (4 lines changed), and plugin.json (2 lines changed). Any user or system referencing the old scoped package name will silently resolve to a stale or missing package. The CHANGELOG adds 21 lines but the diff stat does not indicate a migration section, deprecation notice, or uninstall-old/reinstall-new instructions. In a pre-1.0 plugin ecosystem this can strand users who pinned or cached the old scope.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Add explicit migration guidance to the CHANGELOG and release_card.md: (1) note the old scope name, (2) instruct users to uninstall the old package before installing the new one, (3) if possible, publish a stub under the old scope that prints a deprecation warning and exits. Confirm the old scope name is either deprecated on the registry or redirected.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Interactive menu in setup command adds branching without visible input-validation guards\",\n      \"body\": \"commands/setup.md gained 19 lines of changes to add an interactive menu when the system is already configured. In the Claude-plugin command model, setup.md is a prompt template — the menu logic is expressed in natural-language instructions to the model. If the prompt does not defensively handle out-of-range selections, empty input, or a partially-written config file, the model may produce confusing output or corrupt the existing configuration. The change is not trivially reversible because it alters the command contract for returning users.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Inspect the full diff of commands/setup.md and confirm the prompt instructions include: (1) a fallback/default branch for unrecognized menu choices, (2) a cancel/abort option, (3) explicit instructions to back up the existing config before overwriting. If any of these are missing, add them before shipping.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"release_card.md rewrite may embed stale scope references\",\n      \"body\": \"release_card.md has 326 lines changed (a near-complete rewrite). If any installation snippets, badges, or example commands in this file still reference the old npm scope, new users following the release card will install the wrong package. The scope rename affects three config files but a 326-line documentation rewrite creates a high surface area for stale references.\",\n      \"file\": \"release_card.md\",\n      \"line_start\": 1,\n      \"line_end\": 326,\n      \"confidence\": 0.45,\n      \"recommendation\": \"Grep release_card.md for the old scope name and confirm every occurrence is updated to the new scope. Treat this as a blocking check before merge.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect the full diff of package.json to confirm the exact old and new scope names and verify the new scope is already published or will be published atomically with this merge.\",\n    \"Read commands/setup.md in full and walk the interactive menu paths for: (a) already-configured happy path, (b) invalid menu selection, (c) user cancellation, (d) partially-corrupt existing config.\",\n    \"Search release_card.md and CHANGELOG.md for any remaining references to the old scope name.\",\n    \"If the old scope already has published versions, publish a deprecation stub before or simultaneously with this change.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T17:01:02.176Z"
+}

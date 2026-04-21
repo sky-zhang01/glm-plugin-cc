@@ -1,0 +1,58 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 13
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 2,
+    "citation_accuracy": 0.5,
+    "citation_false_file_hits": 0,
+    "latency_ms": 36682,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The commit adds an interactive menu to the setup command when already configured and renames the npm scope. The setup command change introduces branching logic without visible error handling for edge cases (corrupted config, partial state). The npm scope rename is a breaking change with no migration path documented. However, the changes are primarily in Markdown/config files (commands/setup.md, package.json, marketplace/plugin JSON, release_card.md, CHANGELOG.md) — not in executable runtime code — which limits the blast radius of most defects. The main concerns are around the scope rename compatibility and the setup command's handling of already-configured states.",
+    "findings": [
+      {
+        "severity": "medium",
+        "title": "npm scope rename with no migration or compatibility note",
+        "body": "The package.json changes the npm scope from one name to another (visible in the diff stat showing package.json changes alongside the rename commit message). Any existing installations, CI pipelines, or documentation referencing the old scope will break. The CHANGELOG entry for v0.4.7 does not explicitly call out a breaking scope change or provide migration instructions. Users on the old scope will get 404s on `npm install` after publication under the new name.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.6,
+        "recommendation": "Verify that the old scope package is either republished as a redirect/deprecated pointer OR that the CHANGELOG and README explicitly document the scope change as a breaking action with upgrade steps. If this is a Claude plugin distributed outside npm, clarify that the scope rename only affects internal references."
+      },
+      {
+        "severity": "low",
+        "title": "Setup command interactive menu lacks documented guard for corrupted/stale config state",
+        "body": "The commands/setup.md change adds an interactive menu when the tool is 'already configured.' The markdown describes branching behavior (already-configured vs. fresh setup). If the config file exists but is malformed, empty, or partially written from a previous failed run, the menu logic may misinterpret the state — either offering the wrong options or silently overwriting data. There is no documented handling of this edge case in the diff.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.45,
+        "recommendation": "Add a guard or documented step in the setup flow that validates the existing config before presenting the 'already configured' menu. If the config is unreadable, the flow should default to a safe path (e.g., warn and offer to reconfigure from scratch) rather than assuming a valid prior configuration."
+      }
+    ],
+    "next_steps": [
+      "Inspect the full diff of commands/setup.md to confirm the interactive menu logic and whether corrupted-config edge cases are handled.",
+      "Verify whether the npm scope rename in package.json affects actual distribution or is cosmetic (plugin-internal reference only).",
+      "Check if .claude-plugin/marketplace.json and plugin.json scope/name changes are consistent with package.json and whether existing plugin installations will auto-update or break."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The commit adds an interactive menu to the setup command when already configured and renames the npm scope. The setup command change introduces branching logic without visible error handling for edge cases (corrupted config, partial state). The npm scope rename is a breaking change with no migration path documented. However, the changes are primarily in Markdown/config files (commands/setup.md, package.json, marketplace/plugin JSON, release_card.md, CHANGELOG.md) — not in executable runtime code — which limits the blast radius of most defects. The main concerns are around the scope rename compatibility and the setup command's handling of already-configured states.\",\"findings\":[{\"severity\":\"medium\",\"title\":\"npm scope rename with no migration or compatibility note\",\"body\":\"The package.json changes the npm scope from one name to another (visible in the diff stat showing package.json changes alongside the rename commit message). Any existing installations, CI pipelines, or documentation referencing the old scope will break. The CHANGELOG entry for v0.4.7 does not explicitly call out a breaking scope change or provide migration instructions. Users on the old scope will get 404s on `npm install` after publication under the new name.\",\"file\":\"package.json\",\"line_start\":1,\"line_end\":4,\"confidence\":0.6,\"recommendation\":\"Verify that the old scope package is either republished as a redirect/deprecated pointer OR that the CHANGELOG and README explicitly document the scope change as a breaking action with upgrade steps. If this is a Claude plugin distributed outside npm, clarify that the scope rename only affects internal references.\"},{\"severity\":\"low\",\"title\":\"Setup command interactive menu lacks documented guard for corrupted/stale config state\",\"body\":\"The commands/setup.md change adds an interactive menu when the tool is 'already configured.' The markdown describes branching behavior (already-configured vs. fresh setup). If the config file exists but is malformed, empty, or partially written from a previous failed run, the menu logic may misinterpret the state — either offering the wrong options or silently overwriting data. There is no documented handling of this edge case in the diff.\",\"file\":\"commands/setup.md\",\"line_start\":1,\"line_end\":19,\"confidence\":0.45,\"recommendation\":\"Add a guard or documented step in the setup flow that validates the existing config before presenting the 'already configured' menu. If the config is unreadable, the flow should default to a safe path (e.g., warn and offer to reconfigure from scratch) rather than assuming a valid prior configuration.\"}],\"next_steps\":[\"Inspect the full diff of commands/setup.md to confirm the interactive menu logic and whether corrupted-config edge cases are handled.\",\"Verify whether the npm scope rename in package.json affects actual distribution or is cosmetic (plugin-internal reference only).\",\"Check if .claude-plugin/marketplace.json and plugin.json scope/name changes are consistent with package.json and whether existing plugin installations will auto-update or break.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:47:20.212Z"
+}

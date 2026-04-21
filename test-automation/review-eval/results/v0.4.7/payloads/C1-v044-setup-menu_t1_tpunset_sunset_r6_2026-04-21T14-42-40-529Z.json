@@ -1,0 +1,68 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 6
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 77290,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit renames the npm package scope and adds an interactive setup menu for already-configured projects. The scope rename in package.json is the primary risk: if this package is already published and consumed under the old scope, existing installations, lockfiles, and CI pipelines will break on upgrade. The setup.md command change (19 lines) adds an interactive menu path but cannot be fully assessed without the diff content. The risk profile depends heavily on whether the old scope package has been deprecated or aliased, which is not addressed in this commit.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change for existing consumers",
+        "body": "The package.json diff (4 lines changed) corresponds to an npm scope rename per the commit message. If the previous scoped package (@old/name) is published and users have lockfiles or CI referencing it, this change creates a new package identity with no migration path. There is no evidence of npm deprecation notices, package aliasing, or documentation guiding users from the old scope to the new one within this commit.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.75,
+        "recommendation": "Verify the old-scoped package has been deprecated on npm with a message pointing to the new scope. If this is the first publish under the new scope, add a postinstall notice or update all downstream references. If no published package exists yet, document that in the PR to reduce reviewer concern."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive menu added to setup.md without visible test or validation of edge cases",
+        "body": "The commit adds an interactive menu to the setup command when the project is already configured (19 lines changed in commands/setup.md). Because this is a Claude-plugin prompt-definition file, the 'interactive menu' is implemented as conditional prompt logic. If the menu options are not exhaustive (e.g., missing 'cancel' or 'reset entirely'), or if the detection of 'already configured' has false positives/negatives, users could be stuck in a loop or silently overwrite configuration. The changelog references this as a fix, but there are no tests or validation artifacts in the diff.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.5,
+        "recommendation": "Ensure the setup.md prompt handles: (1) corrupted or partial config state, (2) a 'no-op / cancel' escape hatch, (3) idempotent re-run if the user selects the same configuration. Add a smoke-test or example transcript to the PR demonstrating each menu path."
+      },
+      {
+        "severity": "low",
+        "title": "marketplace.json and plugin.json changes not validated against plugin registry schema",
+        "body": "The .claude-plugin/marketplace.json (4 lines changed) and plugin.json (2 lines changed) are modified as part of the scope rename. If the plugin registry expects specific fields (e.g., identifier, version, or scope-qualified name) that are now inconsistent with the new package scope, the plugin may fail to register or appear duplicated in the marketplace.",
+        "file": ".claude-plugin/marketplace.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.4,
+        "recommendation": "Confirm that the plugin identifier in marketplace.json and plugin.json is consistent with the new package.json name, and that the Claude plugin registry does not cache or key on the old scope-qualified identifier."
+      }
+    ],
+    "next_steps": [
+      "Verify the old npm scope package is deprecated or unpublished, or confirm this is pre-release and no consumers exist.",
+      "Provide the full diff of commands/setup.md so reviewers can validate all interactive menu branches and escape hatches.",
+      "Confirm that .claude-plugin identifiers are updated consistently with the new package scope."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"This commit renames the npm package scope and adds an interactive setup menu for already-configured projects. The scope rename in package.json is the primary risk: if this package is already published and consumed under the old scope, existing installations, lockfiles, and CI pipelines will break on upgrade. The setup.md command change (19 lines) adds an interactive menu path but cannot be fully assessed without the diff content. The risk profile depends heavily on whether the old scope package has been deprecated or aliased, which is not addressed in this commit.\",\"findings\":[{\"severity\":\"high\",\"title\":\"npm scope rename is a breaking change for existing consumers\",\"body\":\"The package.json diff (4 lines changed) corresponds to an npm scope rename per the commit message. If the previous scoped package (@old/name) is published and users have lockfiles or CI referencing it, this change creates a new package identity with no migration path. There is no evidence of npm deprecation notices, package aliasing, or documentation guiding users from the old scope to the new one within this commit.\",\"file\":\"package.json\",\"line_start\":1,\"line_end\":4,\"confidence\":0.75,\"recommendation\":\"Verify the old-scoped package has been deprecated on npm with a message pointing to the new scope. If this is the first publish under the new scope, add a postinstall notice or update all downstream references. If no published package exists yet, document that in the PR to reduce reviewer concern.\"},{\"severity\":\"medium\",\"title\":\"Interactive menu added to setup.md without visible test or validation of edge cases\",\"body\":\"The commit adds an interactive menu to the setup command when the project is already configured (19 lines changed in commands/setup.md). Because this is a Claude-plugin prompt-definition file, the 'interactive menu' is implemented as conditional prompt logic. If the menu options are not exhaustive (e.g., missing 'cancel' or 'reset entirely'), or if the detection of 'already configured' has false positives/negatives, users could be stuck in a loop or silently overwrite configuration. The changelog references this as a fix, but there are no tests or validation artifacts in the diff.\",\"file\":\"commands/setup.md\",\"line_start\":1,\"line_end\":19,\"confidence\":0.5,\"recommendation\":\"Ensure the setup.md prompt handles: (1) corrupted or partial config state, (2) a 'no-op / cancel' escape hatch, (3) idempotent re-run if the user selects the same configuration. Add a smoke-test or example transcript to the PR demonstrating each menu path.\"},{\"severity\":\"low\",\"title\":\"marketplace.json and plugin.json changes not validated against plugin registry schema\",\"body\":\"The .claude-plugin/marketplace.json (4 lines changed) and plugin.json (2 lines changed) are modified as part of the scope rename. If the plugin registry expects specific fields (e.g., identifier, version, or scope-qualified name) that are now inconsistent with the new package scope, the plugin may fail to register or appear duplicated in the marketplace.\",\"file\":\".claude-plugin/marketplace.json\",\"line_start\":1,\"line_end\":4,\"confidence\":0.4,\"recommendation\":\"Confirm that the plugin identifier in marketplace.json and plugin.json is consistent with the new package.json name, and that the Claude plugin registry does not cache or key on the old scope-qualified identifier.\"}],\"next_steps\":[\"Verify the old npm scope package is deprecated or unpublished, or confirm this is pre-release and no consumers exist.\",\"Provide the full diff of commands/setup.md so reviewers can validate all interactive menu branches and escape hatches.\",\"Confirm that .claude-plugin identifiers are updated consistently with the new package scope.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:42:40.551Z"
+}

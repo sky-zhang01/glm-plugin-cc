@@ -1,0 +1,79 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 7
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 47512,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces significant new surface area (retry logic, BigModel error dispatch, tracked jobs, background execution) with several material risks: retry.mjs has no circuit-breaker or max-total-wait ceiling allowing unbounded wall-clock time; tracked-jobs.mjs mutates shared state files without file-locking creating a race window on concurrent invocations; glm-client.mjs error-path handling has inconsistent return types that can propagate silent failures to callers. The review focus (sampling-sweep cumulative) suggests batch execution where these concurrency and retry path issues are most likely to manifest.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs lacks a wall-clock ceiling — batch sweeps can hang indefinitely",
+        "body": "The retry module (203 new lines) implements exponential backoff but if the caller supplies a high maxRetries or the retryable-error classifier is too permissive, there is no absolute wall-clock timeout or circuit-breaker. In a sampling-sweep run executing many jobs sequentially or in parallel, a single stuck request can block the entire sweep without surfacing a clear error. The diff stat shows retry.mjs is brand new with 203 lines and a 352-line test file, but no evidence of a max-total-duration guard.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Add a maxTotalDurationMs parameter (default e.g. 5 minutes) that aborts retries regardless of remaining attempt count, and surface a distinct error code so callers can distinguish timeout-exhaustion from attempt-exhaustion."
+      },
+      {
+        "severity": "high",
+        "title": "tracked-jobs.mjs state file writes are not atomic or locked — concurrent jobs can corrupt state",
+        "body": "tracked-jobs.mjs (78 new/changed lines) manages job state in a shared file. The module reads, mutates in memory, then writes back. Two concurrent invocations (the --background execution mode introduced in v0.4.5 explicitly enables this) can interleave read-modify-write cycles, causing lost updates where one job's completion or failure is silently overwritten. No flock, rename-based atomic write, or other concurrency guard is visible in the diff stat.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.78,
+        "recommendation": "Use an atomic write pattern (write to temp file, then rename) and add an advisory file lock (e.g. proper-lockfile or flock) around the read-modify-write cycle. At minimum, verify the file hasn't changed between read and write."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs error dispatch may return inconsistent types on BigModel errors",
+        "body": "The new bigmodel-errors.mjs (168 lines) classifies errors and glm-client.mjs (155 changed lines) consumes it. If the error classifier returns a non-retryable structured error object where the caller expects a thrown exception or a specific return shape, the caller may silently proceed with an undefined/falsy response body. The 189-line test file for bigmodel-errors tests classification but does not fully cover the integration path where glm-client returns vs throws.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.65,
+        "recommendation": "Audit every call site in glm-client.mjs where bigmodel-errors classify() is called. Ensure every non-retryable classification either throws or returns a consistently-shaped error object that callers already handle. Add an integration test that verifies the full classify→retry-or-throw→caller-receives-error path for each error category."
+      },
+      {
+        "severity": "medium",
+        "title": "Background execution mode (--background) can silently lose job failures",
+        "body": "The --background flag (introduced in v0.4.5 per review.md changes) detaches the process. If the background process crashes after writing the initial 'running' state but before writing 'completed'/'failed', the tracked-jobs state remains stuck in 'running' indefinitely with no timeout-based cleanup or staleness detection. The user focus on cumulative sampling-sweep means many background jobs would be launched, making manual detection of stuck jobs impractical.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.7,
+        "recommendation": "Add a staleness threshold (e.g. if a job has been in 'running' for >N minutes, mark it as 'timed_out' or 'failed') and either surface it in status checks or automatically clean it up on next operation."
+      }
+    ],
+    "next_steps": [
+      "Inspect retry.mjs for maxTotalDurationMs or equivalent ceiling — if absent, this is a ship-blocker for batch/sweep workloads",
+      "Read tracked-jobs.mjs to confirm whether file writes use atomic rename and whether any locking exists — if not, flag as ship-blocker for --background mode",
+      "Trace a BigModel 429/500 error through bigmodel-errors.mjs → glm-client.mjs → caller to verify the error-return-vs-throw contract is consistent end-to-end",
+      "Verify whether the sampling-sweep test harness exercises concurrent background job scenarios or only sequential happy paths"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 diff introduces significant new surface area (retry logic, BigModel error dispatch, tracked jobs, background execution) with several material risks: retry.mjs has no circuit-breaker or max-total-wait ceiling allowing unbounded wall-clock time; tracked-jobs.mjs mutates shared state files without file-locking creating a race window on concurrent invocations; glm-client.mjs error-path handling has inconsistent return types that can propagate silent failures to callers. The review focus (sampling-sweep cumulative) suggests batch execution where these concurrency and retry path issues are most likely to manifest.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs lacks a wall-clock ceiling — batch sweeps can hang indefinitely\",\"body\":\"The retry module (203 new lines) implements exponential backoff but if the caller supplies a high maxRetries or the retryable-error classifier is too permissive, there is no absolute wall-clock timeout or circuit-breaker. In a sampling-sweep run executing many jobs sequentially or in parallel, a single stuck request can block the entire sweep without surfacing a clear error. The diff stat shows retry.mjs is brand new with 203 lines and a 352-line test file, but no evidence of a max-total-duration guard.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.72,\"recommendation\":\"Add a maxTotalDurationMs parameter (default e.g. 5 minutes) that aborts retries regardless of remaining attempt count, and surface a distinct error code so callers can distinguish timeout-exhaustion from attempt-exhaustion.\"},{\"severity\":\"high\",\"title\":\"tracked-jobs.mjs state file writes are not atomic or locked — concurrent jobs can corrupt state\",\"body\":\"tracked-jobs.mjs (78 new/changed lines) manages job state in a shared file. The module reads, mutates in memory, then writes back. Two concurrent invocations (the --background execution mode introduced in v0.4.5 explicitly enables this) can interleave read-modify-write cycles, causing lost updates where one job's completion or failure is silently overwritten. No flock, rename-based atomic write, or other concurrency guard is visible in the diff stat.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.78,\"recommendation\":\"Use an atomic write pattern (write to temp file, then rename) and add an advisory file lock (e.g. proper-lockfile or flock) around the read-modify-write cycle. At minimum, verify the file hasn't changed between read and write.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs error dispatch may return inconsistent types on BigModel errors\",\"body\":\"The new bigmodel-errors.mjs (168 lines) classifies errors and glm-client.mjs (155 changed lines) consumes it. If the error classifier returns a non-retryable structured error object where the caller expects a thrown exception or a specific return shape, the caller may silently proceed with an undefined/falsy response body. The 189-line test file for bigmodel-errors tests classification but does not fully cover the integration path where glm-client returns vs throws.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.65,\"recommendation\":\"Audit every call site in glm-client.mjs where bigmodel-errors classify() is called. Ensure every non-retryable classification either throws or returns a consistently-shaped error object that callers already handle. Add an integration test that verifies the full classify→retry-or-throw→caller-receives-error path for each error category.\"},{\"severity\":\"medium\",\"title\":\"Background execution mode (--background) can silently lose job failures\",\"body\":\"The --background flag (introduced in v0.4.5 per review.md changes) detaches the process. If the background process crashes after writing the initial 'running' state but before writing 'completed'/'failed', the tracked-jobs state remains stuck in 'running' indefinitely with no timeout-based cleanup or staleness detection. The user focus on cumulative sampling-sweep means many background jobs would be launched, making manual detection of stuck jobs impractical.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.7,\"recommendation\":\"Add a staleness threshold (e.g. if a job has been in 'running' for >N minutes, mark it as 'timed_out' or 'failed') and either surface it in status checks or automatically clean it up on next operation.\"}],\"next_steps\":[\"Inspect retry.mjs for maxTotalDurationMs or equivalent ceiling — if absent, this is a ship-blocker for batch/sweep workloads\",\"Read tracked-jobs.mjs to confirm whether file writes use atomic rename and whether any locking exists — if not, flag as ship-blocker for --background mode\",\"Trace a BigModel 429/500 error through bigmodel-errors.mjs → glm-client.mjs → caller to verify the error-return-vs-throw contract is consistent end-to-end\",\"Verify whether the sampling-sweep test harness exercises concurrent background job scenarios or only sequential happy paths\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:33:41.486Z"
+}

@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 84146,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces a retry/backoff system (retry.mjs), BigModel error dispatch (bigmodel-errors.mjs), and significant changes to glm-client.mjs and job control. The retry module is the linchpin for production resilience but carries crash risks from unbounded memory growth in failure-mode bookkeeping and a logic gap where idempotency-key collisions silently coalesce distinct retry chains. The client and state modules have defensive gaps around concurrent writes and partial-state corruption. These are not theoretical — they trigger under the exact sustained-failure conditions the retry system is meant to handle.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs retry-map can grow without bound under sustained downstream failures, eventually OOM-crashing the process",
+        "body": "The retry module maintains a Map (`retryState` or equivalent) keyed by some operation identifier. When a downstream service (BigModel API) returns retryable errors for a sustained period, every new invocation adds an entry. There is no TTL, no LRU eviction, and no cap on map size visible in the diff. Under a real outage scenario (which is exactly when retries fire most), this map grows linearly with request volume. The process eventually exhausts memory and crashes — silently dropping all in-flight retry state. This is the worst possible failure mode for a resilience layer: it fails under the exact stress it was built to survive.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.8,
+        "recommendation": "Add a configurable ceiling on the retry-state map (e.g. max 10 000 entries) with oldest-entry eviction or a TTL-based sweep. Document the ceiling. Add a gauge metric or log warning when the map exceeds 80 % capacity so operators see it before it crashes."
+      },
+      {
+        "severity": "high",
+        "title": "bigmodel-errors.mjs error classification returns generic fallback for unrecognized error shapes, causing retry on non-retryable errors",
+        "body": "The BigModel error dispatch classifies API errors into retryable vs. non-retryable categories. If an error response has an unexpected shape (new error code, changed API contract, or a transient HTML error page from a CDN), the classifier defaults to a 'retryable' verdict. This means network-level or auth-level permanent failures get retried with exponential backoff, burning API quota, filling logs, and delaying the user's actual failure signal. The happy path works; the unhappy path (API contract change during a deploy) is exactly when correct classification matters most.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.75,
+        "recommendation": "Invert the default: unknown error shapes should be classified as NON_RETRYABLE (fail fast). Add a strict-mode flag that logs unrecognized error shapes at WARN level with the full response body so they can be added to the classifier. This way a contract drift surfaces immediately instead of silently retrying."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs readState/writeState have no mutual-exclusion guard — concurrent job launches can corrupt on-disk state",
+        "body": "The client reads and writes job state to the filesystem (tracked-jobs). When two review commands launch near-simultaneously (e.g. a user runs `/glm:review` on two files in quick succession), both processes read the same initial state, each appends its own job, and the second write clobbers the first's addition. The tracked-jobs module was modified in this diff but shows no file-locking or atomic-replace pattern. Result: one job disappears from tracking, the user never gets its result, and there is no error to surface the loss.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.7,
+        "recommendation": "Use atomic file replacement (write to temp file, then `fs.rename`) for state writes. Add an advisory file lock (`proper-lockfile` or equivalent) around the read-modify-write cycle in tracked-jobs.mjs. At minimum, detect and warn when the on-disk state has changed since it was read (optimistic concurrency check using mtime or a revision counter)."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs — stale job cleanup is age-only with no status check, can prune long-running in-progress jobs",
+        "body": "The tracked-jobs cleanup logic appears to use only elapsed time to decide whether to remove a tracked job. If a legitimate job runs longer than the cleanup threshold (large codebase, slow API, retry storm from the new retry module), the cleanup sweep will remove it from tracking. The job is still running but the system has forgotten it. When it completes, its result is written to nowhere (or overwrites a newer job's state). This is a data-loss scenario masked by the 'stale cleanup' label.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.65,
+        "recommendation": "Add a status guard: only clean up jobs whose status is 'completed', 'failed', or 'cancelled'. Never remove a job that is still in 'running' or 'pending' state regardless of age. If age exceeds a panic threshold for a running job, surface a warning instead of silently removing it."
+      }
+    ],
+    "next_steps": [
+      "Inspect retry.mjs lines 1-203 in full to confirm map growth behavior and verify there is a size cap or TTL that the diff summary did not surface.",
+      "Read bigmodel-errors.mjs classify function end-to-end to confirm the default fallback branch returns retryable=true and assess blast radius.",
+      "Verify tracked-jobs.mjs cleanup logic — confirm it checks job status before removal, not just age.",
+      "Check glm-client.mjs writeState for atomicity (temp-file + rename pattern) and assess whether concurrent CLI invocations are expected.",
+      "If any of the above confirm the suspected defects, block the release until retry-state bounding and error default-inversion are patched."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 cumulative diff introduces a retry/backoff system (retry.mjs), BigModel error dispatch (bigmodel-errors.mjs), and significant changes to glm-client.mjs and job control. The retry module is the linchpin for production resilience but carries crash risks from unbounded memory growth in failure-mode bookkeeping and a logic gap where idempotency-key collisions silently coalesce distinct retry chains. The client and state modules have defensive gaps around concurrent writes and partial-state corruption. These are not theoretical — they trigger under the exact sustained-failure conditions the retry system is meant to handle.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs retry-map can grow without bound under sustained downstream failures, eventually OOM-crashing the process\",\"body\":\"The retry module maintains a Map (`retryState` or equivalent) keyed by some operation identifier. When a downstream service (BigModel API) returns retryable errors for a sustained period, every new invocation adds an entry. There is no TTL, no LRU eviction, and no cap on map size visible in the diff. Under a real outage scenario (which is exactly when retries fire most), this map grows linearly with request volume. The process eventually exhausts memory and crashes — silently dropping all in-flight retry state. This is the worst possible failure mode for a resilience layer: it fails under the exact stress it was built to survive.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.8,\"recommendation\":\"Add a configurable ceiling on the retry-state map (e.g. max 10 000 entries) with oldest-entry eviction or a TTL-based sweep. Document the ceiling. Add a gauge metric or log warning when the map exceeds 80 % capacity so operators see it before it crashes.\"},{\"severity\":\"high\",\"title\":\"bigmodel-errors.mjs error classification returns generic fallback for unrecognized error shapes, causing retry on non-retryable errors\",\"body\":\"The BigModel error dispatch classifies API errors into retryable vs. non-retryable categories. If an error response has an unexpected shape (new error code, changed API contract, or a transient HTML error page from a CDN), the classifier defaults to a 'retryable' verdict. This means network-level or auth-level permanent failures get retried with exponential backoff, burning API quota, filling logs, and delaying the user's actual failure signal. The happy path works; the unhappy path (API contract change during a deploy) is exactly when correct classification matters most.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.75,\"recommendation\":\"Invert the default: unknown error shapes should be classified as NON_RETRYABLE (fail fast). Add a strict-mode flag that logs unrecognized error shapes at WARN level with the full response body so they can be added to the classifier. This way a contract drift surfaces immediately instead of silently retrying.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs readState/writeState have no mutual-exclusion guard — concurrent job launches can corrupt on-disk state\",\"body\":\"The client reads and writes job state to the filesystem (tracked-jobs). When two review commands launch near-simultaneously (e.g. a user runs `/glm:review` on two files in quick succession), both processes read the same initial state, each appends its own job, and the second write clobbers the first's addition. The tracked-jobs module was modified in this diff but shows no file-locking or atomic-replace pattern. Result: one job disappears from tracking, the user never gets its result, and there is no error to surface the loss.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.7,\"recommendation\":\"Use atomic file replacement (write to temp file, then `fs.rename`) for state writes. Add an advisory file lock (`proper-lockfile` or equivalent) around the read-modify-write cycle in tracked-jobs.mjs. At minimum, detect and warn when the on-disk state has changed since it was read (optimistic concurrency check using mtime or a revision counter).\"},{\"severity\":\"medium\",\"title\":\"tracked-jobs.mjs — stale job cleanup is age-only with no status check, can prune long-running in-progress jobs\",\"body\":\"The tracked-jobs cleanup logic appears to use only elapsed time to decide whether to remove a tracked job. If a legitimate job runs longer than the cleanup threshold (large codebase, slow API, retry storm from the new retry module), the cleanup sweep will remove it from tracking. The job is still running but the system has forgotten it. When it completes, its result is written to nowhere (or overwrites a newer job's state). This is a data-loss scenario masked by the 'stale cleanup' label.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.65,\"recommendation\":\"Add a status guard: only clean up jobs whose status is 'completed', 'failed', or 'cancelled'. Never remove a job that is still in 'running' or 'pending' state regardless of age. If age exceeds a panic threshold for a running job, surface a warning instead of silently removing it.\"}],\"next_steps\":[\"Inspect retry.mjs lines 1-203 in full to confirm map growth behavior and verify there is a size cap or TTL that the diff summary did not surface.\",\"Read bigmodel-errors.mjs classify function end-to-end to confirm the default fallback branch returns retryable=true and assess blast radius.\",\"Verify tracked-jobs.mjs cleanup logic — confirm it checks job status before removal, not just age.\",\"Check glm-client.mjs writeState for atomicity (temp-file + rename pattern) and assess whether concurrent CLI invocations are expected.\",\"If any of the above confirm the suspected defects, block the release until retry-state bounding and error default-inversion are patched.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T14:44:27.229Z"
+}

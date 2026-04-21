@@ -1,0 +1,145 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 24
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 61265,
+    "error_code": ""
+  },
+  "parsed": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "verdict",
+      "summary",
+      "findings",
+      "next_steps"
+    ],
+    "properties": {
+      "verdict": {
+        "type": "string",
+        "enum": [
+          "approve",
+          "needs-attention"
+        ]
+      },
+      "summary": {
+        "type": "string"
+      },
+      "findings": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "severity",
+            "title",
+            "body",
+            "file",
+            "line_start",
+            "line_end",
+            "confidence",
+            "recommendation"
+          ],
+          "properties": {
+            "severity": {
+              "type": "string",
+              "enum": [
+                "critical",
+                "high",
+                "medium",
+                "low"
+              ]
+            },
+            "title": {
+              "type": "string"
+            },
+            "body": {
+              "type": "string"
+            },
+            "file": {
+              "type": "string"
+            },
+            "line_start": {
+              "type": "integer"
+            },
+            "line_end": {
+              "type": "integer"
+            },
+            "confidence": {
+              "type": "number"
+            },
+            "recommendation": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "next_steps": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "verdict": "needs-attention",
+    "summary": "This commit bundles two distinct concerns—an interactive setup menu addition and an npm scope rename—into a single commit. The npm scope rename is a breaking change for existing installations with no visible migration path or deprecation strategy on the old package name. The interactive menu addition to setup risks blocking non-interactive or scripted invocations. These concerns should be resolved before shipping.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "NPM scope rename is a breaking change with no visible migration path",
+        "body": "The commit message explicitly includes 'rename npm scope' and package.json shows 4 lines changed. Renaming the npm scope (e.g., @old-scope → @new-scope) means the package is published under a completely new identifier. Existing users who installed the old-scoped package will not receive this update, will not be notified, and may have stale/broken installations. There is no indication in the diff of a deprecation notice on the old package, a postinstall migration script, or documentation instructing users to switch. The marketplace.json and plugin.json changes may also reference the new scope, meaning old installations that look up the marketplace will fail to find the plugin.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.85,
+        "recommendation": "Before merging: (1) Publish a deprecation notice on the old-scoped package pointing users to the new one. (2) Add migration instructions to CHANGELOG.md and release_card.md. (3) Consider whether the old package should have a postinstall that warns or auto-installs the new scope."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive menu in setup may block non-interactive or scripted invocations",
+        "body": "The commit adds an interactive menu to /glm:setup when the plugin is already configured (commands/setup.md, 19 lines changed). If setup is invoked in a non-TTY context (CI, scripting, automated onboarding), the menu will hang waiting for user input or fail silently. There is no indication of a --non-interactive flag, a TTY detection guard, or a default/auto-accept option. This breaks any automation that calls setup idempotently.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.75,
+        "recommendation": "Add TTY detection so the menu is skipped or auto-selects a default in non-interactive contexts. Alternatively, add a --yes or --non-interactive flag that bypasses the menu. Document this behavior."
+      },
+      {
+        "severity": "medium",
+        "title": "Scope rename may invalidate existing plugin.json/marketplace.json references for installed users",
+        "body": "Both .claude-plugin/marketplace.json (4 lines changed) and .claude-plugin/plugin.json (2 lines changed) are modified, likely updating identifiers or URIs to the new scope. Existing installations that cached or reference the old plugin.json path or marketplace entry may fail to resolve the plugin after update, leaving the user with a broken plugin registration that Claude cannot locate.",
+        "file": ".claude-plugin/plugin.json",
+        "line_start": 1,
+        "line_end": 2,
+        "confidence": 0.7,
+        "recommendation": "Verify that the Claude plugin loader can handle a scope change gracefully for already-installed plugins. If not, add a migration step to the setup command that re-registers the plugin under the new scope and cleans up the old registration."
+      }
+    ],
+    "next_steps": [
+      "Inspect the full diff of package.json to confirm the exact scope rename and assess blast radius on existing users.",
+      "Inspect the full diff of commands/setup.md to verify whether TTY detection or non-interactive handling exists.",
+      "Add a migration/deprecation strategy for the old npm scope before shipping.",
+      "Consider splitting this into two commits: one for the scope rename (with migration tooling) and one for the interactive menu (with non-interactive fallback)."
+    ]
+  },
+  "rawOutputHead": "{\n  \"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n  \"type\": \"object\",\n  \"additionalProperties\": false,\n  \"required\": [\n    \"verdict\",\n    \"summary\",\n    \"findings\",\n    \"next_steps\"\n  ],\n  \"properties\": {\n    \"verdict\": {\n      \"type\": \"string\",\n      \"enum\": [\n        \"approve\",\n        \"needs-attention\"\n      ]\n    },\n    \"summary\": {\n      \"type\": \"string\"\n    },\n    \"findings\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"object\",\n        \"additionalProperties\": false,\n        \"required\": [\n          \"severity\",\n          \"title\",\n          \"body\",\n          \"file\",\n          \"line_start\",\n          \"line_end\",\n          \"confidence\",\n          \"recommendation\"\n        ],\n        \"properties\": {\n          \"severity\": {\n            \"type\": \"string\",\n            \"enum\": [\n              \"critical\",\n              \"high\",\n              \"medium\",\n              \"low\"\n            ]\n          },\n          \"title\": {\n            \"type\": \"string\"\n          },\n          \"body\": {\n            \"type\": \"string\"\n          },\n          \"file\": {\n            \"type\": \"string\"\n          },\n          \"line_start\": {\n            \"type\": \"integer\"\n          },\n          \"line_end\": {\n            \"type\": \"integer\"\n          },\n          \"confidence\": {\n            \"type\": \"number\"\n          },\n          \"recommendation\": {\n            \"type\": \"string\"\n          }\n        }\n      }\n    },\n    \"next_steps\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"string\"\n      }\n    }\n  },\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"This commit bundles two distinct concerns—an interactive setup menu addition and an npm scope rename—into a single commit. The npm scope rename is a breaking change for existing installations with no visible migration path or deprecation strategy on the old package name. The interactive menu addition to setup risks blocking non-interactive or scripted invocations. These concerns should be resolved before shipping.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"NPM scope rename is a breaking change with no visible migration path\",\n      \"body\": \"The commit message explicitly includes 'rename npm scope' and package.json shows 4 lines changed. Renaming the npm scope (e.g., @old-scope → @new-scope) means the package is published under a completely new identifier. Existing users who installed the old-scoped package will not receive this update, will not be notified, and may have stale/broken installations. There is no indication in the diff of a deprecation notice on the old package, a postinstall migration script, or documentation instructing users to switch. The marketplace.json and plugin.json changes may also reference the new scope, meaning old installations that look up the marketplace will fail to find the plugin.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.85,\n      \"recommendation\": \"Before merging: (1) Publish a deprecation notice on the old-scoped package pointing users to the new one. (2) Add migration instructions to CHANGELOG.md and release_card.md. (3) Consider whether the old package should have a postinstall that warns or auto-installs the new scope.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Interactive menu in setup may block non-interactive or scripted invocations\",\n      \"body\": \"The commit adds an interactive menu to /glm:setup when the plugin is already configured (commands/setup.md, 19 lines changed). If setup is invoked in a non-TTY context (CI, scripting, automated onboarding), the menu will hang waiting for user input or fail silently. There is no indication of a --non-interactive flag, a TTY detection guard, or a default/auto-accept option. This breaks any automation that calls setup idempotently.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Add TTY detection so the menu is skipped or auto-selects a default in non-interactive contexts. Alternatively, add a --yes or --non-interactive flag that bypasses the menu. Document this behavior.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Scope rename may invalidate existing plugin.json/marketplace.json references for installed users\",\n      \"body\": \"Both .claude-plugin/marketplace.json (4 lines changed) and .claude-plugin/plugin.json (2 lines changed) are modified, likely updating identifiers or URIs to the new scope. Existing installations that cached or reference the old plugin.json path or marketplace entry may fail to resolve the plugin after update, leaving the user with a broken plugin registration that Claude cannot locate.\",\n      \"file\": \".claude-plugin/plugin.json\",\n      \"line_start\": 1,\n      \"line_end\": 2,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Verify that the Claude plugin loader can handle a scope change gracefully for already-installed plugins. If not, add a migration step to the setup command that re-registers the plugin under the new scope and cleans up the old registration.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect the full diff of package.json to confirm the exact scope rename and assess blast radius on existing users.\",\n    \"Inspect the full diff of commands/setup.md to verify whether TTY detection or non-interactive handling exists.\",\n    \"Add a migration/deprecation strategy for the old npm scope before shipping.\",\n    \"Consider splitting this into two commits: one for the scope rename (with migration tooling) and one for the interactive menu (with non-interactive fallback).\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:55:58.665Z"
+}

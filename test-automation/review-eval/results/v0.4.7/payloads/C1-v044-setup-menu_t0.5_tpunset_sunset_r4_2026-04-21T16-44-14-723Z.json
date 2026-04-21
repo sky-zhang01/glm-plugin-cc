@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 4
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 76274,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit bundles an npm scope rename with a functional change to the setup command. The scope rename is a potentially breaking change for existing consumers, and the interactive menu addition in commands/setup.md could fail silently in non-TTY or CI environments. Without seeing the full diff content, the structural risk of the scope rename alone warrants attention before shipping.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change for existing consumers",
+        "body": "The diff stat shows 4 lines changed in package.json corresponding to a scope rename. If the package has already been published under the old scope, existing installations, lockfiles, and dependent projects will fail to resolve after this rename. There is no evidence of a deprecation path, migration guide, or dual-publishing strategy. The CHANGELOG entry and release_card.md should explicitly document this as a breaking change and provide migration steps, but the rename is bundled in a 'fix:' commit, which understates the severity.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.75,
+        "recommendation": "Verify that the old scope packages are either still resolvable (deprecated but present) or that all consumers have been updated. Treat this as a semver-major change if the package is already published under the old scope. Confirm the CHANGELOG clearly marks this as a breaking change with migration instructions."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive menu in setup may fail or hang in non-TTY environments",
+        "body": "The commit adds an interactive menu to /glm:setup when already configured (19 lines changed in commands/setup.md). Interactive prompts require a TTY. In CI/CD pipelines, headless environments, or piped stdin, the prompt may hang indefinitely or fail silently, blocking automation. The diff stat does not show any fallback or skip mechanism for non-interactive contexts.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.55,
+        "recommendation": "Ensure the interactive menu has a non-interactive fallback (e.g., --yes flag, env var, or stdin detection). Document how to run setup in CI or scripted environments. Test that the command exits cleanly when stdin is not a TTY."
+      },
+      {
+        "severity": "medium",
+        "title": "Plugin configuration files changed without clear versioning signal",
+        "body": "Both .claude-plugin/marketplace.json and .claude-plugin/plugin.json are modified (4 and 2 lines respectively). If the scope rename propagates into these manifests as identifiers, entry points, or command namespaces, any cached or installed copies of the plugin will have stale configuration until the user re-installs. There is no migration or cache-invalidation mechanism visible.",
+        "file": ".claude-plugin/plugin.json",
+        "line_start": 1,
+        "line_end": 2,
+        "confidence": 0.5,
+        "recommendation": "Confirm that the plugin system handles identifier changes gracefully on upgrade. If not, add an explicit migration or re-install step documented in CHANGELOG and release_card.md."
+      }
+    ],
+    "next_steps": [
+      "Inspect the full diff of package.json to confirm the old scope is deprecated or dual-published.",
+      "Inspect the full diff of commands/setup.md to verify non-TTY fallback behavior exists.",
+      "Verify the CHANGELOG entry accurately reflects the breaking nature of the scope rename.",
+      "Test the setup command in a non-interactive environment (piped stdin, CI) before shipping."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"This commit bundles an npm scope rename with a functional change to the setup command. The scope rename is a potentially breaking change for existing consumers, and the interactive menu addition in commands/setup.md could fail silently in non-TTY or CI environments. Without seeing the full diff content, the structural risk of the scope rename alone warrants attention before shipping.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename is a breaking change for existing consumers\",\n      \"body\": \"The diff stat shows 4 lines changed in package.json corresponding to a scope rename. If the package has already been published under the old scope, existing installations, lockfiles, and dependent projects will fail to resolve after this rename. There is no evidence of a deprecation path, migration guide, or dual-publishing strategy. The CHANGELOG entry and release_card.md should explicitly document this as a breaking change and provide migration steps, but the rename is bundled in a 'fix:' commit, which understates the severity.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Verify that the old scope packages are either still resolvable (deprecated but present) or that all consumers have been updated. Treat this as a semver-major change if the package is already published under the old scope. Confirm the CHANGELOG clearly marks this as a breaking change with migration instructions.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Interactive menu in setup may fail or hang in non-TTY environments\",\n      \"body\": \"The commit adds an interactive menu to /glm:setup when already configured (19 lines changed in commands/setup.md). Interactive prompts require a TTY. In CI/CD pipelines, headless environments, or piped stdin, the prompt may hang indefinitely or fail silently, blocking automation. The diff stat does not show any fallback or skip mechanism for non-interactive contexts.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Ensure the interactive menu has a non-interactive fallback (e.g., --yes flag, env var, or stdin detection). Document how to run setup in CI or scripted environments. Test that the command exits cleanly when stdin is not a TTY.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Plugin configuration files changed without clear versioning signal\",\n      \"body\": \"Both .claude-plugin/marketplace.json and .claude-plugin/plugin.json are modified (4 and 2 lines respectively). If the scope rename propagates into these manifests as identifiers, entry points, or command namespaces, any cached or installed copies of the plugin will have stale configuration until the user re-installs. There is no migration or cache-invalidation mechanism visible.\",\n      \"file\": \".claude-plugin/plugin.json\",\n      \"line_start\": 1,\n      \"line_end\": 2,\n      \"confidence\": 0.5,\n      \"recommendation\": \"Confirm that the plugin system handles identifier changes gracefully on upgrade. If not, add an explicit migration or re-install step documented in CHANGELOG and release_card.md.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect the full diff of package.json to confirm the old scope is deprecated or dual-published.\",\n    \"Inspect the full diff of commands/setup.md to verify non-TTY fallback behavior exists.\",\n    \"Verify the CHANGELOG entry accurately reflects the breaking nature of the scope rename.\",\n    \"Test the setup command in a non-interactive environment (piped stdin, CI) before shipping.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:44:14.759Z"
+}

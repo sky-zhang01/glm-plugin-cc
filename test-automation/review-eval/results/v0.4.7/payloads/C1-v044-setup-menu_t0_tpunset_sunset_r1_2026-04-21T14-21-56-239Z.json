@@ -1,0 +1,68 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.333,
+    "citation_false_file_hits": 0,
+    "latency_ms": 35834,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The change primarily updates metadata (package scope rename), documentation, and adds an interactive menu to the setup command. While the risk surface is low for a documentation/config change, the setup command modification introduces interactive branching logic that could trap users or fail silently in non-interactive environments. The rename of the npm scope is a breaking change for existing users but lacks migration guidance.",
+    "findings": [
+      {
+        "severity": "medium",
+        "title": "Setup command interactive menu lacks non-interactive/fallback handling",
+        "body": "The diff to commands/setup.md adds an interactive menu when the system is already configured. If this command is invoked in a non-interactive context (piped stdin, CI, script), the menu prompt may hang indefinitely or consume unexpected input, blocking the user with no clear error or timeout. There is no visible guard for non-TTY or fallback behavior.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.6,
+        "recommendation": "Add an explicit non-interactive fallback or timeout behavior to the interactive menu. If stdin is not a TTY, either skip the menu and proceed with a sensible default, or print a clear error message instructing the user to pass a flag (e.g., --force or --reconfigure)."
+      },
+      {
+        "severity": "medium",
+        "title": "npm scope rename is a breaking change with no migration path documented",
+        "body": "The package.json scope rename changes the package identity. Any existing users who installed the previous scoped package will not receive updates automatically. Neither the CHANGELOG nor release_card.md appears to call this out as a breaking change or provide uninstall/reinstall instructions. This can cause version skew where users think they are on v0.4.7 but are still running the old package.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 5,
+        "confidence": 0.7,
+        "recommendation": "Explicitly document the scope rename as a breaking change in CHANGELOG.md with uninstall/reinstall instructions. Consider adding a deprecation notice to the old package name if possible, or a postinstall check that warns if the old scope is still present."
+      },
+      {
+        "severity": "low",
+        "title": "release_card.md has grown significantly (326 lines) with no visible structural validation",
+        "body": "The release_card.md grew substantially (from ~100 lines to ~326 lines based on the diff stat). Large markdown files in plugin metadata can cause rendering issues in constrained UI contexts (chat windows, plugin directories). There is no visible linting or length validation.",
+        "file": "release_card.md",
+        "line_start": 1,
+        "line_end": 326,
+        "confidence": 0.4,
+        "recommendation": "Verify that the expanded release_card.md renders correctly in all target contexts (Claude plugin directory, marketplace listing). Consider adding a length check or lint step to CI if not already present."
+      }
+    ],
+    "next_steps": [
+      "Verify the interactive setup menu behavior when stdin is not a TTY or is piped — test in a scripted/CI context",
+      "Add migration documentation for the npm scope rename so existing users know to reinstall",
+      "Confirm release_card.md renders correctly in all target surfaces at its new length"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The change primarily updates metadata (package scope rename), documentation, and adds an interactive menu to the setup command. While the risk surface is low for a documentation/config change, the setup command modification introduces interactive branching logic that could trap users or fail silently in non-interactive environments. The rename of the npm scope is a breaking change for existing users but lacks migration guidance.\",\"findings\":[{\"severity\":\"medium\",\"title\":\"Setup command interactive menu lacks non-interactive/fallback handling\",\"body\":\"The diff to commands/setup.md adds an interactive menu when the system is already configured. If this command is invoked in a non-interactive context (piped stdin, CI, script), the menu prompt may hang indefinitely or consume unexpected input, blocking the user with no clear error or timeout. There is no visible guard for non-TTY or fallback behavior.\",\"file\":\"commands/setup.md\",\"line_start\":1,\"line_end\":19,\"confidence\":0.6,\"recommendation\":\"Add an explicit non-interactive fallback or timeout behavior to the interactive menu. If stdin is not a TTY, either skip the menu and proceed with a sensible default, or print a clear error message instructing the user to pass a flag (e.g., --force or --reconfigure).\"},{\"severity\":\"medium\",\"title\":\"npm scope rename is a breaking change with no migration path documented\",\"body\":\"The package.json scope rename changes the package identity. Any existing users who installed the previous scoped package will not receive updates automatically. Neither the CHANGELOG nor release_card.md appears to call this out as a breaking change or provide uninstall/reinstall instructions. This can cause version skew where users think they are on v0.4.7 but are still running the old package.\",\"file\":\"package.json\",\"line_start\":1,\"line_end\":5,\"confidence\":0.7,\"recommendation\":\"Explicitly document the scope rename as a breaking change in CHANGELOG.md with uninstall/reinstall instructions. Consider adding a deprecation notice to the old package name if possible, or a postinstall check that warns if the old scope is still present.\"},{\"severity\":\"low\",\"title\":\"release_card.md has grown significantly (326 lines) with no visible structural validation\",\"body\":\"The release_card.md grew substantially (from ~100 lines to ~326 lines based on the diff stat). Large markdown files in plugin metadata can cause rendering issues in constrained UI contexts (chat windows, plugin directories). There is no visible linting or length validation.\",\"file\":\"release_card.md\",\"line_start\":1,\"line_end\":326,\"confidence\":0.4,\"recommendation\":\"Verify that the expanded release_card.md renders correctly in all target contexts (Claude plugin directory, marketplace listing). Consider adding a length check or lint step to CI if not already present.\"}],\"next_steps\":[\"Verify the interactive setup menu behavior when stdin is not a TTY or is piped — test in a scripted/CI context\",\"Add migration documentation for the npm scope rename so existing users know to reinstall\",\"Confirm release_card.md renders correctly in all target surfaces at its new length\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:21:56.268Z"
+}

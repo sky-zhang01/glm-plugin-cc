@@ -1,0 +1,59 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 12
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 2,
+    "citation_accuracy": 0.5,
+    "citation_false_file_hits": 0,
+    "latency_ms": 53549,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit introduces an npm scope rename and modifies the setup command flow. The scope rename is a breaking change for existing consumers: any user with the old package name installed will break on upgrade with no migration path documented. The setup command modification adds interactive menu behavior, but without the actual diff content available for line-by-line analysis, the risk of misconfigured JSON metadata or broken command flow cannot be ruled out. Ship blocked pending diff inspection and explicit migration documentation for the scope rename.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is an undocumented breaking change",
+        "body": "The commit renames the npm scope (reflected in package.json). Any existing user with the old-scoped package in their environment will encounter resolution failures after this ships. There is no evidence of a deprecation path, codemod, or migration guide for the old scope. The CHANGELOG entry and release_card should explicitly call out the breaking nature and provide remediation steps, but based on the commit message alone this appears untreated.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.75,
+        "recommendation": "Add a deprecated stub package under the old scope that points to the new one, or document the breaking change prominently in CHANGELOG.md and release_card.md with explicit upgrade instructions. If this is a consumer-facing package, consider semver major bump."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive menu in setup.md lacks failure-mode documentation",
+        "body": "The setup command now branches into an interactive menu when already configured. Markdown-driven commands in the Claude plugin framework depend on the host's ability to render choices. If the menu syntax is malformed or the host does not support interactive prompts, the user may see a silent no-op or an error with no recovery guidance. The diff adds ~19 changed lines in commands/setup.md, suggesting significant logic restructuring that should be manually verified.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.6,
+        "recommendation": "Verify the menu syntax against the Claude plugin command specification. Test the setup command in both 'fresh install' and 'already configured' states. Add fallback text or a direct instruction path if interactive menus are not supported in all runtime contexts."
+      }
+    ],
+    "next_steps": [
+      "Run `git diff 7766943^..7766943` to inspect the full diff and verify JSON syntax in marketplace.json and plugin.json",
+      "Confirm the npm scope rename does not orphan the old package name on the registry",
+      "Test the interactive setup menu in both fresh and pre-configured states",
+      "Ensure CHANGELOG.md explicitly marks the scope rename as breaking if it affects consumers"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"This commit introduces an npm scope rename and modifies the setup command flow. The scope rename is a breaking change for existing consumers: any user with the old package name installed will break on upgrade with no migration path documented. The setup command modification adds interactive menu behavior, but without the actual diff content available for line-by-line analysis, the risk of misconfigured JSON metadata or broken command flow cannot be ruled out. Ship blocked pending diff inspection and explicit migration documentation for the scope rename.\",\"findings\":[{\"severity\":\"high\",\"title\":\"npm scope rename is an undocumented breaking change\",\"body\":\"The commit renames the npm scope (reflected in package.json). Any existing user with the old-scoped package in their environment will encounter resolution failures after this ships. There is no evidence of a deprecation path, codemod, or migration guide for the old scope. The CHANGELOG entry and release_card should explicitly call out the breaking nature and provide remediation steps, but based on the commit message alone this appears untreated.\",\"file\":\"package.json\",\"line_start\":1,\"line_end\":4,\"confidence\":0.75,\"recommendation\":\"Add a deprecated stub package under the old scope that points to the new one, or document the breaking change prominently in CHANGELOG.md and release_card.md with explicit upgrade instructions. If this is a consumer-facing package, consider semver major bump.\"},{\"severity\":\"medium\",\"title\":\"Interactive menu in setup.md lacks failure-mode documentation\",\"body\":\"The setup command now branches into an interactive menu when already configured. Markdown-driven commands in the Claude plugin framework depend on the host's ability to render choices. If the menu syntax is malformed or the host does not support interactive prompts, the user may see a silent no-op or an error with no recovery guidance. The diff adds ~19 changed lines in commands/setup.md, suggesting significant logic restructuring that should be manually verified.\",\"file\":\"commands/setup.md\",\"line_start\":1,\"line_end\":19,\"confidence\":0.6,\"recommendation\":\"Verify the menu syntax against the Claude plugin command specification. Test the setup command in both 'fresh install' and 'already configured' states. Add fallback text or a direct instruction path if interactive menus are not supported in all runtime contexts.\"}],\"next_steps\":[\"Run `git diff 7766943^..7766943` to inspect the full diff and verify JSON syntax in marketplace.json and plugin.json\",\"Confirm the npm scope rename does not orphan the old package name on the registry\",\"Test the interactive setup menu in both fresh and pre-configured states\",\"Ensure CHANGELOG.md explicitly marks the scope rename as breaking if it affects consumers\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T14:46:43.512Z"
+}

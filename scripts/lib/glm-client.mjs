@@ -615,6 +615,51 @@ function assignOptionalSamplingParam(body, key, value, { min, max, integer = fal
   body[key] = num;
 }
 
+/**
+ * Build the BigModel /chat/completions POST body.
+ *
+ * Pure function extracted from runChatRequest so request-shape behavior
+ * (response_format, thinking mode, sampling-parameter forwarding) is
+ * unit-testable without standing up a fake HTTP endpoint.
+ *
+ * `ctx` carries the already-resolved call-time values (model name,
+ * max_tokens, composed messages, thinking flag); `options` is the
+ * caller's request options (expectJson, temperature, topP, seed,
+ * frequencyPenalty, presencePenalty).
+ *
+ * Review-specific behavior (expectJson: true):
+ * - Sets `response_format: { type: "json_object" }`. BigModel GLM-5.x
+ *   supports this on the OpenAI-compatible endpoint (confirmed
+ *   2026-04 via docs.z.ai) and it reduces
+ *   MARKDOWN_FENCE_UNTERMINATED / TRUNCATED_JSON / REASONING_LEAK
+ *   rates we observed in the v0.4.7 149-run expanded sweep.
+ * - This is parser-hardening only. It does NOT defend against
+ *   content-level fabrication ("correctness without faithfulness"
+ *   per Wallat et al. 2024) — for that see
+ *   docs/anti-hallucination-roadmap.md.
+ * - `json_schema` is NOT supported by GLM-5.x (only "text" and
+ *   "json_object").
+ */
+export function buildChatRequestBody(options, ctx) {
+  const { model, maxTokens, messages, thinkingEnabled } = ctx;
+  const body = {
+    model,
+    max_tokens: maxTokens,
+    messages,
+    stream: false,
+    thinking: { type: thinkingEnabled ? "enabled" : "disabled" }
+  };
+  if (options.expectJson) {
+    body.response_format = { type: "json_object" };
+  }
+  assignOptionalSamplingParam(body, "temperature", options.temperature, { min: 0, max: 2 });
+  assignOptionalSamplingParam(body, "top_p", options.topP ?? options.top_p, { min: 0, max: 1 });
+  assignOptionalSamplingParam(body, "seed", options.seed, { integer: true });
+  assignOptionalSamplingParam(body, "frequency_penalty", options.frequencyPenalty ?? options.frequency_penalty, { min: -2, max: 2 });
+  assignOptionalSamplingParam(body, "presence_penalty", options.presencePenalty ?? options.presence_penalty, { min: -2, max: 2 });
+  return body;
+}
+
 async function runChatRequest(cwd, options = {}) {
   const availability = getGlmAvailability(cwd);
   if (!availability.available) {
@@ -669,18 +714,12 @@ async function runChatRequest(cwd, options = {}) {
     // exposes the knobs so power users can opt in. Default change will
     // happen in a later release after the sanity-sweep data lands in
     // test-automation/review-eval/results/.
-    const body = {
+    const body = buildChatRequestBody(options, {
       model,
-      max_tokens: maxTokens,
+      maxTokens,
       messages,
-      stream: false,
-      thinking: { type: thinkingEnabled ? "enabled" : "disabled" }
-    };
-    assignOptionalSamplingParam(body, "temperature", options.temperature, { min: 0, max: 2 });
-    assignOptionalSamplingParam(body, "top_p", options.topP ?? options.top_p, { min: 0, max: 1 });
-    assignOptionalSamplingParam(body, "seed", options.seed, { integer: true });
-    assignOptionalSamplingParam(body, "frequency_penalty", options.frequencyPenalty ?? options.frequency_penalty, { min: -2, max: 2 });
-    assignOptionalSamplingParam(body, "presence_penalty", options.presencePenalty ?? options.presence_penalty, { min: -2, max: 2 });
+      thinkingEnabled
+    });
 
     if (typeof options.onProgress === "function") {
       options.onProgress({

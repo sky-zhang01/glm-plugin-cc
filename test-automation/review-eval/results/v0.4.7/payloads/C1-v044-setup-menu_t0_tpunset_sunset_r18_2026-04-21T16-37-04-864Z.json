@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 18
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.333,
+    "citation_false_file_hits": 0,
+    "latency_ms": 58288,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit bundles a potentially breaking npm scope rename with a behavioral change to the setup command. The scope rename risks breaking existing installations silently (old package won't update, new package looks like a different plugin). The interactive menu added to setup.md changes the idempotency contract of /glm:setup — previously safe to re-run, it now prompts and may allow accidental config destruction. These are shippable concerns that need explicit migration guidance.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change for existing users with no migration path",
+        "body": "The commit renames the npm scope (package.json, marketplace.json, plugin.json all changed). Existing users who installed under the old scope will not receive this update via normal package management — the old and new scoped names are treated as separate packages. There is no indication of a deprecation path, redirect, or user communication. Users on the old scope will silently stagnate on the previous version.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 5,
+        "confidence": 0.75,
+        "recommendation": "Either publish a deprecated stub under the old scope that depends on the new scope and warns users, or document an explicit uninstall/reinstall migration step in the changelog and release notes. The CHANGELOG entry should call this out as a breaking action, not bury it in a fix commit."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive setup menu may allow accidental config overwrite without confirmation guard",
+        "body": "commands/setup.md now presents an interactive menu when already configured. If the menu includes options like 'reset' or 'reconfigure' without a destructive-action confirmation, a user who habitually re-runs setup (expecting idempotent no-op behavior) could destroy their existing configuration. The change in idempotency contract — from safe-to-rerun to interactive-and-potentially-destructive — is a behavioral regression unless explicitly guarded.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.65,
+        "recommendation": "Ensure any menu option that overwrites or resets existing configuration requires explicit confirmation. Consider adding a 'do nothing / keep current config' default option. Verify the prompt instructions handle partial or corrupted config states gracefully rather than only the binary 'configured vs not configured' case."
+      },
+      {
+        "severity": "low",
+        "title": "Bundle of unrelated concerns in single fix commit obscures risk",
+        "body": "The commit message says 'fix' but includes a breaking scope rename and a feature-level behavioral change (interactive menu). This makes it harder for reviewers and users to assess risk. The CHANGELOG entry (21 lines added) may not adequately flag the scope rename as an action item for existing users.",
+        "file": "CHANGELOG.md",
+        "line_start": 1,
+        "line_end": 21,
+        "confidence": 0.55,
+        "recommendation": "Split the scope rename and the setup menu change into separate commits or at minimum ensure the CHANGELOG has a 'BREAKING' or 'Migration Required' callout that is impossible to miss."
+      }
+    ],
+    "next_steps": [
+      "Inspect commands/setup.md diff in full to verify destructive menu options have confirmation guards.",
+      "Verify whether the old npm scope package has been deprecated or if a migration stub exists.",
+      "Confirm the CHANGELOG and release_card.md explicitly tell existing users to uninstall the old scope and install the new one.",
+      "Test the setup command's behavior with a partially corrupted config to verify the interactive menu doesn't crash or produce invalid state."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"This commit bundles a potentially breaking npm scope rename with a behavioral change to the setup command. The scope rename risks breaking existing installations silently (old package won't update, new package looks like a different plugin). The interactive menu added to setup.md changes the idempotency contract of /glm:setup — previously safe to re-run, it now prompts and may allow accidental config destruction. These are shippable concerns that need explicit migration guidance.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename is a breaking change for existing users with no migration path\",\n      \"body\": \"The commit renames the npm scope (package.json, marketplace.json, plugin.json all changed). Existing users who installed under the old scope will not receive this update via normal package management — the old and new scoped names are treated as separate packages. There is no indication of a deprecation path, redirect, or user communication. Users on the old scope will silently stagnate on the previous version.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 5,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Either publish a deprecated stub under the old scope that depends on the new scope and warns users, or document an explicit uninstall/reinstall migration step in the changelog and release notes. The CHANGELOG entry should call this out as a breaking action, not bury it in a fix commit.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Interactive setup menu may allow accidental config overwrite without confirmation guard\",\n      \"body\": \"commands/setup.md now presents an interactive menu when already configured. If the menu includes options like 'reset' or 'reconfigure' without a destructive-action confirmation, a user who habitually re-runs setup (expecting idempotent no-op behavior) could destroy their existing configuration. The change in idempotency contract — from safe-to-rerun to interactive-and-potentially-destructive — is a behavioral regression unless explicitly guarded.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Ensure any menu option that overwrites or resets existing configuration requires explicit confirmation. Consider adding a 'do nothing / keep current config' default option. Verify the prompt instructions handle partial or corrupted config states gracefully rather than only the binary 'configured vs not configured' case.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"Bundle of unrelated concerns in single fix commit obscures risk\",\n      \"body\": \"The commit message says 'fix' but includes a breaking scope rename and a feature-level behavioral change (interactive menu). This makes it harder for reviewers and users to assess risk. The CHANGELOG entry (21 lines added) may not adequately flag the scope rename as an action item for existing users.\",\n      \"file\": \"CHANGELOG.md\",\n      \"line_start\": 1,\n      \"line_end\": 21,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Split the scope rename and the setup menu change into separate commits or at minimum ensure the CHANGELOG has a 'BREAKING' or 'Migration Required' callout that is impossible to miss.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect commands/setup.md diff in full to verify destructive menu options have confirmation guards.\",\n    \"Verify whether the old npm scope package has been deprecated or if a migration stub exists.\",\n    \"Confirm the CHANGELOG and release_card.md explicitly tell existing users to uninstall the old scope and install the new one.\",\n    \"Test the setup command's behavior with a partially corrupted config to verify the interactive menu doesn't crash or produce invalid state.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:37:04.887Z"
+}

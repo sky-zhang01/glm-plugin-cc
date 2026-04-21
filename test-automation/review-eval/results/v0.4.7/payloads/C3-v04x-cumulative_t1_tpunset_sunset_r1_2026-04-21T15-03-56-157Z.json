@@ -1,0 +1,79 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 64940,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 delta introduces several high-risk modules — retry.mjs, bigmodel-errors.mjs, tracked-jobs.mjs, and glm-client.mjs — that handle network failure, concurrency, and state management. Multiple paths allow silent data loss, unbounded resource consumption, or indistinguishable retry loops that hide real failures. The change should not ship until retry exhaustion and job-tracking race conditions are addressed.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs likely retries indefinitely on persistent transient errors if maxAttempts is unset or misconfigured",
+        "body": "The retry module (scripts/lib/retry.mjs, 203 new lines) is the backbone of BigModel error recovery. If any caller fails to pass a bounded maxAttempts, or if the retry predicate always returns true (e.g., classifying a permanent 4xx as retriable), the system will loop until process-level timeout. Unit tests (tests/retry.test.mjs) cover 352 lines but the existence of extensive tests does not prove maxAttempts is always supplied at every call site in glm-client.mjs. An unconfigured or defaulted infinite retry on a persistent API error would hang the user's session silently, with no indication that the request is looping. This is the kind of failure that is expensive to diagnose and invisible in logs.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Audit every call site that invokes the retry helper. Ensure maxAttempts has a hard upper-bound default (e.g., 5) at the function-signature level so that no caller can accidentally omit it. Add an elapsed-time or wall-clock cap as a secondary guard. Verify this with a test that omits maxAttempts and asserts the retry loop terminates."
+      },
+      {
+        "severity": "high",
+        "title": "tracked-jobs.mjs + job-control.mjs race condition on concurrent status reads and writes",
+        "body": "tracked-jobs.mjs (78 lines changed) and job-control.mjs (20 lines changed) manage background job state. If two CLI invocations run concurrently (e.g., two terminal tabs), both read and write the same job state file without any file-locking primitive. This creates a TOCTOU race: both processes could read 'running', both decide to act, and the last writer wins — silently dropping the other process's state update. The impact is lost job tracking, duplicate work, or a job marked 'completed' that was actually only partially completed. No test file was found for tracked-jobs.mjs in the test directory, meaning this race has zero coverage.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.78,
+        "recommendation": "Add file-locking (e.g., lockfile, flock, or atomic rename) around all reads and writes to the shared job state file. Add a concurrency test that spawns two processes simultaneously and asserts state consistency after both complete. If file-locking is not feasible, document the single-process constraint prominently."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs retry classification may silently swallow permanent failures",
+        "body": "scripts/lib/bigmodel-errors.mjs (168 new lines) classifies BigModel API errors into retriable vs permanent. If the classification logic has any gap — for example, not handling a new error code, or misclassifying a 403 as retriable — the retry layer will keep hammering the API until maxAttempts is exhausted, and the user sees a generic 'max retries exceeded' instead of the actual permission error. This hides the root cause and makes debugging nearly impossible. The 189-line test file tests/bigmodel-errors.test.mjs suggests good coverage of known codes, but the pattern-matching approach is inherently fragile to upstream API changes.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.65,
+        "recommendation": "Ensure every retry attempt logs the original error classification (retriable/permanent) and the specific error code. When maxAttempts is exhausted, surface the original error details prominently, not just 'retries exhausted'. Add a catch-all classifier that treats unknown error codes as permanent (fail-closed) rather than retriable (fail-open)."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs error handling may lose partial response data on mid-stream failure",
+        "body": "scripts/lib/glm-client.mjs (155 lines changed) handles the BigModel API communication. If a streaming response fails mid-stream (network drop, timeout), the partial data accumulated so far may be silently discarded if the error handler only throws. Any work already received from the model is lost and the retry starts from scratch. For long-running generation tasks, this is a significant user-visible cost: wasted tokens, wasted time, and no way to recover the partial output.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.58,
+        "recommendation": "In the streaming error path, preserve any partial response data and attach it to the thrown error object or return it alongside the error. This allows callers to decide whether to surface the partial result to the user rather than discarding it entirely. At minimum, log how much data was received before the failure."
+      }
+    ],
+    "next_steps": [
+      "Read scripts/lib/retry.mjs fully and verify maxAttempts has a mandatory or safely-bounded default at the function signature level.",
+      "Read scripts/lib/tracked-jobs.mjs and scripts/lib/job-control.mjs to confirm or refute the TOCTOU race on concurrent file access; check for any locking mechanism.",
+      "Grep all callers of the retry helper in glm-client.mjs and confirm every invocation passes an explicit, bounded maxAttempts.",
+      "Read the bigmodel-errors.mjs classify function and confirm unknown/unexpected error codes are classified as permanent (fail-closed), not retriable (fail-open)."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 delta introduces several high-risk modules — retry.mjs, bigmodel-errors.mjs, tracked-jobs.mjs, and glm-client.mjs — that handle network failure, concurrency, and state management. Multiple paths allow silent data loss, unbounded resource consumption, or indistinguishable retry loops that hide real failures. The change should not ship until retry exhaustion and job-tracking race conditions are addressed.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs likely retries indefinitely on persistent transient errors if maxAttempts is unset or misconfigured\",\"body\":\"The retry module (scripts/lib/retry.mjs, 203 new lines) is the backbone of BigModel error recovery. If any caller fails to pass a bounded maxAttempts, or if the retry predicate always returns true (e.g., classifying a permanent 4xx as retriable), the system will loop until process-level timeout. Unit tests (tests/retry.test.mjs) cover 352 lines but the existence of extensive tests does not prove maxAttempts is always supplied at every call site in glm-client.mjs. An unconfigured or defaulted infinite retry on a persistent API error would hang the user's session silently, with no indication that the request is looping. This is the kind of failure that is expensive to diagnose and invisible in logs.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.72,\"recommendation\":\"Audit every call site that invokes the retry helper. Ensure maxAttempts has a hard upper-bound default (e.g., 5) at the function-signature level so that no caller can accidentally omit it. Add an elapsed-time or wall-clock cap as a secondary guard. Verify this with a test that omits maxAttempts and asserts the retry loop terminates.\"},{\"severity\":\"high\",\"title\":\"tracked-jobs.mjs + job-control.mjs race condition on concurrent status reads and writes\",\"body\":\"tracked-jobs.mjs (78 lines changed) and job-control.mjs (20 lines changed) manage background job state. If two CLI invocations run concurrently (e.g., two terminal tabs), both read and write the same job state file without any file-locking primitive. This creates a TOCTOU race: both processes could read 'running', both decide to act, and the last writer wins — silently dropping the other process's state update. The impact is lost job tracking, duplicate work, or a job marked 'completed' that was actually only partially completed. No test file was found for tracked-jobs.mjs in the test directory, meaning this race has zero coverage.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.78,\"recommendation\":\"Add file-locking (e.g., lockfile, flock, or atomic rename) around all reads and writes to the shared job state file. Add a concurrency test that spawns two processes simultaneously and asserts state consistency after both complete. If file-locking is not feasible, document the single-process constraint prominently.\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors.mjs retry classification may silently swallow permanent failures\",\"body\":\"scripts/lib/bigmodel-errors.mjs (168 new lines) classifies BigModel API errors into retriable vs permanent. If the classification logic has any gap — for example, not handling a new error code, or misclassifying a 403 as retriable — the retry layer will keep hammering the API until maxAttempts is exhausted, and the user sees a generic 'max retries exceeded' instead of the actual permission error. This hides the root cause and makes debugging nearly impossible. The 189-line test file tests/bigmodel-errors.test.mjs suggests good coverage of known codes, but the pattern-matching approach is inherently fragile to upstream API changes.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.65,\"recommendation\":\"Ensure every retry attempt logs the original error classification (retriable/permanent) and the specific error code. When maxAttempts is exhausted, surface the original error details prominently, not just 'retries exhausted'. Add a catch-all classifier that treats unknown error codes as permanent (fail-closed) rather than retriable (fail-open).\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs error handling may lose partial response data on mid-stream failure\",\"body\":\"scripts/lib/glm-client.mjs (155 lines changed) handles the BigModel API communication. If a streaming response fails mid-stream (network drop, timeout), the partial data accumulated so far may be silently discarded if the error handler only throws. Any work already received from the model is lost and the retry starts from scratch. For long-running generation tasks, this is a significant user-visible cost: wasted tokens, wasted time, and no way to recover the partial output.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.58,\"recommendation\":\"In the streaming error path, preserve any partial response data and attach it to the thrown error object or return it alongside the error. This allows callers to decide whether to surface the partial result to the user rather than discarding it entirely. At minimum, log how much data was received before the failure.\"}],\"next_steps\":[\"Read scripts/lib/retry.mjs fully and verify maxAttempts has a mandatory or safely-bounded default at the function signature level.\",\"Read scripts/lib/tracked-jobs.mjs and scripts/lib/job-control.mjs to confirm or refute the TOCTOU race on concurrent file access; check for any locking mechanism.\",\"Grep all callers of the retry helper in glm-client.mjs and confirm every invocation passes an explicit, bounded maxAttempts.\",\"Read the bigmodel-errors.mjs classify function and confirm unknown/unexpected error codes are classified as permanent (fail-closed), not retriable (fail-open).\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T15:03:56.193Z"
+}

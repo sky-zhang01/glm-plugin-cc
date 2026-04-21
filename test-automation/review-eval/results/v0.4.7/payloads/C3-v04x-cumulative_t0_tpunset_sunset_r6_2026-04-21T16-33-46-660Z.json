@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 6
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 87950,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The cumulative v0.4.0→v0.4.6 diff introduces a new retry/backoff system (retry.mjs, 203 lines), a BigModel error dispatcher (bigmodel-errors.mjs, 168 lines), and significant modifications to glm-client.mjs, while simultaneously deleting process.mjs (67 lines removed). The diff stat shows no surviving test for process.mjs consumers or for integration between retry and glm-client under concurrent/partial-failure conditions. Without being able to inspect the actual code contents, three structural risks are flagged that warrant manual verification before a v0.4.7 ship decision.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "process.mjs deleted — potential broken imports at runtime",
+        "body": "The diff shows `scripts/lib/process.mjs` with 67 lines entirely removed and no replacement file listed. If any surviving module (glm-companion.mjs, glm-client.mjs, render.mjs, etc.) still contains a dynamic or static `import` referencing `./process.mjs` or `./lib/process.mjs`, the import will throw at runtime. This class of failure is silent in static analysis if imports are conditional or string-concatenated. The commit message for the deletion commit ('refactor: Bundle E+ simplify pass') suggests functions were inlined or moved, but without verifying every consumer this is a latent crash risk.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.7,
+        "recommendation": "Grep the entire codebase for any remaining reference to 'process.mjs' (including dynamic imports, require, or string references). If any exist, either restore the needed exports or update the consumers. Add a CI check that validates all import targets resolve."
+      },
+      {
+        "severity": "high",
+        "title": "New retry.mjs (203 lines) — idempotency and retry-storm risk unverified",
+        "body": "A brand-new retry/backoff module with 203 lines is the largest single addition. Retry logic that wraps API calls (especially to BigModel via glm-client.mjs) must guarantee that retried operations are idempotent. If a BigModel job-submission call succeeds server-side but the response is lost (network timeout), a retry could create duplicate jobs. The commit message 'feat: v0.4.6 BigModel error dispatch + auto retry/backoff' suggests automatic retry on errors, but automatic retry on non-idempotent endpoints without deduplication is a classic source of duplicate side-effects. Additionally, if retry counts or backoff caps are misconfigured, retry storms could exhaust API rate limits or budget.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.65,
+        "recommendation": "1) Verify that every call site wrapped by retry.mjs is idempotent or includes a deduplication key. 2) Ensure retry counts have hard upper bounds and that backoff is exponential with jitter. 3) Add integration tests simulating partial-response scenarios (timeout after server-side commit) to confirm no duplicate side-effects. 4) Log every retry attempt with enough context for post-incident analysis."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error dispatch may silently swallow unrecognized errors",
+        "body": "A 168-line error classification module for BigModel API errors is new. Error dispatchers that pattern-match on known error codes or messages risk falling through to a default case that either logs and returns a generic error (swallowing diagnostic context) or, worse, returns normally. If the dispatcher catches an error and reclassifies it as non-retryable when the underlying cause is transient (or vice versa), the retry layer will make the wrong decision. The tests file (tests/bigmodel-errors.test.mjs, 189 lines) exists but only covers known error patterns — the unknown/unrecognized error path is the highest-risk blind spot.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.6,
+        "recommendation": "Audit the default/fallthrough branch in the error dispatcher to ensure: 1) unrecognized errors are never silently downgraded to non-errors, 2) full error context (stack, headers, status code) is preserved in any reclassified error, 3) a test explicitly exercises an unrecognized/unexpected error shape to confirm safe propagation."
+      }
+    ],
+    "next_steps": [
+      "Run `grep -r 'process\\.mjs' scripts/` to confirm no dangling imports remain after the deletion.",
+      "Inspect retry.mjs call sites in glm-client.mjs to confirm each retried HTTP verb is idempotent or guarded by an idempotency key.",
+      "Read the default/fallthrough branch in bigmodel-errors.mjs and verify unrecognized errors propagate with full context rather than being swallowed.",
+      "Run the full test suite (`tests/*.test.mjs`) and confirm all pass before proceeding with v0.4.7 tagging."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The cumulative v0.4.0→v0.4.6 diff introduces a new retry/backoff system (retry.mjs, 203 lines), a BigModel error dispatcher (bigmodel-errors.mjs, 168 lines), and significant modifications to glm-client.mjs, while simultaneously deleting process.mjs (67 lines removed). The diff stat shows no surviving test for process.mjs consumers or for integration between retry and glm-client under concurrent/partial-failure conditions. Without being able to inspect the actual code contents, three structural risks are flagged that warrant manual verification before a v0.4.7 ship decision.\",\"findings\":[{\"severity\":\"high\",\"title\":\"process.mjs deleted — potential broken imports at runtime\",\"body\":\"The diff shows `scripts/lib/process.mjs` with 67 lines entirely removed and no replacement file listed. If any surviving module (glm-companion.mjs, glm-client.mjs, render.mjs, etc.) still contains a dynamic or static `import` referencing `./process.mjs` or `./lib/process.mjs`, the import will throw at runtime. This class of failure is silent in static analysis if imports are conditional or string-concatenated. The commit message for the deletion commit ('refactor: Bundle E+ simplify pass') suggests functions were inlined or moved, but without verifying every consumer this is a latent crash risk.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":1,\"confidence\":0.7,\"recommendation\":\"Grep the entire codebase for any remaining reference to 'process.mjs' (including dynamic imports, require, or string references). If any exist, either restore the needed exports or update the consumers. Add a CI check that validates all import targets resolve.\"},{\"severity\":\"high\",\"title\":\"New retry.mjs (203 lines) — idempotency and retry-storm risk unverified\",\"body\":\"A brand-new retry/backoff module with 203 lines is the largest single addition. Retry logic that wraps API calls (especially to BigModel via glm-client.mjs) must guarantee that retried operations are idempotent. If a BigModel job-submission call succeeds server-side but the response is lost (network timeout), a retry could create duplicate jobs. The commit message 'feat: v0.4.6 BigModel error dispatch + auto retry/backoff' suggests automatic retry on errors, but automatic retry on non-idempotent endpoints without deduplication is a classic source of duplicate side-effects. Additionally, if retry counts or backoff caps are misconfigured, retry storms could exhaust API rate limits or budget.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.65,\"recommendation\":\"1) Verify that every call site wrapped by retry.mjs is idempotent or includes a deduplication key. 2) Ensure retry counts have hard upper bounds and that backoff is exponential with jitter. 3) Add integration tests simulating partial-response scenarios (timeout after server-side commit) to confirm no duplicate side-effects. 4) Log every retry attempt with enough context for post-incident analysis.\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors.mjs error dispatch may silently swallow unrecognized errors\",\"body\":\"A 168-line error classification module for BigModel API errors is new. Error dispatchers that pattern-match on known error codes or messages risk falling through to a default case that either logs and returns a generic error (swallowing diagnostic context) or, worse, returns normally. If the dispatcher catches an error and reclassifies it as non-retryable when the underlying cause is transient (or vice versa), the retry layer will make the wrong decision. The tests file (tests/bigmodel-errors.test.mjs, 189 lines) exists but only covers known error patterns — the unknown/unrecognized error path is the highest-risk blind spot.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.6,\"recommendation\":\"Audit the default/fallthrough branch in the error dispatcher to ensure: 1) unrecognized errors are never silently downgraded to non-errors, 2) full error context (stack, headers, status code) is preserved in any reclassified error, 3) a test explicitly exercises an unrecognized/unexpected error shape to confirm safe propagation.\"}],\"next_steps\":[\"Run `grep -r 'process\\\\.mjs' scripts/` to confirm no dangling imports remain after the deletion.\",\"Inspect retry.mjs call sites in glm-client.mjs to confirm each retried HTTP verb is idempotent or guarded by an idempotency key.\",\"Read the default/fallthrough branch in bigmodel-errors.mjs and verify unrecognized errors propagate with full context rather than being swallowed.\",\"Run the full test suite (`tests/*.test.mjs`) and confirm all pass before proceeding with v0.4.7 tagging.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:33:46.683Z"
+}

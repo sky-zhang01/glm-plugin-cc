@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 8
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 74459,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit bundles an npm scope rename with a feature addition, creating a breaking-change risk with no apparent migration path. The scope rename in package.json can break existing installs and imports, and the interactive setup menu lacks evidence of non-interactive fallback. Combined with a large unreviewed documentation rewrite (326 lines in release_card.md), this should not ship without verifying backward compatibility and silent-failure paths.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change with no migration path",
+        "body": "The commit explicitly renames the npm scope. Existing users with the package installed under the old scope will have broken imports/references. No migration guide, postinstall script, or deprecation shim is visible in the changed files.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.85,
+        "recommendation": "Verify the scope rename is reflected in all import paths, publish a deprecation notice under the old scope, and add a migration note to CHANGELOG.md. Consider dual-publishing temporarily."
+      },
+      {
+        "severity": "high",
+        "title": "Interactive setup menu may hang or fail silently in non-interactive contexts",
+        "body": "Adding an interactive menu to /glm:setup when already configured creates a failure mode for CI/CD, scripting, or pipe-based invocations. No evidence of a --yes, --non-interactive, or timeout fallback in the changed files.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.7,
+        "recommendation": "Ensure the setup command detects non-interactive TTY and either skips the menu or exits with a clear error. Add a --non-interactive flag or environment variable override."
+      },
+      {
+        "severity": "medium",
+        "title": "Plugin metadata may be inconsistent after scope rename",
+        "body": "Both .claude-plugin/marketplace.json (4 lines) and plugin.json (2 lines) were modified alongside the scope rename. If the new scope is not consistently referenced across all plugin registration files, the plugin may fail discovery or registration silently.",
+        "file": ".claude-plugin/marketplace.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.65,
+        "recommendation": "Verify the new package scope is consistently referenced in marketplace.json, plugin.json, and any internal imports. Test plugin registration end-to-end with the renamed scope."
+      },
+      {
+        "severity": "medium",
+        "title": "CHANGELOG entry missing breaking-change annotation for scope rename",
+        "body": "CHANGELOG.md adds 21 lines but a scope rename is a breaking change for existing consumers. If the changelog does not explicitly call this out with a BREAKING CHANGE note, users may upgrade blindly and encounter runtime failures.",
+        "file": "CHANGELOG.md",
+        "line_start": 1,
+        "line_end": 21,
+        "confidence": 0.6,
+        "recommendation": "Add a prominent BREAKING CHANGE section to the changelog entry explaining the scope rename and required user action."
+      },
+      {
+        "severity": "low",
+        "title": "Large documentation rewrite (release_card.md) shipped untested",
+        "body": "326 lines changed in release_card.md represents a major documentation overhaul. While docs don't affect runtime, incorrect instructions for setup or scope migration will cause support burden and user confusion. No test coverage exists for documentation accuracy.",
+        "file": "release_card.md",
+        "line_start": 1,
+        "line_end": 326,
+        "confidence": 0.5,
+        "recommendation": "Manually verify all code samples, CLI commands, and package names in release_card.md reference the new scope correctly and the setup instructions match the new interactive flow."
+      }
+    ],
+    "next_steps": [
+      "Inspect the actual diff of package.json to confirm the old and new scope names and audit all references across the repo.",
+      "Check commands/setup.md for TTY detection or non-interactive fallback before the interactive menu is presented.",
+      "Verify .claude-plugin/marketplace.json and plugin.json reference the new scope consistently.",
+      "Confirm CHANGELOG.md has a breaking-change callout for the scope rename.",
+      "Run the plugin registration/discovery flow end-to-end with the renamed scope in a clean environment."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"This commit bundles an npm scope rename with a feature addition, creating a breaking-change risk with no apparent migration path. The scope rename in package.json can break existing installs and imports, and the interactive setup menu lacks evidence of non-interactive fallback. Combined with a large unreviewed documentation rewrite (326 lines in release_card.md), this should not ship without verifying backward compatibility and silent-failure paths.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename is a breaking change with no migration path\",\n      \"body\": \"The commit explicitly renames the npm scope. Existing users with the package installed under the old scope will have broken imports/references. No migration guide, postinstall script, or deprecation shim is visible in the changed files.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.85,\n      \"recommendation\": \"Verify the scope rename is reflected in all import paths, publish a deprecation notice under the old scope, and add a migration note to CHANGELOG.md. Consider dual-publishing temporarily.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"Interactive setup menu may hang or fail silently in non-interactive contexts\",\n      \"body\": \"Adding an interactive menu to /glm:setup when already configured creates a failure mode for CI/CD, scripting, or pipe-based invocations. No evidence of a --yes, --non-interactive, or timeout fallback in the changed files.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Ensure the setup command detects non-interactive TTY and either skips the menu or exits with a clear error. Add a --non-interactive flag or environment variable override.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Plugin metadata may be inconsistent after scope rename\",\n      \"body\": \"Both .claude-plugin/marketplace.json (4 lines) and plugin.json (2 lines) were modified alongside the scope rename. If the new scope is not consistently referenced across all plugin registration files, the plugin may fail discovery or registration silently.\",\n      \"file\": \".claude-plugin/marketplace.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Verify the new package scope is consistently referenced in marketplace.json, plugin.json, and any internal imports. Test plugin registration end-to-end with the renamed scope.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"CHANGELOG entry missing breaking-change annotation for scope rename\",\n      \"body\": \"CHANGELOG.md adds 21 lines but a scope rename is a breaking change for existing consumers. If the changelog does not explicitly call this out with a BREAKING CHANGE note, users may upgrade blindly and encounter runtime failures.\",\n      \"file\": \"CHANGELOG.md\",\n      \"line_start\": 1,\n      \"line_end\": 21,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Add a prominent BREAKING CHANGE section to the changelog entry explaining the scope rename and required user action.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"Large documentation rewrite (release_card.md) shipped untested\",\n      \"body\": \"326 lines changed in release_card.md represents a major documentation overhaul. While docs don't affect runtime, incorrect instructions for setup or scope migration will cause support burden and user confusion. No test coverage exists for documentation accuracy.\",\n      \"file\": \"release_card.md\",\n      \"line_start\": 1,\n      \"line_end\": 326,\n      \"confidence\": 0.5,\n      \"recommendation\": \"Manually verify all code samples, CLI commands, and package names in release_card.md reference the new scope correctly and the setup instructions match the new interactive flow.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect the actual diff of package.json to confirm the old and new scope names and audit all references across the repo.\",\n    \"Check commands/setup.md for TTY detection or non-interactive fallback before the interactive menu is presented.\",\n    \"Verify .claude-plugin/marketplace.json and plugin.json reference the new scope consistently.\",\n    \"Confirm CHANGELOG.md has a breaking-change callout for the scope rename.\",\n    \"Run the plugin registration/discovery flow end-to-end with the renamed scope in a clean environment.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T16:32:00.854Z"
+}

@@ -93,12 +93,55 @@ Bash({
   is available.
 - `--temperature <0-2>` / `--top-p <0-1>` / `--seed <int>` — sampling
   parameters forwarded to the BigModel API. Unset = BigModel
-  server-side default (generally tuned for chat, not review). Lowering
-  temperature (e.g. `0.2`) and top-p (e.g. `0.85`) makes review more
-  deterministic and is worth trying if you observe fabricated
-  citations or schema-echo failures. `--seed 42` plus low temperature
-  makes runs approximately reproducible. The plugin does NOT ship
-  opinionated defaults yet — see Gitea issue #7 for the in-flight
-  empirical investigation.
+  server-side default. Per the v0.4.7 149-run sweep across small /
+  medium / large fixtures (see "Diff size guidance" below), **the
+  plugin intentionally ships no opinionated defaults**: at effective
+  N=14-17 per cell on the large-diff fixture, no pairwise Fisher
+  exact contrast between `temp=0`, `0.5`, and `1.0` reached
+  significance (all p > 0.3) and the observed ordering was
+  non-monotonic. Note: that sample size has ~16% power to detect a
+  ~15pct per-step effect, so "no detected effect" is not the same as
+  "no effect exists" — the evidence simply doesn't support a default.
+  `--seed <int>` plus an explicit `--temperature` makes runs
+  approximately reproducible and is useful for A/B probing.
 - `--wait` / `--background` — execution mode bypass. See "Execution mode rules" above.
 - Trailing tokens after flags are treated as free-form focus text.
+
+## Diff size guidance
+
+Empirical observations from the v0.4.7 evaluation harness
+(`test-automation/review-eval/`, 149 runs across three curated
+fixtures with full sidecar capture). These describe GLM-5.1 with
+`--thinking on`; they are not contracts — re-run the harness if you
+want to verify the model hasn't drifted:
+
+| diff size | example | files / lines | schema pass (effective N) | citation notes | typical latency |
+|---|---|---|---|---|---|
+| **Small** (<500 lines) | C1-v044-setup-menu | 6 / 440 | 100% (N=16-17 per temp) | Harness `citation_accuracy` drops to 0.66-0.78. `0/93 findings cite out-of-diff or cross-project files`; the drop is driven by "diff-meta" findings (commit-message / CHANGELOG-entry / scope-rename critique) where bodies use review meta-language not present as literal tokens in the cited file (scoring-rubric limitation). **Caveat**: the harness can't detect line-level content fabrication within an allowed file — at least one run confabulated a fictional `@anthropics → @anthropic-ai` rename; if you're using `/glm:review` for small diffs, sanity-check the findings' quoted claims against the diff. | 10-60s |
+| **Medium** (~1500 lines) | C2-v046-aftercare | 11 / 1550 | 95% (40/42 effective across the full temp×seed matrix) | `citation_accuracy` 0.85-1.00 across all cells. Schema and citation both robust. | 30-90s |
+| **Large** (8000+ lines) | C3-v04x-cumulative | 84 / 8336 | 76-93% across `temp∈{0,0.5,1}`, Fisher exact p>0.3 for every pair | `citation_accuracy` 0.83-0.92. 0/149 runs cited `known_false_files` — the 2026-04-21 cross-project hallucination pattern did not reproduce. Parse-layer defenses recover most of the 7-24% schema failures via typed correction-retry. | 60s-3min |
+
+Practical notes:
+
+- **JSON mode is enforced at the API level in v0.4.7**: the plugin
+  sends `response_format: { type: "json_object" }` on every review
+  call so BigModel's structured-output path is taken.
+  Parse-layer defenses (`stripMarkdownFences`, `classifyParseFailure`,
+  correction-retry) remain active as fallback. Scoring-rubric
+  limitation: the harness verifies cited file + token presence near
+  line range, **not** the truthfulness of content claims in
+  `finding.body`. Spot-check quoted claims on small diffs; see
+  `docs/anti-hallucination-roadmap.md` for the v0.4.8 verifier plan.
+- **Background (`--background`) is strongly preferred for anything
+  above "small"** — large-diff runs routinely take 1-3 minutes and the
+  Claude Code session stays interactive.
+- **No single temperature setting dominated** across all three fixture
+  sizes. If you have a reason to pick one (e.g. you want run-to-run
+  reproducibility for a comparison), `--temperature 0 --seed <int>`
+  is sensible, but do not expect it to systematically improve schema
+  or citation quality.
+- **Upstream (BigModel-side) errors** appeared in ~9% of the 149 sweep
+  runs and were time-correlated, not cell-correlated. v0.4.7's
+  expanded error dispatch (see `scripts/lib/bigmodel-errors.mjs`)
+  covers all codes observed. If your single invocation hits one,
+  rerun — it is almost certainly transient.

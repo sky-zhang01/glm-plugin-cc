@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 20
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 75158,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit bundles an npm scope rename with a setup-menu behavioral change. The scope rename is a breaking change for any existing consumer referencing the old package name, and the interactive menu addition to setup.md lacks visible coverage for edge cases (partial config, non-interactive invocations, or re-entrancy). Without seeing the actual diff content, the scope rename alone warrants blocking until compatibility impact is confirmed.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change for existing installations",
+        "body": "package.json is modified (4 lines changed) in a commit whose message includes 'rename npm scope'. Changing the npm scope of a published package breaks every existing reference: require/import paths, lockfiles, CI caches, and any downstream tooling that pins or resolves the old scoped name. There is no evidence in the changed-file list of a deprecation shim, compatibility alias, or migration guide beyond CHANGELOG.md and release_card.md prose. If the old-scoped package is still published, users pulling the old name will get stale code. If it is unpublished or transferred, they will get 404s.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.65,
+        "recommendation": "Confirm: (1) whether the old-scoped package has been deprecated or redirected, (2) whether a postinstall or migration script exists to handle existing installations, and (3) whether the CHANGELOG explicitly calls out the breaking rename with before/after install instructions. If any of these are missing, add them before shipping."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive menu in setup.md may not handle non-interactive or already-configured edge cases",
+        "body": "The commit adds an interactive menu to /glm:setup 'when already configured' (per the commit message). The setup.md file (19 lines changed) now presumably branches on configuration state. Unexamined risks: (a) what happens if the config file exists but is corrupt, empty, or partially written (e.g., from a crashed prior setup)? (b) Is there a non-interactive / --yes flag for scripted or CI invocations, or will the menu block forever? (c) If the user selects 'reconfigure' and the operation fails partway, is the old config preserved or lost? These are the classic silent-failure and data-loss vectors for setup wizards.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.55,
+        "recommendation": "Verify the setup.md prompt handles: corrupt/empty config gracefully (fallback to fresh setup, not crash), non-interactive mode (auto-choose sensible defaults or error clearly), and atomic config writes (write to temp file then rename, so partial writes don't destroy existing config). Add explicit guard text in the markdown for each of these paths."
+      },
+      {
+        "severity": "low",
+        "title": "marketplace.json and plugin.json changes may affect plugin discovery without version bump validation",
+        "body": "Both .claude-plugin/marketplace.json and plugin.json are modified alongside a scope rename. If these files declare the package identifier and the scope changed, any marketplace or plugin registry that indexes by the old identifier will produce stale or broken listings until re-indexed. This is a deployment-ordering hazard: the registry must be updated atomically with (or before) the package publish.",
+        "file": ".claude-plugin/marketplace.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.45,
+        "recommendation": "Confirm the plugin registry update is coordinated with the package publish. If there is a propagation delay, document it and ensure the old listing redirects or shows a deprecation notice during the transition window."
+      }
+    ],
+    "next_steps": [
+      "Inspect the actual diff of package.json to confirm the old and new scope names and verify no other files still reference the old scope.",
+      "Read the full diff of commands/setup.md to trace the interactive-menu branching logic and confirm edge-case handling for corrupt config and non-interactive mode.",
+      "Check whether a migration/deprecation path exists for consumers already installed under the old scope (alias, redirect, or clear error message).",
+      "Verify .claude-plugin/*.json identifiers are consistent with the new scope and that the marketplace listing has been updated or will update atomically."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"This commit bundles an npm scope rename with a setup-menu behavioral change. The scope rename is a breaking change for any existing consumer referencing the old package name, and the interactive menu addition to setup.md lacks visible coverage for edge cases (partial config, non-interactive invocations, or re-entrancy). Without seeing the actual diff content, the scope rename alone warrants blocking until compatibility impact is confirmed.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename is a breaking change for existing installations\",\n      \"body\": \"package.json is modified (4 lines changed) in a commit whose message includes 'rename npm scope'. Changing the npm scope of a published package breaks every existing reference: require/import paths, lockfiles, CI caches, and any downstream tooling that pins or resolves the old scoped name. There is no evidence in the changed-file list of a deprecation shim, compatibility alias, or migration guide beyond CHANGELOG.md and release_card.md prose. If the old-scoped package is still published, users pulling the old name will get stale code. If it is unpublished or transferred, they will get 404s.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Confirm: (1) whether the old-scoped package has been deprecated or redirected, (2) whether a postinstall or migration script exists to handle existing installations, and (3) whether the CHANGELOG explicitly calls out the breaking rename with before/after install instructions. If any of these are missing, add them before shipping.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Interactive menu in setup.md may not handle non-interactive or already-configured edge cases\",\n      \"body\": \"The commit adds an interactive menu to /glm:setup 'when already configured' (per the commit message). The setup.md file (19 lines changed) now presumably branches on configuration state. Unexamined risks: (a) what happens if the config file exists but is corrupt, empty, or partially written (e.g., from a crashed prior setup)? (b) Is there a non-interactive / --yes flag for scripted or CI invocations, or will the menu block forever? (c) If the user selects 'reconfigure' and the operation fails partway, is the old config preserved or lost? These are the classic silent-failure and data-loss vectors for setup wizards.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Verify the setup.md prompt handles: corrupt/empty config gracefully (fallback to fresh setup, not crash), non-interactive mode (auto-choose sensible defaults or error clearly), and atomic config writes (write to temp file then rename, so partial writes don't destroy existing config). Add explicit guard text in the markdown for each of these paths.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"marketplace.json and plugin.json changes may affect plugin discovery without version bump validation\",\n      \"body\": \"Both .claude-plugin/marketplace.json and plugin.json are modified alongside a scope rename. If these files declare the package identifier and the scope changed, any marketplace or plugin registry that indexes by the old identifier will produce stale or broken listings until re-indexed. This is a deployment-ordering hazard: the registry must be updated atomically with (or before) the package publish.\",\n      \"file\": \".claude-plugin/marketplace.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.45,\n      \"recommendation\": \"Confirm the plugin registry update is coordinated with the package publish. If there is a propagation delay, document it and ensure the old listing redirects or shows a deprecation notice during the transition window.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect the actual diff of package.json to confirm the old and new scope names and verify no other files still reference the old scope.\",\n    \"Read the full diff of commands/setup.md to trace the interactive-menu branching logic and confirm edge-case handling for corrupt config and non-interactive mode.\",\n    \"Check whether a migration/deprecation path exists for consumers already installed under the old scope (alias, redirect, or clear error message).\",\n    \"Verify .claude-plugin/*.json identifiers are consistent with the new scope and that the marketplace listing has been updated or will update atomically.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:38:31.538Z"
+}

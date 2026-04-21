@@ -1,0 +1,33 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 23
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 19610,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "approve",
+    "summary": "This commit primarily updates configuration/metadata files (package.json, plugin.json, marketplace.json), documentation (CHANGELOG.md, release_card.md), and a slash-command template (commands/setup.md). No runtime code, authentication logic, data mutations, or stateful operations are present. The changes are safe to ship: the setup.md command template adds a menu prompt but this is a prompt-template, not executable code with failure modes that could cause data loss or corruption.",
+    "findings": [],
+    "next_steps": []
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"approve\",\n  \"summary\": \"This commit primarily updates configuration/metadata files (package.json, plugin.json, marketplace.json), documentation (CHANGELOG.md, release_card.md), and a slash-command template (commands/setup.md). No runtime code, authentication logic, data mutations, or stateful operations are present. The changes are safe to ship: the setup.md command template adds a menu prompt but this is a prompt-template, not executable code with failure modes that could cause data loss or corruption.\",\n  \"findings\": [],\n  \"next_steps\": []\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:54:57.374Z"
+}

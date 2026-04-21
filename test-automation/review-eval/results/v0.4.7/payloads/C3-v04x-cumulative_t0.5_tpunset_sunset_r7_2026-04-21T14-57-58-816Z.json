@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 7
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 60359,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The cumulative v0.4.0→v0.4.7 diff introduces a retry/backoff system, BigModel error dispatch, job tracking, and state management changes with several material risks: a new retry module that may silently swallow non-retryable errors or double-execute on retry boundaries, tracked-jobs state that lacks atomic writes or crash-safety, and a glm-client refactor that changes error propagation semantics. These are the exact class of failures (silent data loss, duplicate execution, corrupted state) that are expensive to detect in production.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs retry logic may silently swallow non-retryable errors or cause duplicate side-effects",
+        "body": "The retry module (203 new lines) is central to the new BigModel auto-retry/backoff feature. Without seeing explicit guards, the concern is: (1) if the retry wrapper invokes side-effectful operations (API calls, state writes), a retry after partial success causes duplicate side-effects — the retry boundary must be idempotent but there is no evidence of idempotency keys or dedup guards; (2) if error classification in bigmodel-errors.mjs misclassifies a non-retryable error as retryable, the system burns retries on a permanently-failing request, delaying user-visible failure and potentially hitting rate limits. The 352-line test file suggests complexity that warrants close inspection of the retry/early-exit paths.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.75,
+        "recommendation": "Audit retry.mjs for: (a) idempotency guarantees on retried operations — document or enforce that all retried callables are safe to re-execute; (b) a hard cap that non-retryable errors bypass the retry loop immediately; (c) ensure the final error thrown after exhausting retries preserves the original error chain for debugging."
+      },
+      {
+        "severity": "high",
+        "title": "tracked-jobs.mjs state file writes lack atomicity — crash during write corrupts job tracking",
+        "body": "The tracked-jobs module (78 lines changed) manages persistent job state. If the module writes state to disk using non-atomic operations (e.g., fs.writeFile without a write-to-temp-then-rename pattern), a process crash or SIGKILL mid-write leaves a truncated or partial JSON file. On next startup, JSON.parse fails and all tracked job state is lost — making it impossible to recover or clean up background jobs. This is a classic silent data-loss scenario.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.72,
+        "recommendation": "Verify that all state persistence uses atomic write (write to temp file, then fs.rename). Add a try/catch around state load that handles corrupted JSON gracefully — e.g., back up the corrupt file and start with empty state rather than crashing."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs refactor changes error propagation — unhandled error types may escape silently",
+        "body": "The glm-client module (155 lines changed) now dispatches through bigmodel-errors.mjs for error classification. If a new or unexpected error type (network timeout, DNS failure, proxy error) is not covered by the error classifier, it may propagate as an unstructured error without retry metadata attached. Callers that depend on retry headers or specific error shapes would then fail in undefined ways — potentially treating a transient network error as permanent.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.68,
+        "recommendation": "Add a default/catch-all case in the error dispatcher that tags unrecognized errors as potentially-retryable with a conservative retry count. Log a warning so unknown error types are visible for future classification."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs concurrent access risk — multiple processes may corrupt shared state file",
+        "body": "state.mjs (32 lines changed) manages shared state. If multiple instances of the tool run concurrently (e.g., two terminal sessions invoking commands simultaneously), they may read-modify-write the same state file, causing lost updates. The diff shows no file locking or concurrency control. This is plausible in a developer tool where multiple terminals are common.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.6,
+        "recommendation": "Add advisory file locking (e.g., lockfile or flock-based approach) around state read-modify-write cycles, or document that concurrent invocation is unsupported and add a stale-lock detection mechanism."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error classification is a single point of failure for retry correctness",
+        "body": "The new 168-line bigmodel-errors.mjs module is responsible for classifying API errors into retryable vs non-retryable categories. If the classification logic has gaps (e.g., new HTTP status codes, changed API error response format), the retry module will make incorrect decisions. The 189-line test file covers known cases but cannot cover future API changes. A misclassification here either causes infinite retries on a permanent error or fails to retry a transient error.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.65,
+        "recommendation": "Add a schema validator for incoming error responses so unexpected formats are caught early. Include a max-retry-age timeout so even if an error is classified as retryable, the system gives up after a wall-clock timeout."
+      }
+    ],
+    "next_steps": [
+      "Read retry.mjs in full to confirm whether retried operations are idempotent and non-retryable errors short-circuit immediately",
+      "Read tracked-jobs.mjs and state.mjs to verify atomic write patterns and crash recovery",
+      "Read glm-client.mjs error handling to trace how unrecognized errors propagate to callers",
+      "Read bigmodel-errors.mjs classification logic to check for uncovered error types (timeouts, DNS, proxy, rate-limit headers)",
+      "Verify that fs.mjs provides atomic write utilities and that tracked-jobs/state modules actually use them"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The cumulative v0.4.0→v0.4.7 diff introduces a retry/backoff system, BigModel error dispatch, job tracking, and state management changes with several material risks: a new retry module that may silently swallow non-retryable errors or double-execute on retry boundaries, tracked-jobs state that lacks atomic writes or crash-safety, and a glm-client refactor that changes error propagation semantics. These are the exact class of failures (silent data loss, duplicate execution, corrupted state) that are expensive to detect in production.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs retry logic may silently swallow non-retryable errors or cause duplicate side-effects\",\"body\":\"The retry module (203 new lines) is central to the new BigModel auto-retry/backoff feature. Without seeing explicit guards, the concern is: (1) if the retry wrapper invokes side-effectful operations (API calls, state writes), a retry after partial success causes duplicate side-effects — the retry boundary must be idempotent but there is no evidence of idempotency keys or dedup guards; (2) if error classification in bigmodel-errors.mjs misclassifies a non-retryable error as retryable, the system burns retries on a permanently-failing request, delaying user-visible failure and potentially hitting rate limits. The 352-line test file suggests complexity that warrants close inspection of the retry/early-exit paths.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.75,\"recommendation\":\"Audit retry.mjs for: (a) idempotency guarantees on retried operations — document or enforce that all retried callables are safe to re-execute; (b) a hard cap that non-retryable errors bypass the retry loop immediately; (c) ensure the final error thrown after exhausting retries preserves the original error chain for debugging.\"},{\"severity\":\"high\",\"title\":\"tracked-jobs.mjs state file writes lack atomicity — crash during write corrupts job tracking\",\"body\":\"The tracked-jobs module (78 lines changed) manages persistent job state. If the module writes state to disk using non-atomic operations (e.g., fs.writeFile without a write-to-temp-then-rename pattern), a process crash or SIGKILL mid-write leaves a truncated or partial JSON file. On next startup, JSON.parse fails and all tracked job state is lost — making it impossible to recover or clean up background jobs. This is a classic silent data-loss scenario.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.72,\"recommendation\":\"Verify that all state persistence uses atomic write (write to temp file, then fs.rename). Add a try/catch around state load that handles corrupted JSON gracefully — e.g., back up the corrupt file and start with empty state rather than crashing.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs refactor changes error propagation — unhandled error types may escape silently\",\"body\":\"The glm-client module (155 lines changed) now dispatches through bigmodel-errors.mjs for error classification. If a new or unexpected error type (network timeout, DNS failure, proxy error) is not covered by the error classifier, it may propagate as an unstructured error without retry metadata attached. Callers that depend on retry headers or specific error shapes would then fail in undefined ways — potentially treating a transient network error as permanent.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.68,\"recommendation\":\"Add a default/catch-all case in the error dispatcher that tags unrecognized errors as potentially-retryable with a conservative retry count. Log a warning so unknown error types are visible for future classification.\"},{\"severity\":\"medium\",\"title\":\"state.mjs concurrent access risk — multiple processes may corrupt shared state file\",\"body\":\"state.mjs (32 lines changed) manages shared state. If multiple instances of the tool run concurrently (e.g., two terminal sessions invoking commands simultaneously), they may read-modify-write the same state file, causing lost updates. The diff shows no file locking or concurrency control. This is plausible in a developer tool where multiple terminals are common.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.6,\"recommendation\":\"Add advisory file locking (e.g., lockfile or flock-based approach) around state read-modify-write cycles, or document that concurrent invocation is unsupported and add a stale-lock detection mechanism.\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors.mjs error classification is a single point of failure for retry correctness\",\"body\":\"The new 168-line bigmodel-errors.mjs module is responsible for classifying API errors into retryable vs non-retryable categories. If the classification logic has gaps (e.g., new HTTP status codes, changed API error response format), the retry module will make incorrect decisions. The 189-line test file covers known cases but cannot cover future API changes. A misclassification here either causes infinite retries on a permanent error or fails to retry a transient error.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.65,\"recommendation\":\"Add a schema validator for incoming error responses so unexpected formats are caught early. Include a max-retry-age timeout so even if an error is classified as retryable, the system gives up after a wall-clock timeout.\"}],\"next_steps\":[\"Read retry.mjs in full to confirm whether retried operations are idempotent and non-retryable errors short-circuit immediately\",\"Read tracked-jobs.mjs and state.mjs to verify atomic write patterns and crash recovery\",\"Read glm-client.mjs error handling to trace how unrecognized errors propagate to callers\",\"Read bigmodel-errors.mjs classification logic to check for uncovered error types (timeouts, DNS, proxy, rate-limit headers)\",\"Verify that fs.mjs provides atomic write utilities and that tracked-jobs/state modules actually use them\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:57:58.855Z"
+}

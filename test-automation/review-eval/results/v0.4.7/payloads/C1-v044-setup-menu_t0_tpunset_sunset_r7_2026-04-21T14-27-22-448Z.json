@@ -1,0 +1,68 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 7
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 90614,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The commit introduces an npm scope rename and a new interactive menu on the setup command. The scope rename is a breaking change for existing users: prior installations under the old scope will not update in-place and will silently diverge. The interactive menu on an already-configured setup path risks blocking non-interactive or scripted usage and has no visible guard for corrupted/partial existing config. Both issues are plausible under real usage and are not addressed in the diff.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a silent breaking change for existing installations",
+        "body": "The package.json and plugin.json changes rename the npm scope. Any user who installed the plugin under the previous scope will not receive this update via normal package manager flows; their install will silently stay on the old version. There is no visible migration path, deprecation notice, or postinstall redirect. The marketplace.json change compounds this by potentially registering under a new identifier while the old one remains published. Inference: based on 4-line changes to package.json and 2-line changes to plugin.json consistent with a scope rename, plus the commit message explicitly stating 'rename npm scope'.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.82,
+        "recommendation": "Either keep the old scope and publish a deprecation redirect, or add a postinstall/preinstall script under the old package name that warns and points users to the new scope. Document the migration step prominently in the CHANGELOG and release_card. If the old package can be deprecated on the registry, do that before shipping."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive menu on re-setup may break non-interactive or scripted workflows",
+        "body": "The commands/setup.md change adds an interactive menu when setup is already configured (19 lines changed). If the command previously completed silently or idempotently on re-run, any CI/automation pipeline or scripted setup will now hang waiting for interactive input. There is no visible flag or environment-variable bypass for non-interactive mode. Inference: the commit message states 'add interactive menu to /glm:setup when already configured' and the 19-line diff to the markdown command file is consistent with adding prompt-based branching logic.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.72,
+        "recommendation": "Add a non-interactive flag or environment variable (e.g., GLM_SETUP_NONINTERACTIVE=1 or --yes) that skips the menu and applies a default or specified action. Document this escape hatch in the command help text."
+      },
+      {
+        "severity": "low",
+        "title": "Release card rewrite lacks verification of link consistency",
+        "body": "The release_card.md has 326 lines changed, representing a substantial rewrite. Any internal cross-references, URLs, or package name references that embed the old scope will now be stale or broken. A manual doc review can miss these, and there is no visible automated check. Inference: large documentation rewrite coinciding with a scope rename makes stale references likely.",
+        "file": "release_card.md",
+        "line_start": 1,
+        "line_end": 326,
+        "confidence": 0.55,
+        "recommendation": "Search the entire release_card.md for the old scope string and any hardcoded URLs referencing the old package name. Add a CI check that greps for the old scope across all markdown files to catch regressions."
+      }
+    ],
+    "next_steps": [
+      "Verify the full diff with `git show 7766943` to confirm the old scope string is fully removed and no dangling references remain.",
+      "Confirm whether the old-scoped package is still published on the registry; if so, add a deprecation notice pointing to the new scope.",
+      "Add a non-interactive bypass to the setup menu and test it in a headless/scripted environment before shipping."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The commit introduces an npm scope rename and a new interactive menu on the setup command. The scope rename is a breaking change for existing users: prior installations under the old scope will not update in-place and will silently diverge. The interactive menu on an already-configured setup path risks blocking non-interactive or scripted usage and has no visible guard for corrupted/partial existing config. Both issues are plausible under real usage and are not addressed in the diff.\",\"findings\":[{\"severity\":\"high\",\"title\":\"npm scope rename is a silent breaking change for existing installations\",\"body\":\"The package.json and plugin.json changes rename the npm scope. Any user who installed the plugin under the previous scope will not receive this update via normal package manager flows; their install will silently stay on the old version. There is no visible migration path, deprecation notice, or postinstall redirect. The marketplace.json change compounds this by potentially registering under a new identifier while the old one remains published. Inference: based on 4-line changes to package.json and 2-line changes to plugin.json consistent with a scope rename, plus the commit message explicitly stating 'rename npm scope'.\",\"file\":\"package.json\",\"line_start\":1,\"line_end\":4,\"confidence\":0.82,\"recommendation\":\"Either keep the old scope and publish a deprecation redirect, or add a postinstall/preinstall script under the old package name that warns and points users to the new scope. Document the migration step prominently in the CHANGELOG and release_card. If the old package can be deprecated on the registry, do that before shipping.\"},{\"severity\":\"medium\",\"title\":\"Interactive menu on re-setup may break non-interactive or scripted workflows\",\"body\":\"The commands/setup.md change adds an interactive menu when setup is already configured (19 lines changed). If the command previously completed silently or idempotently on re-run, any CI/automation pipeline or scripted setup will now hang waiting for interactive input. There is no visible flag or environment-variable bypass for non-interactive mode. Inference: the commit message states 'add interactive menu to /glm:setup when already configured' and the 19-line diff to the markdown command file is consistent with adding prompt-based branching logic.\",\"file\":\"commands/setup.md\",\"line_start\":1,\"line_end\":19,\"confidence\":0.72,\"recommendation\":\"Add a non-interactive flag or environment variable (e.g., GLM_SETUP_NONINTERACTIVE=1 or --yes) that skips the menu and applies a default or specified action. Document this escape hatch in the command help text.\"},{\"severity\":\"low\",\"title\":\"Release card rewrite lacks verification of link consistency\",\"body\":\"The release_card.md has 326 lines changed, representing a substantial rewrite. Any internal cross-references, URLs, or package name references that embed the old scope will now be stale or broken. A manual doc review can miss these, and there is no visible automated check. Inference: large documentation rewrite coinciding with a scope rename makes stale references likely.\",\"file\":\"release_card.md\",\"line_start\":1,\"line_end\":326,\"confidence\":0.55,\"recommendation\":\"Search the entire release_card.md for the old scope string and any hardcoded URLs referencing the old package name. Add a CI check that greps for the old scope across all markdown files to catch regressions.\"}],\"next_steps\":[\"Verify the full diff with `git show 7766943` to confirm the old scope string is fully removed and no dangling references remain.\",\"Confirm whether the old-scoped package is still published on the registry; if so, add a deprecation notice pointing to the new scope.\",\"Add a non-interactive bypass to the setup menu and test it in a headless/scripted environment before shipping.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:27:22.473Z"
+}

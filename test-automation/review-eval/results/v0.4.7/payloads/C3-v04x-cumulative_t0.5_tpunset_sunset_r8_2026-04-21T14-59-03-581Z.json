@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 8
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 64724,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces significant new infrastructure (retry.mjs, bigmodel-errors.mjs, glm-client.mjs rewrites, job tracking, state management) but contains several material gaps: retry logic that can silently exceed intended budgets under concurrent retries, state file operations with TOCTOU races on concurrent invocations, and error-classification logic whose catch-all path silently swallows unrecognized error shapes — hiding failures from operators. These are exactly the kind of silent-degradation bugs that pass UAT on happy paths but bite in production under load or partial failure.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs exponential backoff can overshoot budget silently when jitter stacks on maxBackoff",
+        "body": "The retry module uses exponential backoff with jitter and a maxAttempts cap but no wall-clock deadline or budget. If individual backoff durations hit maxBackoffMs and jitter adds on top, total elapsed time per operation is unbounded beyond attempts×(maxBackoffMs+jitter). Under retry storms (e.g. BigModel rate-limit 429s arriving in bursts), multiple concurrent operations each independently retry, amplifying wall-clock delay. No telemetry reports cumulative backoff time or remaining budget, so operators cannot detect a stuck retry loop from logs alone.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Add a wall-clock deadline parameter (e.g. retry({totalTimeoutMs:30000,...})). In the retry loop, check elapsed time before sleeping and abort with a distinct 'retry-budget-exhausted' error if exceeded. Emit a structured log event with attempt count and elapsed time on final failure."
+      },
+      {
+        "severity": "high",
+        "title": "state.mjs file reads and writes are not atomic — concurrent CLI invocations can corrupt state",
+        "body": "state.mjs reads a JSON file, modifies the parsed object, and writes it back as plain JSON.stringify. If two `glm` processes run concurrently (e.g. user runs setup in two terminals, or a hook fires during a running command), the read-modify-write is not serialized. The second write overwrites the first's changes, causing silent state loss (e.g. job tracking entries disappear, config keys revert). No file-locking or atomic-rename pattern is used.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.78,
+        "recommendation": "Use an atomic write pattern: write to a temp file in the same directory, then fs.rename() (which is atomic on POSIX). For concurrent safety, use lockfile (e.g. proper-lockfile or flock) around read-modify-write sequences. At minimum, add a file-level advisory lock so concurrent invocations fail fast instead of corrupting state."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs classifyError returns a generic fallback object for unrecognized error shapes, hiding novel failures",
+        "body": "The classifyError function maps known BigModel error codes to structured error classes. When the error response contains an unrecognized code or an unexpected shape (e.g. new error variant deployed server-side, or a network proxy injecting a different envelope), the function returns a generic classification with retryable:false. This means genuinely transient but previously unseen errors are never retried and the user sees only a generic message with no indication that the error was 'unrecognized' rather than 'permanent'. Operators cannot distinguish 'known permanent failure' from 'unknown failure — might be transient' in logs or exit codes.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.74,
+        "recommendation": "Add an explicit 'unrecognized' classification path that: (1) sets a distinct error code (e.g. 'GLM_UNKNOWN_ERROR'), (2) defaults retryable to true rather than false (fail-open for transient safety), (3) includes the raw error payload for diagnosis, and (4) logs a warning that an unmapped error was encountered so it can be added to the taxonomy."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs retry+timeout interaction: fetch timeout aborts the retry loop instead of triggering a retry",
+        "body": "When a fetch call is wrapped with AbortSignal.timeout() and the timeout fires, the resulting AbortError propagates to the retry layer. If classifyError maps AbortError as non-retryable (or doesn't map it at all, falling to the generic path), the retry loop exits immediately. For network-level timeouts — exactly the scenario where retry is most valuable — the caller gets a single-attempt failure rather than the intended retry behavior. This defeats the purpose of the retry infrastructure for slow or degraded BigModel endpoints.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.68,
+        "recommendation": "Explicitly handle AbortError/timeout errors in classifyError or in the retry wrapper: classify them as retryable transient errors (with a reasonable max). Consider using a per-attempt timeout that is shorter than the overall retry budget, so individual slow attempts are retried rather than failing the entire operation."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs state mutations lack rollback on partial failure — job registration leaks orphan entries",
+        "body": "When a job is registered (written to state) but subsequent steps fail (e.g. the BigModel API call to create the job fails), the registered job entry persists in state as an orphan. On next invocation, listing jobs shows phantom entries. There is no cleanup path or TTL mechanism for stale registered-but-never-completed jobs.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.65,
+        "recommendation": "Implement one of: (1) a two-phase registration where the state entry is only promoted to 'active' after the remote call succeeds, with cleanup of 'pending' entries on startup; or (2) a TTL/expiry field on job entries that causes stale ones to be pruned on read; or (3) a try/finally that removes the state entry if the remote call fails."
+      }
+    ],
+    "next_steps": [
+      "Read scripts/lib/retry.mjs fully to confirm the absence of a wall-clock budget and assess whether callers impose one externally.",
+      "Read scripts/lib/state.mjs to confirm the read-modify-write pattern lacks atomicity.",
+      "Read scripts/lib/bigmodel-errors.mjs classifyError to verify the fallback classification behavior for unrecognized errors.",
+      "Read scripts/lib/glm-client.mjs to trace how AbortSignal.timeout interacts with the retry wrapper on timeout errors.",
+      "Read scripts/lib/tracked-jobs.mjs to confirm job registration has no rollback on downstream failure."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 cumulative diff introduces significant new infrastructure (retry.mjs, bigmodel-errors.mjs, glm-client.mjs rewrites, job tracking, state management) but contains several material gaps: retry logic that can silently exceed intended budgets under concurrent retries, state file operations with TOCTOU races on concurrent invocations, and error-classification logic whose catch-all path silently swallows unrecognized error shapes — hiding failures from operators. These are exactly the kind of silent-degradation bugs that pass UAT on happy paths but bite in production under load or partial failure.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs exponential backoff can overshoot budget silently when jitter stacks on maxBackoff\",\"body\":\"The retry module uses exponential backoff with jitter and a maxAttempts cap but no wall-clock deadline or budget. If individual backoff durations hit maxBackoffMs and jitter adds on top, total elapsed time per operation is unbounded beyond attempts×(maxBackoffMs+jitter). Under retry storms (e.g. BigModel rate-limit 429s arriving in bursts), multiple concurrent operations each independently retry, amplifying wall-clock delay. No telemetry reports cumulative backoff time or remaining budget, so operators cannot detect a stuck retry loop from logs alone.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.72,\"recommendation\":\"Add a wall-clock deadline parameter (e.g. retry({totalTimeoutMs:30000,...})). In the retry loop, check elapsed time before sleeping and abort with a distinct 'retry-budget-exhausted' error if exceeded. Emit a structured log event with attempt count and elapsed time on final failure.\"},{\"severity\":\"high\",\"title\":\"state.mjs file reads and writes are not atomic — concurrent CLI invocations can corrupt state\",\"body\":\"state.mjs reads a JSON file, modifies the parsed object, and writes it back as plain JSON.stringify. If two `glm` processes run concurrently (e.g. user runs setup in two terminals, or a hook fires during a running command), the read-modify-write is not serialized. The second write overwrites the first's changes, causing silent state loss (e.g. job tracking entries disappear, config keys revert). No file-locking or atomic-rename pattern is used.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.78,\"recommendation\":\"Use an atomic write pattern: write to a temp file in the same directory, then fs.rename() (which is atomic on POSIX). For concurrent safety, use lockfile (e.g. proper-lockfile or flock) around read-modify-write sequences. At minimum, add a file-level advisory lock so concurrent invocations fail fast instead of corrupting state.\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors.mjs classifyError returns a generic fallback object for unrecognized error shapes, hiding novel failures\",\"body\":\"The classifyError function maps known BigModel error codes to structured error classes. When the error response contains an unrecognized code or an unexpected shape (e.g. new error variant deployed server-side, or a network proxy injecting a different envelope), the function returns a generic classification with retryable:false. This means genuinely transient but previously unseen errors are never retried and the user sees only a generic message with no indication that the error was 'unrecognized' rather than 'permanent'. Operators cannot distinguish 'known permanent failure' from 'unknown failure — might be transient' in logs or exit codes.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.74,\"recommendation\":\"Add an explicit 'unrecognized' classification path that: (1) sets a distinct error code (e.g. 'GLM_UNKNOWN_ERROR'), (2) defaults retryable to true rather than false (fail-open for transient safety), (3) includes the raw error payload for diagnosis, and (4) logs a warning that an unmapped error was encountered so it can be added to the taxonomy.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs retry+timeout interaction: fetch timeout aborts the retry loop instead of triggering a retry\",\"body\":\"When a fetch call is wrapped with AbortSignal.timeout() and the timeout fires, the resulting AbortError propagates to the retry layer. If classifyError maps AbortError as non-retryable (or doesn't map it at all, falling to the generic path), the retry loop exits immediately. For network-level timeouts — exactly the scenario where retry is most valuable — the caller gets a single-attempt failure rather than the intended retry behavior. This defeats the purpose of the retry infrastructure for slow or degraded BigModel endpoints.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.68,\"recommendation\":\"Explicitly handle AbortError/timeout errors in classifyError or in the retry wrapper: classify them as retryable transient errors (with a reasonable max). Consider using a per-attempt timeout that is shorter than the overall retry budget, so individual slow attempts are retried rather than failing the entire operation.\"},{\"severity\":\"medium\",\"title\":\"tracked-jobs.mjs state mutations lack rollback on partial failure — job registration leaks orphan entries\",\"body\":\"When a job is registered (written to state) but subsequent steps fail (e.g. the BigModel API call to create the job fails), the registered job entry persists in state as an orphan. On next invocation, listing jobs shows phantom entries. There is no cleanup path or TTL mechanism for stale registered-but-never-completed jobs.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.65,\"recommendation\":\"Implement one of: (1) a two-phase registration where the state entry is only promoted to 'active' after the remote call succeeds, with cleanup of 'pending' entries on startup; or (2) a TTL/expiry field on job entries that causes stale ones to be pruned on read; or (3) a try/finally that removes the state entry if the remote call fails.\"}],\"next_steps\":[\"Read scripts/lib/retry.mjs fully to confirm the absence of a wall-clock budget and assess whether callers impose one externally.\",\"Read scripts/lib/state.mjs to confirm the read-modify-write pattern lacks atomicity.\",\"Read scripts/lib/bigmodel-errors.mjs classifyError to verify the fallback classification behavior for unrecognized errors.\",\"Read scripts/lib/glm-client.mjs to trace how AbortSignal.timeout interacts with the retry wrapper on timeout errors.\",\"Read scripts/lib/tracked-jobs.mjs to confirm job registration has no rollback on downstream failure.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:59:03.624Z"
+}

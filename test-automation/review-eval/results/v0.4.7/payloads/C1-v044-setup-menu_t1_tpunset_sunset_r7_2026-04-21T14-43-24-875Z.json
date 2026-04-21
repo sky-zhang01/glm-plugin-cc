@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 7
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.333,
+    "citation_false_file_hits": 0,
+    "latency_ms": 44323,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The commit adds an interactive menu to /glm:setup when already configured and renames the npm scope. The release_card.md contains a substantial rewrite of configuration/setup documentation. The primary risk is in commands/setup.md where the interactive menu behavior is defined — if the menu logic or its conditional branching has edge cases around the 'already configured' state, users could get stuck or silently misconfigure. However, without the actual diff content visible beyond the stat, I need to ground findings in what's observable.",
+    "findings": [
+      {
+        "severity": "medium",
+        "title": "Scope rename may break existing installations referencing old package name",
+        "body": "The package.json changes (+4/-4 lines) and marketplace.json/plugin.json changes indicate an npm scope rename. If users have existing installations referencing the old scoped package name, the rename creates a compatibility break. There is no evidence in the diff of a migration path, deprecation notice, or backward-compatible alias for the old scope.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.7,
+        "recommendation": "Verify the scope rename is fully propagated. Add a deprecation notice or redirect for the old package name if it was previously published. Confirm the .claude-plugin/plugin.json and marketplace.json identifiers are consistent and don't orphan previous marketplace listings."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive menu on re-setup lacks documentation of cancellation/abort behavior",
+        "body": "commands/setup.md adds an interactive menu when the system is already configured (+19 lines changed). The concern is what happens on edge cases: empty input, Ctrl+C mid-menu, or selecting an invalid option. Without seeing the actual prompt logic, there's a risk of silent data loss (e.g., overwriting existing config) or leaving the user in an ambiguous state if the menu is dismissed without completing.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.6,
+        "recommendation": "Ensure the interactive menu has explicit guardrails: (1) a 'cancel/exit' option that preserves existing config, (2) clear confirmation before destructive overwrites, (3) graceful handling of SIGINT/empty input. Document these paths in the command markdown itself."
+      },
+      {
+        "severity": "low",
+        "title": "CHANGELOG and release_card updates may advertise unreleased or inconsistent version",
+        "body": "The CHANGELOG.md (+21 lines) and release_card.md (heavy rewrite) presumably document v0.4.7 features. If the npm scope rename is not yet published, or if version numbers across package.json, CHANGELOG, and release_card are inconsistent, users following the release notes may encounter broken installs or mismatched behavior.",
+        "file": "release_card.md",
+        "line_start": 1,
+        "line_end": 10,
+        "confidence": 0.5,
+        "recommendation": "Cross-check that the version in package.json matches the CHANGELOG entry and release_card header. Confirm the new scoped package is published and installable before merging."
+      }
+    ],
+    "next_steps": [
+      "Inspect the full diff of commands/setup.md to verify the interactive menu handles all edge cases (cancel, empty input, partial state).",
+      "Confirm the npm scope rename is complete — check that the old scope is either unpublished with a clear message or aliased to the new one.",
+      "Verify that .claude-plugin/plugin.json and marketplace.json identifiers are updated consistently so the plugin marketplace entry is not orphaned.",
+      "Test the re-setup menu flow end-to-end: run setup once, then run it again, and exercise every menu option including cancellation."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The commit adds an interactive menu to /glm:setup when already configured and renames the npm scope. The release_card.md contains a substantial rewrite of configuration/setup documentation. The primary risk is in commands/setup.md where the interactive menu behavior is defined — if the menu logic or its conditional branching has edge cases around the 'already configured' state, users could get stuck or silently misconfigure. However, without the actual diff content visible beyond the stat, I need to ground findings in what's observable.\",\n  \"findings\": [\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Scope rename may break existing installations referencing old package name\",\n      \"body\": \"The package.json changes (+4/-4 lines) and marketplace.json/plugin.json changes indicate an npm scope rename. If users have existing installations referencing the old scoped package name, the rename creates a compatibility break. There is no evidence in the diff of a migration path, deprecation notice, or backward-compatible alias for the old scope.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Verify the scope rename is fully propagated. Add a deprecation notice or redirect for the old package name if it was previously published. Confirm the .claude-plugin/plugin.json and marketplace.json identifiers are consistent and don't orphan previous marketplace listings.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Interactive menu on re-setup lacks documentation of cancellation/abort behavior\",\n      \"body\": \"commands/setup.md adds an interactive menu when the system is already configured (+19 lines changed). The concern is what happens on edge cases: empty input, Ctrl+C mid-menu, or selecting an invalid option. Without seeing the actual prompt logic, there's a risk of silent data loss (e.g., overwriting existing config) or leaving the user in an ambiguous state if the menu is dismissed without completing.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Ensure the interactive menu has explicit guardrails: (1) a 'cancel/exit' option that preserves existing config, (2) clear confirmation before destructive overwrites, (3) graceful handling of SIGINT/empty input. Document these paths in the command markdown itself.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"CHANGELOG and release_card updates may advertise unreleased or inconsistent version\",\n      \"body\": \"The CHANGELOG.md (+21 lines) and release_card.md (heavy rewrite) presumably document v0.4.7 features. If the npm scope rename is not yet published, or if version numbers across package.json, CHANGELOG, and release_card are inconsistent, users following the release notes may encounter broken installs or mismatched behavior.\",\n      \"file\": \"release_card.md\",\n      \"line_start\": 1,\n      \"line_end\": 10,\n      \"confidence\": 0.5,\n      \"recommendation\": \"Cross-check that the version in package.json matches the CHANGELOG entry and release_card header. Confirm the new scoped package is published and installable before merging.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect the full diff of commands/setup.md to verify the interactive menu handles all edge cases (cancel, empty input, partial state).\",\n    \"Confirm the npm scope rename is complete — check that the old scope is either unpublished with a clear message or aliased to the new one.\",\n    \"Verify that .claude-plugin/plugin.json and marketplace.json identifiers are updated consistently so the plugin marketplace entry is not orphaned.\",\n    \"Test the re-setup menu flow end-to-end: run setup once, then run it again, and exercise every menu option including cancellation.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:43:24.895Z"
+}

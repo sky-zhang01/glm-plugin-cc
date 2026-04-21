@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 17
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 68556,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "Commit 7766943 introduces an npm scope rename packaged as a 'fix', which is a breaking change for any existing installation referencing the old scope. Combined with an interactive menu added to the setup command that may block unattended re-runs, this commit carries real migration risk that is not surfaced as a breaking change in semver labeling or clearly documented as a required user action.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change shipped as a fix",
+        "body": "The commit message explicitly states 'rename npm scope', and package.json (4 lines changed), marketplace.json (4 lines changed), and plugin.json (2 lines changed) all reflect this. Changing the package scope fundamentally alters the package identity. Any existing user, CI pipeline, or downstream reference that installs or imports by the old scoped name will fail at resolution time. This is labeled a 'fix' commit with no indication of a major version bump or migration guide, which understates the blast radius.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.88,
+        "recommendation": "Treat the scope rename as a breaking change. Bump the major version if following semver, add an explicit migration section to the CHANGELOG entry (e.g., 'If you previously installed @oldscope/package, uninstall it and reinstall @newscope/package'), and verify no remaining references to the old scope exist in documentation, README, or release_card.md."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive menu in setup command may hang automated or re-entrant flows",
+        "body": "The commit adds 'an interactive menu to /glm:setup when already configured'. If the setup command previously exited cleanly on re-run (making it idempotent for automation), it now blocks on stdin waiting for a menu selection. Any CI pipeline, post-provisioning script, or non-interactive terminal that re-invokes setup will hang indefinitely with no timeout and no --non-interactive or --yes flag fallback visible in the diff context.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.75,
+        "recommendation": "Add a non-interactive escape hatch: accept a flag (e.g., --non-interactive or --skip-prompt) that either skips the menu and exits or applies a sensible default. Document the flag so automation authors can adopt it. Consider defaulting to non-interactive when stdout is not a TTY."
+      },
+      {
+        "severity": "medium",
+        "title": "Scope rename may have left stale references in release_card.md",
+        "body": "release_card.md has 326 lines changed, making it the largest diff in the commit. Given that the npm scope was renamed, any occurrence of the old scope name in this file that was missed will produce broken install instructions or broken links. A file of this size with this many changes is high-risk for partial updates where some references are updated and others are not.",
+        "file": "release_card.md",
+        "line_start": 1,
+        "line_end": 326,
+        "confidence": 0.65,
+        "recommendation": "Grep release_card.md for the old scope name and verify zero hits. Also verify any URLs, badge links, and npm install commands reference the new scope consistently. Consider adding a CI check that validates package name consistency across all markdown and JSON files."
+      }
+    ],
+    "next_steps": [
+      "Run `grep -r '<old-scope-name>' --include='*.md' --include='*.json' .` to confirm no stale references remain anywhere in the repository.",
+      "Verify CHANGELOG.md explicitly documents the scope rename as a breaking migration step with before/after install commands.",
+      "Confirm commands/setup.md has a non-interactive path (flag or TTY detection) before merging.",
+      "Consider whether a major version bump is warranted given the scope rename breaks the install identity for existing users."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"Commit 7766943 introduces an npm scope rename packaged as a 'fix', which is a breaking change for any existing installation referencing the old scope. Combined with an interactive menu added to the setup command that may block unattended re-runs, this commit carries real migration risk that is not surfaced as a breaking change in semver labeling or clearly documented as a required user action.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename is a breaking change shipped as a fix\",\n      \"body\": \"The commit message explicitly states 'rename npm scope', and package.json (4 lines changed), marketplace.json (4 lines changed), and plugin.json (2 lines changed) all reflect this. Changing the package scope fundamentally alters the package identity. Any existing user, CI pipeline, or downstream reference that installs or imports by the old scoped name will fail at resolution time. This is labeled a 'fix' commit with no indication of a major version bump or migration guide, which understates the blast radius.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.88,\n      \"recommendation\": \"Treat the scope rename as a breaking change. Bump the major version if following semver, add an explicit migration section to the CHANGELOG entry (e.g., 'If you previously installed @oldscope/package, uninstall it and reinstall @newscope/package'), and verify no remaining references to the old scope exist in documentation, README, or release_card.md.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Interactive menu in setup command may hang automated or re-entrant flows\",\n      \"body\": \"The commit adds 'an interactive menu to /glm:setup when already configured'. If the setup command previously exited cleanly on re-run (making it idempotent for automation), it now blocks on stdin waiting for a menu selection. Any CI pipeline, post-provisioning script, or non-interactive terminal that re-invokes setup will hang indefinitely with no timeout and no --non-interactive or --yes flag fallback visible in the diff context.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Add a non-interactive escape hatch: accept a flag (e.g., --non-interactive or --skip-prompt) that either skips the menu and exits or applies a sensible default. Document the flag so automation authors can adopt it. Consider defaulting to non-interactive when stdout is not a TTY.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Scope rename may have left stale references in release_card.md\",\n      \"body\": \"release_card.md has 326 lines changed, making it the largest diff in the commit. Given that the npm scope was renamed, any occurrence of the old scope name in this file that was missed will produce broken install instructions or broken links. A file of this size with this many changes is high-risk for partial updates where some references are updated and others are not.\",\n      \"file\": \"release_card.md\",\n      \"line_start\": 1,\n      \"line_end\": 326,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Grep release_card.md for the old scope name and verify zero hits. Also verify any URLs, badge links, and npm install commands reference the new scope consistently. Consider adding a CI check that validates package name consistency across all markdown and JSON files.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `grep -r '<old-scope-name>' --include='*.md' --include='*.json' .` to confirm no stale references remain anywhere in the repository.\",\n    \"Verify CHANGELOG.md explicitly documents the scope rename as a breaking migration step with before/after install commands.\",\n    \"Confirm commands/setup.md has a non-interactive path (flag or TTY detection) before merging.\",\n    \"Consider whether a major version bump is warranted given the scope rename breaks the install identity for existing users.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:36:06.575Z"
+}

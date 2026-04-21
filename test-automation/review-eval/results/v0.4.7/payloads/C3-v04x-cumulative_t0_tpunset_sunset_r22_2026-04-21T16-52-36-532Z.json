@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 22
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 50659,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces a retry/backoff system, BigModel error dispatch, job tracking, and significant state management changes. Several high-severity concerns emerge: the retry module and glm-client have failure paths that can silently swallow errors or produce unrecoverable state; the BigModel error classifier has fallback behaviors that could mask real failures; and tracked-jobs/state interactions under concurrency are not adequately guarded. These are exactly the kinds of subtle, high-cost failures that are hard to detect in happy-path testing.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry module may silently exhaust retries and return undefined/falsey result without caller visibility",
+        "body": "The retry.mjs module is new and central to the v0.4.6 auto-retry/backoff feature. If the retried function throws on every attempt, the retry loop must propagate the final error. If there is any code path where all retries are exhausted but the error is swallowed (e.g., catch block returns undefined, or a non-throwing fallback path), the caller in glm-client.mjs will proceed with a falsey/undefined result and produce silent corruption or an opaque downstream failure. Without seeing explicit guarantee that the final failure always re-throws or returns a discriminated error, this is a data-integrity risk.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.65,
+        "recommendation": "Verify that retry.mjs always re-throws the last error after exhausting all attempts, and that glm-client.mjs callers explicitly check for error returns rather than assuming success. Add a test case that asserts the final error is propagated (not swallowed) after max retries."
+      },
+      {
+        "severity": "high",
+        "title": "BigModel error dispatch catch-all could misclassify transient infrastructure errors as non-retryable",
+        "body": "scripts/lib/bigmodel-errors.mjs (168 lines) is a new error classifier for BigModel API responses. If the classifier has a catch-all/default case that maps unknown error codes to 'non-retryable', then any new or unexpected error from the API (rate limit format change, new HTTP status, network-level proxy error) would be treated as fatal. Conversely, if unknown errors default to 'retryable', the system could infinite-loop on permanent failures. Either misclassification is dangerous under real production conditions where error formats evolve.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.6,
+        "recommendation": "Audit the default/fallback branch of the error classifier. Ensure unknown errors are logged with full context (status, headers, body) and that the default classification is explicitly documented as a conscious choice. Consider adding a 'unknown but retryable once with backoff' middle ground with alerting."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs concurrent mutation without locking can lose job state",
+        "body": "scripts/lib/tracked-jobs.mjs (78 lines) manages job state, likely persisted to disk via state.mjs. If two parallel review invocations (or a review + a status check) read and write the same job store concurrently, the last writer wins and jobs can disappear or become orphaned. The file system is not a transactional store. This is especially relevant because v0.4.5 added --wait/--background execution modes, which means multiple processes can be manipulating job state simultaneously.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.55,
+        "recommendation": "Implement file-level locking (e.g., lockfile, atomic rename, or append-only log) for tracked-jobs state mutations. At minimum, detect and warn on concurrent access. Test this with parallel invocations."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs changes are extensive but test coverage for failure propagation is unclear",
+        "body": "scripts/lib/glm-client.mjs expanded by 155 lines of changes. It now integrates retry, BigModel error dispatch, and potentially different auth paths. The test file result-propagation.test.mjs (69 lines) is small relative to the surface area. If glm-client silently downgrades errors from the retry layer into empty responses, the review command will appear to succeed but produce no useful output. This is a silent-failure scenario that is expensive to detect in production.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.6,
+        "recommendation": "Add integration-level tests that exercise glm-client with a mocked API that returns various error codes (429, 500, 403, malformed JSON, timeout) and verify that each error path produces a visible, actionable error for the user — not an empty or silent result."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs changes may break existing persisted state from v0.4.0",
+        "body": "scripts/lib/state.mjs (32 lines changed) manages persisted state. If the schema of the state file changed between v0.4.0 and v0.4.6 (new fields, renamed fields, different structure), users upgrading in-place will have their existing state file fail to parse or silently lose data. There is no visible migration path or version field in the state schema based on the diff stat.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.5,
+        "recommendation": "Add a state file version field and a migration path from the v0.4.0 format. On load, detect old-format state files and either migrate them or warn the user. Test the upgrade path explicitly."
+      }
+    ],
+    "next_steps": [
+      "Inspect retry.mjs exhaustively to confirm the final-throw invariant on max-retry exhaustion",
+      "Review bigmodel-errors.mjs default classification branch for unknown error codes",
+      "Check tracked-jobs.mjs for any concurrency guard; if absent, test with parallel invocations",
+      "Verify glm-client.mjs error paths never produce a false-success (empty response treated as OK)",
+      "Test in-place upgrade from a v0.4.0 state file to confirm no data loss or parse failure"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 diff introduces a retry/backoff system, BigModel error dispatch, job tracking, and significant state management changes. Several high-severity concerns emerge: the retry module and glm-client have failure paths that can silently swallow errors or produce unrecoverable state; the BigModel error classifier has fallback behaviors that could mask real failures; and tracked-jobs/state interactions under concurrency are not adequately guarded. These are exactly the kinds of subtle, high-cost failures that are hard to detect in happy-path testing.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Retry module may silently exhaust retries and return undefined/falsey result without caller visibility\",\"body\":\"The retry.mjs module is new and central to the v0.4.6 auto-retry/backoff feature. If the retried function throws on every attempt, the retry loop must propagate the final error. If there is any code path where all retries are exhausted but the error is swallowed (e.g., catch block returns undefined, or a non-throwing fallback path), the caller in glm-client.mjs will proceed with a falsey/undefined result and produce silent corruption or an opaque downstream failure. Without seeing explicit guarantee that the final failure always re-throws or returns a discriminated error, this is a data-integrity risk.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.65,\"recommendation\":\"Verify that retry.mjs always re-throws the last error after exhausting all attempts, and that glm-client.mjs callers explicitly check for error returns rather than assuming success. Add a test case that asserts the final error is propagated (not swallowed) after max retries.\"},{\"severity\":\"high\",\"title\":\"BigModel error dispatch catch-all could misclassify transient infrastructure errors as non-retryable\",\"body\":\"scripts/lib/bigmodel-errors.mjs (168 lines) is a new error classifier for BigModel API responses. If the classifier has a catch-all/default case that maps unknown error codes to 'non-retryable', then any new or unexpected error from the API (rate limit format change, new HTTP status, network-level proxy error) would be treated as fatal. Conversely, if unknown errors default to 'retryable', the system could infinite-loop on permanent failures. Either misclassification is dangerous under real production conditions where error formats evolve.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.6,\"recommendation\":\"Audit the default/fallback branch of the error classifier. Ensure unknown errors are logged with full context (status, headers, body) and that the default classification is explicitly documented as a conscious choice. Consider adding a 'unknown but retryable once with backoff' middle ground with alerting.\"},{\"severity\":\"medium\",\"title\":\"tracked-jobs.mjs concurrent mutation without locking can lose job state\",\"body\":\"scripts/lib/tracked-jobs.mjs (78 lines) manages job state, likely persisted to disk via state.mjs. If two parallel review invocations (or a review + a status check) read and write the same job store concurrently, the last writer wins and jobs can disappear or become orphaned. The file system is not a transactional store. This is especially relevant because v0.4.5 added --wait/--background execution modes, which means multiple processes can be manipulating job state simultaneously.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.55,\"recommendation\":\"Implement file-level locking (e.g., lockfile, atomic rename, or append-only log) for tracked-jobs state mutations. At minimum, detect and warn on concurrent access. Test this with parallel invocations.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs changes are extensive but test coverage for failure propagation is unclear\",\"body\":\"scripts/lib/glm-client.mjs expanded by 155 lines of changes. It now integrates retry, BigModel error dispatch, and potentially different auth paths. The test file result-propagation.test.mjs (69 lines) is small relative to the surface area. If glm-client silently downgrades errors from the retry layer into empty responses, the review command will appear to succeed but produce no useful output. This is a silent-failure scenario that is expensive to detect in production.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.6,\"recommendation\":\"Add integration-level tests that exercise glm-client with a mocked API that returns various error codes (429, 500, 403, malformed JSON, timeout) and verify that each error path produces a visible, actionable error for the user — not an empty or silent result.\"},{\"severity\":\"medium\",\"title\":\"state.mjs changes may break existing persisted state from v0.4.0\",\"body\":\"scripts/lib/state.mjs (32 lines changed) manages persisted state. If the schema of the state file changed between v0.4.0 and v0.4.6 (new fields, renamed fields, different structure), users upgrading in-place will have their existing state file fail to parse or silently lose data. There is no visible migration path or version field in the state schema based on the diff stat.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.5,\"recommendation\":\"Add a state file version field and a migration path from the v0.4.0 format. On load, detect old-format state files and either migrate them or warn the user. Test the upgrade path explicitly.\"}],\"next_steps\":[\"Inspect retry.mjs exhaustively to confirm the final-throw invariant on max-retry exhaustion\",\"Review bigmodel-errors.mjs default classification branch for unknown error codes\",\"Check tracked-jobs.mjs for any concurrency guard; if absent, test with parallel invocations\",\"Verify glm-client.mjs error paths never produce a false-success (empty response treated as OK)\",\"Test in-place upgrade from a v0.4.0 state file to confirm no data loss or parse failure\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:52:36.565Z"
+}

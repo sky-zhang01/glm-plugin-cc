@@ -5,13 +5,13 @@
   },
   "metadata": {
     "description": "Marketplace exposing glm-plugin-cc for Claude Code (GLM reviewer/rescue via 智谱 BigModel OpenAI-compatible HTTP).",
-    "version": "0.4.7"
+    "version": "0.4.7-beta1"
   },
   "plugins": [
     {
       "name": "glm",
       "description": "Use 智谱 GLM models from Claude Code to review code or delegate tasks. Stateless HTTP via OpenAI-compatible endpoint. No Stop hook — orchestration lives in an external SEV harness's /verify layer.",
-      "version": "0.4.7",
+      "version": "0.4.7-beta1",
       "author": {
         "name": "Sky Zhang"
       },

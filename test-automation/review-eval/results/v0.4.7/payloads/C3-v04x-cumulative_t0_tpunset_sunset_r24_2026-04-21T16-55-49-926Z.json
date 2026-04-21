@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 24
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 67534,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The diff introduces retry logic, error dispatch, and job-control changes that are material to the v0.4.7 sampling-sweep focus. While the overall structure is reasonable, there are specific issues in the retry and error-handling paths that could cause silent failures or resource leaks under production stress. The most concerning finding is in retry.mjs where the backoff implementation may not cap correctly under concurrent retries, and in glm-client.mjs where error propagation can swallow retryable errors.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry loop can exceed maxAttempts under concurrent jitter collision",
+        "body": "In retry.mjs, the exponential backoff with jitter is calculated but the retry loop condition checks attempt count after incrementing. If jitter causes two concurrent retry loops to align their sleep times, both will retry simultaneously and the attempt counter is local to each call frame. More critically, the retry wrapper catches errors broadly and the shouldRetry predicate is evaluated after the error is already caught, meaning if shouldRetry returns false for an unexpected error shape, the error is silently swallowed and undefined is returned to the caller instead of re-throwing. This creates a silent failure path where the caller believes the operation succeeded with no result.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Audit the retry function's catch block to ensure that when shouldRetry returns false, the original error is always re-thrown rather than returning undefined. Add an explicit guard: if (!shouldRetry(error)) throw error; and ensure the final exhausted-retries case also throws a wrapped error rather than returning silently."
+      },
+      {
+        "severity": "high",
+        "title": "glm-client error dispatch can mask retryable network errors as non-retryable",
+        "body": "The glm-client.mjs changes introduce a BigModel error dispatch layer that classifies errors before they reach the retry logic. If the HTTP client throws a network-level error (ECONNRESET, ETIMEDOUT, ENOTFOUND) that does not have the expected response body shape, the error dispatcher may classify it as a non-retryable 'client_error' or 'unknown_error' instead of a transient network error. This means transient infrastructure blips will fail immediately without retry, defeating the purpose of the retry layer.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.68,
+        "recommendation": "In the error classification logic, add a first-pass check for standard Node.js network error codes (ECONNRESET, ETIMEDOUT, ENOTFOUND, ECONNREFUSED, etc.) and classify those as retryable BEFORE attempting to parse response body. This ensures network-level failures always get retried regardless of response shape."
+      },
+      {
+        "severity": "medium",
+        "title": "Tracked jobs cleanup is fire-and-forget on process exit",
+        "body": "In tracked-jobs.mjs, job state is written to a tracking file but the cleanup on process exit or interruption relies on process signal handlers that may not fire if the parent process is killed with SIGKILL or crashes. This leaves stale job entries in the tracking file. On next invocation, the stale entries could cause the companion to skip or misidentify active jobs, leading to duplicate work or incorrect status reporting.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.65,
+        "recommendation": "Add a staleness check when loading tracked jobs: if a job entry's timestamp is older than a reasonable TTL (e.g., 2x the maximum expected job duration), treat it as stale and clean it up rather than treating it as active. This makes the system self-healing after unclean shutdowns."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors dispatch assumes specific error body structure without defensive parsing",
+        "body": "The bigmodel-errors.mjs module maps API error codes to retry strategies but assumes the error response body contains specific fields (error.code, error.message, etc.). If the API returns an unexpected error format (e.g., an HTML error page from a reverse proxy, or a truncated JSON response), the dispatch will either throw an unhandled TypeError accessing properties on undefined, or silently produce an incorrect classification. Neither path has a test case for malformed response bodies.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.71,
+        "recommendation": "Add defensive parsing at the entry point of the error dispatcher: verify the error body is a non-null object with the expected fields before classification. Add a fallback classification for malformed responses that defaults to retryable with a short delay. Add test cases for null body, non-JSON body, and truncated JSON body."
+      },
+      {
+        "severity": "low",
+        "title": "State file writes lack atomicity - partial writes can corrupt state",
+        "body": "In state.mjs, state is persisted by writing directly to the state file path. If the process is interrupted mid-write (e.g., SIGINT during JSON.stringify + write), the state file will contain truncated JSON. On next load, JSON.parse will throw and the user's configuration/state is lost. This is a data integrity risk for the setup command.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.58,
+        "recommendation": "Use atomic write semantics: write to a temporary file in the same directory, then rename over the target. rename() is atomic on POSIX filesystems and prevents partial-write corruption."
+      }
+    ],
+    "next_steps": [
+      "Verify retry.mjs catch block always re-throws on non-retryable errors - do not allow undefined return",
+      "Add network-level error code detection before BigModel error body parsing in glm-client.mjs",
+      "Add staleness TTL to tracked-jobs loading to self-heal after unclean shutdowns",
+      "Add test cases for malformed error response bodies in bigmodel-errors.mjs",
+      "Consider atomic file writes in state.mjs to prevent state corruption on interruption"
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The diff introduces retry logic, error dispatch, and job-control changes that are material to the v0.4.7 sampling-sweep focus. While the overall structure is reasonable, there are specific issues in the retry and error-handling paths that could cause silent failures or resource leaks under production stress. The most concerning finding is in retry.mjs where the backoff implementation may not cap correctly under concurrent retries, and in glm-client.mjs where error propagation can swallow retryable errors.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Retry loop can exceed maxAttempts under concurrent jitter collision\",\n      \"body\": \"In retry.mjs, the exponential backoff with jitter is calculated but the retry loop condition checks attempt count after incrementing. If jitter causes two concurrent retry loops to align their sleep times, both will retry simultaneously and the attempt counter is local to each call frame. More critically, the retry wrapper catches errors broadly and the shouldRetry predicate is evaluated after the error is already caught, meaning if shouldRetry returns false for an unexpected error shape, the error is silently swallowed and undefined is returned to the caller instead of re-throwing. This creates a silent failure path where the caller believes the operation succeeded with no result.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Audit the retry function's catch block to ensure that when shouldRetry returns false, the original error is always re-thrown rather than returning undefined. Add an explicit guard: if (!shouldRetry(error)) throw error; and ensure the final exhausted-retries case also throws a wrapped error rather than returning silently.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"glm-client error dispatch can mask retryable network errors as non-retryable\",\n      \"body\": \"The glm-client.mjs changes introduce a BigModel error dispatch layer that classifies errors before they reach the retry logic. If the HTTP client throws a network-level error (ECONNRESET, ETIMEDOUT, ENOTFOUND) that does not have the expected response body shape, the error dispatcher may classify it as a non-retryable 'client_error' or 'unknown_error' instead of a transient network error. This means transient infrastructure blips will fail immediately without retry, defeating the purpose of the retry layer.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.68,\n      \"recommendation\": \"In the error classification logic, add a first-pass check for standard Node.js network error codes (ECONNRESET, ETIMEDOUT, ENOTFOUND, ECONNREFUSED, etc.) and classify those as retryable BEFORE attempting to parse response body. This ensures network-level failures always get retried regardless of response shape.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Tracked jobs cleanup is fire-and-forget on process exit\",\n      \"body\": \"In tracked-jobs.mjs, job state is written to a tracking file but the cleanup on process exit or interruption relies on process signal handlers that may not fire if the parent process is killed with SIGKILL or crashes. This leaves stale job entries in the tracking file. On next invocation, the stale entries could cause the companion to skip or misidentify active jobs, leading to duplicate work or incorrect status reporting.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Add a staleness check when loading tracked jobs: if a job entry's timestamp is older than a reasonable TTL (e.g., 2x the maximum expected job duration), treat it as stale and clean it up rather than treating it as active. This makes the system self-healing after unclean shutdowns.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"bigmodel-errors dispatch assumes specific error body structure without defensive parsing\",\n      \"body\": \"The bigmodel-errors.mjs module maps API error codes to retry strategies but assumes the error response body contains specific fields (error.code, error.message, etc.). If the API returns an unexpected error format (e.g., an HTML error page from a reverse proxy, or a truncated JSON response), the dispatch will either throw an unhandled TypeError accessing properties on undefined, or silently produce an incorrect classification. Neither path has a test case for malformed response bodies.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.71,\n      \"recommendation\": \"Add defensive parsing at the entry point of the error dispatcher: verify the error body is a non-null object with the expected fields before classification. Add a fallback classification for malformed responses that defaults to retryable with a short delay. Add test cases for null body, non-JSON body, and truncated JSON body.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"State file writes lack atomicity - partial writes can corrupt state\",\n      \"body\": \"In state.mjs, state is persisted by writing directly to the state file path. If the process is interrupted mid-write (e.g., SIGINT during JSON.stringify + write), the state file will contain truncated JSON. On next load, JSON.parse will throw and the user's configuration/state is lost. This is a data integrity risk for the setup command.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.58,\n      \"recommendation\": \"Use atomic write semantics: write to a temporary file in the same directory, then rename over the target. rename() is atomic on POSIX filesystems and prevents partial-write corruption.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Verify retry.mjs catch block always re-throws on non-retryable errors - do not allow undefined return\",\n    \"Add network-level error code detection before BigModel error body parsing in glm-client.mjs\",\n    \"Add staleness TTL to tracked-jobs loading to self-heal after unclean shutdowns\",\n    \"Add test cases for malformed error response bodies in bigmodel-errors.mjs\",\n    \"Consider atomic file writes in state.mjs to prevent state corruption on interruption\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T16:55:49.965Z"
+}

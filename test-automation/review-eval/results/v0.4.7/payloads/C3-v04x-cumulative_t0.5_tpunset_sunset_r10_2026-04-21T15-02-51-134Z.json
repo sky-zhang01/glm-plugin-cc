@@ -1,0 +1,28 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 10
+  },
+  "metrics": {
+    "schema_compliance": 0,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 93731,
+    "error_code": "PARSE_FAILURE"
+  },
+  "parsed": null,
+  "rawOutputHead": "I need to examine the actual code in the critical files to find concrete defects. Let me read the key files.",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "PARSE_FAILURE",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T15:02:51.134Z"
+}

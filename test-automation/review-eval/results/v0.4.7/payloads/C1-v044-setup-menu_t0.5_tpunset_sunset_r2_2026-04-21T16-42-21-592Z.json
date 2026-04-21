@@ -1,0 +1,48 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 1,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 22979,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The commit adds an interactive setup menu and renames the npm scope. The changes are confined to documentation, metadata, and a markdown command file — so there is no runtime code to exploit. However, the setup command template has a structural flaw that could cause silent misbehavior on the re-configuration path it claims to fix.",
+    "findings": [
+      {
+        "severity": "medium",
+        "title": "Setup menu template lacks else-path guard for unrecognised input",
+        "body": "In commands/setup.md, the interactive menu template uses numbered-choice pattern (1-4) for the re-configuration flow. If the user supplies an unexpected value (e.g. a non-numeric answer, or a number outside 1-4), there is no explicit fallback branch visible in the template. Because this is a Markdown-driven command parsed by the GLM runtime, an invalid selection may silently fall through to no-op or default to the first option, giving the user no feedback that their choice was ignored. On a setup/configure path this is a trust-boundary issue: the user believes they have reconfigured (e.g. switched models or reset keys) when in fact nothing changed.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.55,
+        "recommendation": "Add an explicit catch-all / else instruction in the menu template that acknowledges invalid input and re-prompts or exits with a clear message, so the user is never left in an ambiguous state about whether their configuration was applied."
+      }
+    ],
+    "next_steps": [
+      "Inspect the full rendered behaviour of the setup command at runtime with out-of-range and non-numeric inputs to confirm whether the GLM command runtime handles the fallback or the template must.",
+      "Verify that the npm scope rename (@anthropic → @anthropics or similar) does not break existing installs or published package references before release.",
+      "Confirm CHANGELOG version bump matches package.json version."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The commit adds an interactive setup menu and renames the npm scope. The changes are confined to documentation, metadata, and a markdown command file — so there is no runtime code to exploit. However, the setup command template has a structural flaw that could cause silent misbehavior on the re-configuration path it claims to fix.\",\"findings\":[{\"severity\":\"medium\",\"title\":\"Setup menu template lacks else-path guard for unrecognised input\",\"body\":\"In commands/setup.md, the interactive menu template uses numbered-choice pattern (1-4) for the re-configuration flow. If the user supplies an unexpected value (e.g. a non-numeric answer, or a number outside 1-4), there is no explicit fallback branch visible in the template. Because this is a Markdown-driven command parsed by the GLM runtime, an invalid selection may silently fall through to no-op or default to the first option, giving the user no feedback that their choice was ignored. On a setup/configure path this is a trust-boundary issue: the user believes they have reconfigured (e.g. switched models or reset keys) when in fact nothing changed.\",\"file\":\"commands/setup.md\",\"line_start\":1,\"line_end\":19,\"confidence\":0.55,\"recommendation\":\"Add an explicit catch-all / else instruction in the menu template that acknowledges invalid input and re-prompts or exits with a clear message, so the user is never left in an ambiguous state about whether their configuration was applied.\"}],\"next_steps\":[\"Inspect the full rendered behaviour of the setup command at runtime with out-of-range and non-numeric inputs to confirm whether the GLM command runtime handles the fallback or the template must.\",\"Verify that the npm scope rename (@anthropic → @anthropics or similar) does not break existing installs or published package references before release.\",\"Confirm CHANGELOG version bump matches package.json version.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:42:21.598Z"
+}
