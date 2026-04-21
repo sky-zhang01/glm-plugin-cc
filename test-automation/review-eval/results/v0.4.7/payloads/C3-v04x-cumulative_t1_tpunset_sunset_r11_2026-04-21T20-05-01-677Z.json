@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 11
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 68807,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "Cumulative v0.4.0→v0.4.6 diff introduces significant new infrastructural modules (retry.mjs, bigmodel-errors.mjs) and deletes process.mjs entirely. Without direct code inspection the most defensible risks are: (1) deleted process.mjs may leave orphaned imports causing runtime ReferenceErrors, (2) the new retry/error-dispatch layer integrated into glm-client.mjs could silently swallow non-retryable errors or duplicate non-idempotent API calls, and (3) concurrent state mutations in state.mjs + tracked-jobs.mjs lack visible serialization guarantees. These are high-cost failure modes (silent data corruption, hung jobs, uncaught crashes) that must be verified before shipping.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Deleted process.mjs may orphan imports across the codebase",
+        "body": "scripts/lib/process.mjs was entirely removed (67 lines deleted, 0 added). If any surviving file still imports from './lib/process.mjs' or '../lib/process.mjs', the import will resolve at require-time but any named export access will throw at runtime. scripts/check-imports.mjs was modified (5 lines changed) suggesting import-path updates were attempted, but check-imports.mjs is a static analysis script that may not cover dynamic imports, re-exports, or template-literal import paths. A single missed import produces an unhandled ReferenceError in production.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.72,
+        "recommendation": "Run `grep -r 'process\\.mjs' scripts/ commands/` (excluding the deleted file and check-imports itself) and verify zero hits. Add an automated CI gate that greps for the deleted module path and fails the build on any match."
+      },
+      {
+        "severity": "high",
+        "title": "New retry layer in glm-client.mjs may duplicate non-idempotent BigModel API calls",
+        "body": "retry.mjs (203 lines added) and bigmodel-errors.mjs (168 lines added) introduce retry/backoff semantics integrated into glm-client.mjs (155 lines changed). If the BigModel API calls that receive retries are not idempotent (e.g., job submission, state-mutating operations), a retried request after a timeout or 5xx could create duplicate jobs or double-apply state changes. The retry logic must classify errors precisely and skip retries for operations that have already been acknowledged server-side. Without seeing the implementation, this is a classic silent-data-corruption vector.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.65,
+        "recommendation": "Audit every call site in glm-client.mjs where retry is applied. Confirm each wrapped operation is idempotent or that the retry layer checks for an idempotency key / prior response before re-executing. Add a test case in retry.test.mjs that verifies a retried job-submission call does not produce duplicate records."
+      },
+      {
+        "severity": "medium",
+        "title": "Concurrent state mutations in state.mjs and tracked-jobs.mjs lack visible locking",
+        "body": "state.mjs (32 lines changed) and tracked-jobs.mjs (78 lines changed) manage persistent job/state data. If two concurrent glm-companion.mjs processes or two overlapping async call stacks read-modify-write the same state file, the last writer wins silently, losing intermediate updates. Node.js async I/O interleaving between readFile and writeFile creates a TOCTOU window even in single-process usage if multiple async operations overlap.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.58,
+        "recommendation": "Verify whether state.mjs uses atomic file replacement (write-to-temp then rename) or a serialization queue for read-modify-write cycles. If not, add either file-locking (e.g., proper-lockfile) or an in-process mutex around state transitions. Add a concurrent-write test in state.test.mjs that runs two overlapping updates and asserts both mutations are preserved."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error dispatch could misclassify unknown errors as retryable",
+        "body": "A new 168-line error classification module dispatches BigModel errors into retryable vs. non-retryable categories. If the classification falls through to a default 'retryable' branch for unrecognized error shapes (e.g., new API error codes, schema changes on the provider side), the system will blindly retry errors that should surface immediately. This masks real failures and wastes retry budget, potentially delaying user-visible error reporting by minutes.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.55,
+        "recommendation": "Inspect the default/else branch of the error classifier. Ensure unrecognized errors are classified as non-retryable (fail-fast) rather than retryable. Add a test in bigmodel-errors.test.mjs that passes a completely novel error shape and asserts it is classified as non-retryable."
+      }
+    ],
+    "next_steps": [
+      "Run `git diff v0.4.0..HEAD -- scripts/lib/process.mjs` to confirm the deletion and then `grep -rn 'process\\.mjs' scripts/ commands/ hooks/` to verify no orphaned imports remain.",
+      "Inspect retry.mjs call sites in glm-client.mjs to confirm each retried operation is idempotent or guarded by an idempotency check.",
+      "Review state.mjs read-modify-write paths for TOCTOU race conditions; verify atomic file replacement or locking is in place.",
+      "Check bigmodel-errors.mjs default classification branch — ensure unknown errors fail fast rather than trigger silent retries.",
+      "Run the full test suite (`node --test tests/*.test.mjs`) against the target commit and verify zero failures before merge."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"Cumulative v0.4.0→v0.4.6 diff introduces significant new infrastructural modules (retry.mjs, bigmodel-errors.mjs) and deletes process.mjs entirely. Without direct code inspection the most defensible risks are: (1) deleted process.mjs may leave orphaned imports causing runtime ReferenceErrors, (2) the new retry/error-dispatch layer integrated into glm-client.mjs could silently swallow non-retryable errors or duplicate non-idempotent API calls, and (3) concurrent state mutations in state.mjs + tracked-jobs.mjs lack visible serialization guarantees. These are high-cost failure modes (silent data corruption, hung jobs, uncaught crashes) that must be verified before shipping.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Deleted process.mjs may orphan imports across the codebase\",\n      \"body\": \"scripts/lib/process.mjs was entirely removed (67 lines deleted, 0 added). If any surviving file still imports from './lib/process.mjs' or '../lib/process.mjs', the import will resolve at require-time but any named export access will throw at runtime. scripts/check-imports.mjs was modified (5 lines changed) suggesting import-path updates were attempted, but check-imports.mjs is a static analysis script that may not cover dynamic imports, re-exports, or template-literal import paths. A single missed import produces an unhandled ReferenceError in production.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Run `grep -r 'process\\\\.mjs' scripts/ commands/` (excluding the deleted file and check-imports itself) and verify zero hits. Add an automated CI gate that greps for the deleted module path and fails the build on any match.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"New retry layer in glm-client.mjs may duplicate non-idempotent BigModel API calls\",\n      \"body\": \"retry.mjs (203 lines added) and bigmodel-errors.mjs (168 lines added) introduce retry/backoff semantics integrated into glm-client.mjs (155 lines changed). If the BigModel API calls that receive retries are not idempotent (e.g., job submission, state-mutating operations), a retried request after a timeout or 5xx could create duplicate jobs or double-apply state changes. The retry logic must classify errors precisely and skip retries for operations that have already been acknowledged server-side. Without seeing the implementation, this is a classic silent-data-corruption vector.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Audit every call site in glm-client.mjs where retry is applied. Confirm each wrapped operation is idempotent or that the retry layer checks for an idempotency key / prior response before re-executing. Add a test case in retry.test.mjs that verifies a retried job-submission call does not produce duplicate records.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Concurrent state mutations in state.mjs and tracked-jobs.mjs lack visible locking\",\n      \"body\": \"state.mjs (32 lines changed) and tracked-jobs.mjs (78 lines changed) manage persistent job/state data. If two concurrent glm-companion.mjs processes or two overlapping async call stacks read-modify-write the same state file, the last writer wins silently, losing intermediate updates. Node.js async I/O interleaving between readFile and writeFile creates a TOCTOU window even in single-process usage if multiple async operations overlap.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.58,\n      \"recommendation\": \"Verify whether state.mjs uses atomic file replacement (write-to-temp then rename) or a serialization queue for read-modify-write cycles. If not, add either file-locking (e.g., proper-lockfile) or an in-process mutex around state transitions. Add a concurrent-write test in state.test.mjs that runs two overlapping updates and asserts both mutations are preserved.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"bigmodel-errors.mjs error dispatch could misclassify unknown errors as retryable\",\n      \"body\": \"A new 168-line error classification module dispatches BigModel errors into retryable vs. non-retryable categories. If the classification falls through to a default 'retryable' branch for unrecognized error shapes (e.g., new API error codes, schema changes on the provider side), the system will blindly retry errors that should surface immediately. This masks real failures and wastes retry budget, potentially delaying user-visible error reporting by minutes.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Inspect the default/else branch of the error classifier. Ensure unrecognized errors are classified as non-retryable (fail-fast) rather than retryable. Add a test in bigmodel-errors.test.mjs that passes a completely novel error shape and asserts it is classified as non-retryable.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `git diff v0.4.0..HEAD -- scripts/lib/process.mjs` to confirm the deletion and then `grep -rn 'process\\\\.mjs' scripts/ commands/ hooks/` to verify no orphaned imports remain.\",\n    \"Inspect retry.mjs call sites in glm-client.mjs to confirm each retried operation is idempotent or guarded by an idempotency check.\",\n    \"Review state.mjs read-modify-write paths for TOCTOU race conditions; verify atomic file replacement or locking is in place.\",\n    \"Check bigmodel-errors.mjs default classification branch — ensure unknown errors fail fast rather than trigger silent retries.\",\n    \"Run the full test suite (`node --test tests/*.test.mjs`) against the target commit and verify zero failures before merge.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T20:05:01.707Z"
+}

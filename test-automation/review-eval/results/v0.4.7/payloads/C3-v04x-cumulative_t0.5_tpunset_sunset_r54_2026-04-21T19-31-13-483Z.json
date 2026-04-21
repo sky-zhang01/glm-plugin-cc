@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 54
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 108447,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "Massive cumulative delta (84 files, +6623/-480 lines) spanning v0.4.0→v0.4.6 with concurrent additions of retry logic, error dispatch, background job execution, and a deleted module. The scope alone is a ship risk: several new critical-path modules (retry.mjs 203 lines, bigmodel-errors.mjs 168 lines) interact in ways that are hard to validate without tracing the actual code. The deleted process.mjs and the background execution mode introduce concrete failure modes that warrant verification before release.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Deleted scripts/lib/process.mjs (67 lines) risks runtime MODULE_NOT_FOUND on any missed import",
+        "body": "The diff stat shows scripts/lib/process.mjs was entirely removed (-67 lines). scripts/check-imports.mjs was modified (+5/-1 lines), likely to update module references, but check-imports.mjs is a static analysis tool that may not cover dynamic imports, eval-based loading, or the test-automation shell scripts that invoke the companion. Any remaining `import ... from './process.mjs'` or `require('./process.mjs')` at runtime will throw MODULE_NOT_FOUND and crash the invocation. The commit log notes 'ReferenceError + full thread/resume scaffolding purge' (Bundle F), suggesting this deletion was part of a larger purge, which increases the chance that a dependent path was missed.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.72,
+        "recommendation": "Run `grep -r 'process\\.mjs' scripts/ test-automation/ commands/ --include='*.mjs' --include='*.sh'` against the working tree. If any hit exists outside check-imports.mjs, either restore the module with a re-export shim or update the consumer. Add a CI gate that fails if any .mjs file imports from a path that does not exist on disk."
+      },
+      {
+        "severity": "high",
+        "title": "New retry.mjs (203 lines) + bigmodel-errors.mjs (168 lines) error-classification coupling can silently misroute failures",
+        "body": "Retry behavior is driven by error classification in bigmodel-errors.mjs. If an error is misclassified as retryable (e.g., a 400-level auth error matching a broad pattern), the retry loop will burn API quota and potentially trigger rate-limiting or account lockout. Conversely, if a transient 429/503 is classified as non-retryable, the user sees an opaque failure with no recovery. The two modules are new, large, and tightly coupled through an implicit contract (error shape → retry decision). The test file retry.test.mjs (352 lines) tests the retry module in isolation but cannot fully validate the classification boundary conditions that arise when bigmodel-errors dispatches real API responses. This is exactly the kind of coupling that passes unit tests but fails in production edge cases.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.65,
+        "recommendation": "Add integration tests that feed real-looking API error payloads through bigmodel-errors.classify() into retry.withRetry() and assert both retry-count and final-error behavior for each error class. Add a safety cap (max total retry budget in wall-clock time or absolute request count) to prevent quota exhaustion regardless of classification. Log every retry decision at warn level for observability."
+      },
+      {
+        "severity": "medium",
+        "title": "Background execution mode (--wait/--background) can orphan jobs on process kill or unclean shutdown",
+        "body": "The commit 'feat(review): add --wait/--background execution-mode flags + size-estimation menu' introduces background job execution. tracked-jobs.mjs (78 lines changed) manages job state, and session-lifecycle-hook.mjs (5 lines changed) may handle cleanup. If the parent process is killed (SIGKILL, OOM, user Ctrl-C during --background), tracked-jobs state can become stale — pointing to PIDs or temp files that no longer exist. A subsequent invocation reading stale state could hang waiting for a dead job, or worse, assume a job completed successfully when it was interrupted mid-write. The lifecycle hook modification is only 5 lines, which is suspiciously small for proper cleanup of background processes.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.58,
+        "recommendation": "On startup, tracked-jobs.mjs should detect stale entries (PID not running, temp file missing) and either mark them failed or prompt the user. Add a SIGTERM/SIGINT handler in the background execution path that writes a 'cancelled' status before exiting. Consider adding a --cleanup flag or automatic stale-job detection on every invocation."
+      }
+    ],
+    "next_steps": [
+      "Run `grep -rn 'process\\.mjs\\|process\\.js' scripts/ test-automation/` to verify no dangling imports from the deleted module",
+      "Inspect retry.mjs for a hard ceiling on total retry cost (wall-clock or request count) independent of error classification",
+      "Verify tracked-jobs.mjs handles stale state on startup and that session-lifecycle-hook.mjs covers SIGTERM/SIGINT for background jobs",
+      "Consider splitting this cumulative delta into smaller, individually reviewable release increments to reduce ship risk"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"Massive cumulative delta (84 files, +6623/-480 lines) spanning v0.4.0→v0.4.6 with concurrent additions of retry logic, error dispatch, background job execution, and a deleted module. The scope alone is a ship risk: several new critical-path modules (retry.mjs 203 lines, bigmodel-errors.mjs 168 lines) interact in ways that are hard to validate without tracing the actual code. The deleted process.mjs and the background execution mode introduce concrete failure modes that warrant verification before release.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Deleted scripts/lib/process.mjs (67 lines) risks runtime MODULE_NOT_FOUND on any missed import\",\"body\":\"The diff stat shows scripts/lib/process.mjs was entirely removed (-67 lines). scripts/check-imports.mjs was modified (+5/-1 lines), likely to update module references, but check-imports.mjs is a static analysis tool that may not cover dynamic imports, eval-based loading, or the test-automation shell scripts that invoke the companion. Any remaining `import ... from './process.mjs'` or `require('./process.mjs')` at runtime will throw MODULE_NOT_FOUND and crash the invocation. The commit log notes 'ReferenceError + full thread/resume scaffolding purge' (Bundle F), suggesting this deletion was part of a larger purge, which increases the chance that a dependent path was missed.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":67,\"confidence\":0.72,\"recommendation\":\"Run `grep -r 'process\\\\.mjs' scripts/ test-automation/ commands/ --include='*.mjs' --include='*.sh'` against the working tree. If any hit exists outside check-imports.mjs, either restore the module with a re-export shim or update the consumer. Add a CI gate that fails if any .mjs file imports from a path that does not exist on disk.\"},{\"severity\":\"high\",\"title\":\"New retry.mjs (203 lines) + bigmodel-errors.mjs (168 lines) error-classification coupling can silently misroute failures\",\"body\":\"Retry behavior is driven by error classification in bigmodel-errors.mjs. If an error is misclassified as retryable (e.g., a 400-level auth error matching a broad pattern), the retry loop will burn API quota and potentially trigger rate-limiting or account lockout. Conversely, if a transient 429/503 is classified as non-retryable, the user sees an opaque failure with no recovery. The two modules are new, large, and tightly coupled through an implicit contract (error shape → retry decision). The test file retry.test.mjs (352 lines) tests the retry module in isolation but cannot fully validate the classification boundary conditions that arise when bigmodel-errors dispatches real API responses. This is exactly the kind of coupling that passes unit tests but fails in production edge cases.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.65,\"recommendation\":\"Add integration tests that feed real-looking API error payloads through bigmodel-errors.classify() into retry.withRetry() and assert both retry-count and final-error behavior for each error class. Add a safety cap (max total retry budget in wall-clock time or absolute request count) to prevent quota exhaustion regardless of classification. Log every retry decision at warn level for observability.\"},{\"severity\":\"medium\",\"title\":\"Background execution mode (--wait/--background) can orphan jobs on process kill or unclean shutdown\",\"body\":\"The commit 'feat(review): add --wait/--background execution-mode flags + size-estimation menu' introduces background job execution. tracked-jobs.mjs (78 lines changed) manages job state, and session-lifecycle-hook.mjs (5 lines changed) may handle cleanup. If the parent process is killed (SIGKILL, OOM, user Ctrl-C during --background), tracked-jobs state can become stale — pointing to PIDs or temp files that no longer exist. A subsequent invocation reading stale state could hang waiting for a dead job, or worse, assume a job completed successfully when it was interrupted mid-write. The lifecycle hook modification is only 5 lines, which is suspiciously small for proper cleanup of background processes.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.58,\"recommendation\":\"On startup, tracked-jobs.mjs should detect stale entries (PID not running, temp file missing) and either mark them failed or prompt the user. Add a SIGTERM/SIGINT handler in the background execution path that writes a 'cancelled' status before exiting. Consider adding a --cleanup flag or automatic stale-job detection on every invocation.\"}],\"next_steps\":[\"Run `grep -rn 'process\\\\.mjs\\\\|process\\\\.js' scripts/ test-automation/` to verify no dangling imports from the deleted module\",\"Inspect retry.mjs for a hard ceiling on total retry cost (wall-clock or request count) independent of error classification\",\"Verify tracked-jobs.mjs handles stale state on startup and that session-lifecycle-hook.mjs covers SIGTERM/SIGINT for background jobs\",\"Consider splitting this cumulative delta into smaller, individually reviewable release increments to reduce ship risk\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T19:31:13.505Z"
+}

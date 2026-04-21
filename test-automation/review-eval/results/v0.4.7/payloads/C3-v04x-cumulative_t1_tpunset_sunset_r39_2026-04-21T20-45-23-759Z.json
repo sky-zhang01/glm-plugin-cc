@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 39
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 37118,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces substantial new runtime logic (retry/backoff, BigModel error dispatch, tracked jobs, render pipeline) without clear evidence of edge-case hardening in several critical paths. The most concerning areas are: (1) retry.mjs has unbounded concurrency potential under concurrent callers, (2) tracked-jobs.mjs state mutations lack atomicity guarantees, and (3) glm-client.mjs error classification could silently swallow transient failures as permanent. These are the kinds of defects that pass UAT on happy paths but degrade under production stress. I am blocking on three concrete findings below.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs: no concurrency guard — overlapping retry loops can exhaust API quota or corrupt shared job state",
+        "body": "The retry module (scripts/lib/retry.mjs) is new in this diff (~203 lines added) and implements exponential backoff with configurable attempts. However, the diff stat shows no mutex, lock, or deduplication mechanism. If two callers invoke retry for the same logical operation (e.g., two concurrent glm-client requests for the same job ID), both loops run independently, potentially doubling API calls and racing on shared state in tracked-jobs.mjs or state.mjs. Under the user focus on 'sampling-sweep run 39', concurrent sweeps hitting the same endpoint would amplify this. The retry loop also appears to use setTimeout-based delays with no cancellation token, meaning a caller that gives up early cannot abort in-flight retries.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Add an AbortSignal or cancellation token parameter to the retry function. Document whether callers are expected to serialize access. At minimum, log a warning when retry is invoked concurrently for the same operation key."
+      },
+      {
+        "severity": "high",
+        "title": "bigmodel-errors.mjs: misclassification of transient errors as permanent causes silent data loss on retry exhaustion",
+        "body": "scripts/lib/bigmodel-errors.mjs (~168 lines added) classifies API error codes to determine retry eligibility. If an error is classified as non-retryable but is actually transient (e.g., a 503 with an unrecognized error subcode, or a rate-limit response with an unexpected Content-Type), the caller in glm-client.mjs will immediately fail the job without retry. The companion test file (tests/bigmodel-errors.test.mjs, ~189 lines) only tests known error patterns. There is no fallback path for unrecognized errors — the diff shows no 'default to retryable' safety net. A single misclassification under a sampling sweep means an entire batch is silently dropped with no recovery path, which is exactly the failure mode the retry system was built to prevent.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.78,
+        "recommendation": "Add a default/fallback classification that treats unrecognized error responses as retryable (conservative stance). Add a log line for unclassified errors so they are observable. Extend tests to cover the unknown-error-code path explicitly."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs: non-atomic state file writes risk corruption on crash or SIGKILL mid-write",
+        "body": "scripts/lib/tracked-jobs.mjs (~78 lines changed) persists job tracking state. The companion fs.mjs module (~44 lines changed) provides file utilities. Neither shows evidence of atomic write (write-to-temp-then-rename) patterns. Under a sampling sweep with high job throughput, a process crash or OOM kill during write can leave a partially-written JSON state file. On restart, JSON.parse would throw, and there is no visible recovery mechanism (no backup file, no corruption-tolerant parse). This would cause all tracked job state to be lost — a data-loss scenario that is silent until the next status query.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.68,
+        "recommendation": "Use atomic write: write to a temp file in the same directory, then rename over the target. On read, if the main file is corrupt, attempt to read the previous temp/backup file. Add a test that simulates a truncated state file and verifies recovery behavior."
+      }
+    ],
+    "next_steps": [
+      "Inspect scripts/lib/retry.mjs full source to confirm absence of cancellation/concurrency controls and assess whether sampling-sweep scenarios actually trigger concurrent retry paths.",
+      "Inspect scripts/lib/bigmodel-errors.mjs to verify the default error classification behavior — confirm whether unknown error codes are treated as retryable or permanent.",
+      "Inspect scripts/lib/tracked-jobs.mjs and scripts/lib/fs.mjs to confirm write atomicity (or lack thereof) and trace the recovery path for a corrupt state file.",
+      "Run the existing test suite (tests/retry.test.mjs, tests/bigmodel-errors.test.mjs) with injected unknown error codes and concurrent callers to reproduce the hypothesized failure modes."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff introduces substantial new runtime logic (retry/backoff, BigModel error dispatch, tracked jobs, render pipeline) without clear evidence of edge-case hardening in several critical paths. The most concerning areas are: (1) retry.mjs has unbounded concurrency potential under concurrent callers, (2) tracked-jobs.mjs state mutations lack atomicity guarantees, and (3) glm-client.mjs error classification could silently swallow transient failures as permanent. These are the kinds of defects that pass UAT on happy paths but degrade under production stress. I am blocking on three concrete findings below.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"retry.mjs: no concurrency guard — overlapping retry loops can exhaust API quota or corrupt shared job state\",\n      \"body\": \"The retry module (scripts/lib/retry.mjs) is new in this diff (~203 lines added) and implements exponential backoff with configurable attempts. However, the diff stat shows no mutex, lock, or deduplication mechanism. If two callers invoke retry for the same logical operation (e.g., two concurrent glm-client requests for the same job ID), both loops run independently, potentially doubling API calls and racing on shared state in tracked-jobs.mjs or state.mjs. Under the user focus on 'sampling-sweep run 39', concurrent sweeps hitting the same endpoint would amplify this. The retry loop also appears to use setTimeout-based delays with no cancellation token, meaning a caller that gives up early cannot abort in-flight retries.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Add an AbortSignal or cancellation token parameter to the retry function. Document whether callers are expected to serialize access. At minimum, log a warning when retry is invoked concurrently for the same operation key.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"bigmodel-errors.mjs: misclassification of transient errors as permanent causes silent data loss on retry exhaustion\",\n      \"body\": \"scripts/lib/bigmodel-errors.mjs (~168 lines added) classifies API error codes to determine retry eligibility. If an error is classified as non-retryable but is actually transient (e.g., a 503 with an unrecognized error subcode, or a rate-limit response with an unexpected Content-Type), the caller in glm-client.mjs will immediately fail the job without retry. The companion test file (tests/bigmodel-errors.test.mjs, ~189 lines) only tests known error patterns. There is no fallback path for unrecognized errors — the diff shows no 'default to retryable' safety net. A single misclassification under a sampling sweep means an entire batch is silently dropped with no recovery path, which is exactly the failure mode the retry system was built to prevent.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Add a default/fallback classification that treats unrecognized error responses as retryable (conservative stance). Add a log line for unclassified errors so they are observable. Extend tests to cover the unknown-error-code path explicitly.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"tracked-jobs.mjs: non-atomic state file writes risk corruption on crash or SIGKILL mid-write\",\n      \"body\": \"scripts/lib/tracked-jobs.mjs (~78 lines changed) persists job tracking state. The companion fs.mjs module (~44 lines changed) provides file utilities. Neither shows evidence of atomic write (write-to-temp-then-rename) patterns. Under a sampling sweep with high job throughput, a process crash or OOM kill during write can leave a partially-written JSON state file. On restart, JSON.parse would throw, and there is no visible recovery mechanism (no backup file, no corruption-tolerant parse). This would cause all tracked job state to be lost — a data-loss scenario that is silent until the next status query.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Use atomic write: write to a temp file in the same directory, then rename over the target. On read, if the main file is corrupt, attempt to read the previous temp/backup file. Add a test that simulates a truncated state file and verifies recovery behavior.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect scripts/lib/retry.mjs full source to confirm absence of cancellation/concurrency controls and assess whether sampling-sweep scenarios actually trigger concurrent retry paths.\",\n    \"Inspect scripts/lib/bigmodel-errors.mjs to verify the default error classification behavior — confirm whether unknown error codes are treated as retryable or permanent.\",\n    \"Inspect scripts/lib/tracked-jobs.mjs and scripts/lib/fs.mjs to confirm write atomicity (or lack thereof) and trace the recovery path for a corrupt state file.\",\n    \"Run the existing test suite (tests/retry.test.mjs, tests/bigmodel-errors.test.mjs) with injected unknown error codes and concurrent callers to reproduce the hypothesized failure modes.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T20:45:23.780Z"
+}

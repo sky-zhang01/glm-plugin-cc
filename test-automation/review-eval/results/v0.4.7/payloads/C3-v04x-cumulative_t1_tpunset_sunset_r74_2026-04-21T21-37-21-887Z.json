@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 74
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 104300,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The cumulative v0.4.0→v0.4.6 diff removes scripts/lib/process.mjs entirely (67 lines deleted) while several dependent modules in scripts/lib/ were modified in the same span. If any remaining import of process.mjs survives outside the files shown in this diff—or inside them via dynamic imports or re-exports—the result is an immediate ERR_MODULE_NOT_FOUND at runtime with no fallback path. Additionally, retry.mjs (203 new lines) and bigmodel-errors.mjs (168 new lines) form a new error-dispatch→retry backbone that all API calls now depend on, yet the diff context is insufficient to verify that retry classification is exhaustive or that backoff parameters prevent thundering-herd behaviour under sustained failure. The deleted module risk is the strongest ship-blocker because it produces a silent-then-fatal failure mode that basic smoke testing might miss if the import path is only exercised in edge-case subcommands.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Deleted scripts/lib/process.mjs may leave dangling imports",
+        "body": "The diff stat shows scripts/lib/process.mjs with 67 lines removed and zero additions—the file is deleted. Multiple scripts/lib/ modules were modified in the same diff (render.mjs ±79, job-control.mjs ±20, state.mjs ±32, glm-client.mjs ±155). If any of these—or scripts/glm-companion.mjs—still contain a static or dynamic import of process.mjs, the runtime will throw ERR_MODULE_NOT_FOUND. Because the process module likely exported utility functions (spawning, signal handling, or exit-code mapping), a missing import would surface only when the specific code path that calls those utilities is exercised, making it easy to miss in ad-hoc testing and likely to hit users during error-handling or background-execution paths.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.72,
+        "recommendation": "Grepping the entire tree for 'process.mjs' or 'process\\' (as an import specifier) should be a hard gate. Add a CI check that verifies no import resolves to a deleted file. If process.mjs functionality was absorbed into render.mjs or retry.mjs, confirm that every former call-site was updated and that tests cover the redirected path."
+      },
+      {
+        "severity": "medium",
+        "title": "New retry.mjs backbone has no visible guard against non-idempotent retries",
+        "body": "retry.mjs adds 203 lines of new retry/backoff logic and is paired with 352 lines of tests (good ratio). However, if the retry wrapper is applied to API calls that have side effects (e.g., job submission, state transitions in tracked-jobs.mjs, or writes via glm-client.mjs), a retried request that actually succeeded on the first attempt but whose response was lost (network timeout) would produce duplicate side effects. The diff context does not show whether idempotency keys, request deduplication, or at-most-once guards exist. Given that tracked-jobs.mjs (78 lines changed) and state.mjs (32 lines changed) manage persistent state, a duplicate job write could corrupt the job ledger silently.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.55,
+        "recommendation": "Verify that retry.mjs only wraps idempotent (GET/status) operations, or that mutating calls carry idempotency keys. Add a test case where a 'successful' request is followed by a synthetic network error to confirm the retry layer does not double-execute the side effect."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error taxonomy may silently swallow unknown error shapes",
+        "body": "The new bigmodel-errors.mjs (168 lines) is the error-classification layer that drives retry decisions. If the error taxonomy does not cover all response shapes the BigModel API can return, unrecognised errors will fall into a default branch. A conservative default (no retry) hides transient failures; a permissive default (always retry) wastes quota and may hit rate limits. Without seeing the implementation, the risk is that the classification is incomplete, causing either silent data loss (giving up on a retriable error) or wasteful retries on permanent failures (burning API quota).",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.5,
+        "recommendation": "Ensure the default classification branch logs the unrecognised error shape at WARN level (not silently) and applies a conservative 'no retry' policy. Add a test that passes a completely unexpected error shape and asserts the fallback behaviour is documented and safe."
+      }
+    ],
+    "next_steps": [
+      "Run 'grep -r \"from.*process\" scripts/' and 'grep -r \"import.*process\" scripts/' to confirm no file still imports from the deleted scripts/lib/process.mjs.",
+      "Audit retry.mjs to confirm it is only applied to idempotent operations or that mutating calls include idempotency keys.",
+      "Verify bigmodel-errors.mjs default error branch logs unrecognised shapes rather than silently swallowing them.",
+      "Run the full test suite (all 13 test files shown) and confirm zero failures before merging."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The cumulative v0.4.0→v0.4.6 diff removes scripts/lib/process.mjs entirely (67 lines deleted) while several dependent modules in scripts/lib/ were modified in the same span. If any remaining import of process.mjs survives outside the files shown in this diff—or inside them via dynamic imports or re-exports—the result is an immediate ERR_MODULE_NOT_FOUND at runtime with no fallback path. Additionally, retry.mjs (203 new lines) and bigmodel-errors.mjs (168 new lines) form a new error-dispatch→retry backbone that all API calls now depend on, yet the diff context is insufficient to verify that retry classification is exhaustive or that backoff parameters prevent thundering-herd behaviour under sustained failure. The deleted module risk is the strongest ship-blocker because it produces a silent-then-fatal failure mode that basic smoke testing might miss if the import path is only exercised in edge-case subcommands.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Deleted scripts/lib/process.mjs may leave dangling imports\",\n      \"body\": \"The diff stat shows scripts/lib/process.mjs with 67 lines removed and zero additions—the file is deleted. Multiple scripts/lib/ modules were modified in the same diff (render.mjs ±79, job-control.mjs ±20, state.mjs ±32, glm-client.mjs ±155). If any of these—or scripts/glm-companion.mjs—still contain a static or dynamic import of process.mjs, the runtime will throw ERR_MODULE_NOT_FOUND. Because the process module likely exported utility functions (spawning, signal handling, or exit-code mapping), a missing import would surface only when the specific code path that calls those utilities is exercised, making it easy to miss in ad-hoc testing and likely to hit users during error-handling or background-execution paths.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Grepping the entire tree for 'process.mjs' or 'process\\\\' (as an import specifier) should be a hard gate. Add a CI check that verifies no import resolves to a deleted file. If process.mjs functionality was absorbed into render.mjs or retry.mjs, confirm that every former call-site was updated and that tests cover the redirected path.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"New retry.mjs backbone has no visible guard against non-idempotent retries\",\n      \"body\": \"retry.mjs adds 203 lines of new retry/backoff logic and is paired with 352 lines of tests (good ratio). However, if the retry wrapper is applied to API calls that have side effects (e.g., job submission, state transitions in tracked-jobs.mjs, or writes via glm-client.mjs), a retried request that actually succeeded on the first attempt but whose response was lost (network timeout) would produce duplicate side effects. The diff context does not show whether idempotency keys, request deduplication, or at-most-once guards exist. Given that tracked-jobs.mjs (78 lines changed) and state.mjs (32 lines changed) manage persistent state, a duplicate job write could corrupt the job ledger silently.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Verify that retry.mjs only wraps idempotent (GET/status) operations, or that mutating calls carry idempotency keys. Add a test case where a 'successful' request is followed by a synthetic network error to confirm the retry layer does not double-execute the side effect.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"bigmodel-errors.mjs error taxonomy may silently swallow unknown error shapes\",\n      \"body\": \"The new bigmodel-errors.mjs (168 lines) is the error-classification layer that drives retry decisions. If the error taxonomy does not cover all response shapes the BigModel API can return, unrecognised errors will fall into a default branch. A conservative default (no retry) hides transient failures; a permissive default (always retry) wastes quota and may hit rate limits. Without seeing the implementation, the risk is that the classification is incomplete, causing either silent data loss (giving up on a retriable error) or wasteful retries on permanent failures (burning API quota).\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.5,\n      \"recommendation\": \"Ensure the default classification branch logs the unrecognised error shape at WARN level (not silently) and applies a conservative 'no retry' policy. Add a test that passes a completely unexpected error shape and asserts the fallback behaviour is documented and safe.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run 'grep -r \\\"from.*process\\\" scripts/' and 'grep -r \\\"import.*process\\\" scripts/' to confirm no file still imports from the deleted scripts/lib/process.mjs.\",\n    \"Audit retry.mjs to confirm it is only applied to idempotent operations or that mutating calls include idempotency keys.\",\n    \"Verify bigmodel-errors.mjs default error branch logs unrecognised shapes rather than silently swallowing them.\",\n    \"Run the full test suite (all 13 test files shown) and confirm zero failures before merging.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T21:37:21.908Z"
+}

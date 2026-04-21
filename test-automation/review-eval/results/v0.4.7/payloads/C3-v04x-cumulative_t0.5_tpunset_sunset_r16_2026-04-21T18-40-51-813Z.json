@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 16
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 294835,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The cumulative v0.4.0→v0.4.6 diff is large (6.6K lines, 84 files) for a minor-version range. The most defensible blocker is missing dedicated test coverage for glm-client.mjs, which is the core HTTP/transport layer and was substantially modified (155 lines changed) to integrate new retry.mjs and bigmodel-errors.mjs modules. Without tests proving the client handles auth failures, retries, partial responses, and error classification correctly, a regression here would be silent and hard to diagnose in production.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "No dedicated test file for glm-client.mjs despite substantial changes",
+        "body": "scripts/lib/glm-client.mjs shows 155 lines changed (added/modified) in the diff, integrating new retry.mjs and bigmodel-errors.mjs modules. However, the test directory contains no glm-client.test.mjs or similar file. The listed test files cover args, bigmodel-errors, fs, job-render, preset-config, render, result-propagation, retry, schema-load, setup-resilience, state, status-resilience, target-label, and template-contract — but NOT the client itself. This means the integration point between retry logic, error dispatch, and the actual HTTP transport layer has zero automated verification. A mis-wired retry that double-submits requests, or an error classifier that silently swallows auth failures, would not be caught by CI.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.88,
+        "recommendation": "Add a glm-client.test.mjs covering at minimum: (1) retry on transient errors with idempotency verification, (2) non-retryable error passthrough, (3) auth failure propagation, (4) timeout handling, and (5) BigModel error dispatch integration. Gate this test in CI before shipping."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs modified with no dedicated test coverage",
+        "body": "scripts/lib/tracked-jobs.mjs shows 78 lines changed. This module manages job lifecycle state. The test directory has no tracked-jobs.test.mjs. Job tracking is directly responsible for preventing duplicate work and ensuring correct status reporting. A regression here could cause silent job loss or phantom stuck jobs. The only indirect coverage is via job-render.test.mjs, which tests rendering, not state correctness.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.78,
+        "recommendation": "Add tracked-jobs.test.mjs covering: concurrent job creation, job state transitions, stale job cleanup, and edge cases (empty state file, corrupted JSON)."
+      },
+      {
+        "severity": "medium",
+        "title": "process.mjs deleted — potential dangling import risk",
+        "body": "scripts/lib/process.mjs shows -67 lines in the diff stat, indicating it was fully removed. Commit 'Bundle F — ReferenceError + full thread/resume scaffolding purge' references this purge. While the commit message suggests intentional cleanup, there is no test file that validates no remaining import of process.mjs exists. The check-imports.mjs script (5 lines changed) may or may not catch dangling imports at CI time. If any surviving code path imports from './process.mjs' or './lib/process.mjs', it will throw ERR_MODULE_NOT_FOUND at runtime — a failure mode that only manifests on the specific code path, not at startup.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.65,
+        "recommendation": "Verify check-imports.mjs validates that no file in the repository imports from process.mjs. Add an explicit CI check that greps for any remaining 'process.mjs' import strings across the codebase. Consider adding a schema-load or import-resolution test that fails if a deleted module is still referenced."
+      },
+      {
+        "severity": "medium",
+        "title": "Retry + error dispatch integration lacks end-to-end test evidence",
+        "body": "retry.mjs (203 new lines) and bigmodel-errors.mjs (168 new lines) are both new modules with dedicated unit tests (352 and 189 lines respectively). However, the integration between these two modules and glm-client.mjs (which consumes both) has no test coverage. The v0.4.5 UAT scenarios exist but are manual (shell scripts + JSON fixtures). There is no automated integration test proving that a real BigModel error triggers the correct retry classification and backoff through the client. Under stress (concurrent requests, rate limits), misclassification could cause either infinite retry loops or silent failure drops.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.72,
+        "recommendation": "Add an integration test that mocks the HTTP layer and verifies the full chain: HTTP error → bigmodel-errors.mjs classification → retry.mjs backoff decision → glm-client.mjs retry/drop behavior. Validate max-retry bounds and ensure non-retryable errors never trigger retries."
+      }
+    ],
+    "next_steps": [
+      "Add glm-client.test.mjs with integration coverage for retry + error dispatch before merge.",
+      "Run a grep for 'process.mjs' across all .mjs files to confirm no dangling imports from the deleted module.",
+      "Add tracked-jobs.test.mjs for job lifecycle state correctness.",
+      "Verify check-imports.mjs catches references to deleted modules as a CI guard.",
+      "Consider a smoke test in CI that actually imports glm-client.mjs to catch module-resolution failures early."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The cumulative v0.4.0→v0.4.6 diff is large (6.6K lines, 84 files) for a minor-version range. The most defensible blocker is missing dedicated test coverage for glm-client.mjs, which is the core HTTP/transport layer and was substantially modified (155 lines changed) to integrate new retry.mjs and bigmodel-errors.mjs modules. Without tests proving the client handles auth failures, retries, partial responses, and error classification correctly, a regression here would be silent and hard to diagnose in production.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"No dedicated test file for glm-client.mjs despite substantial changes\",\n      \"body\": \"scripts/lib/glm-client.mjs shows 155 lines changed (added/modified) in the diff, integrating new retry.mjs and bigmodel-errors.mjs modules. However, the test directory contains no glm-client.test.mjs or similar file. The listed test files cover args, bigmodel-errors, fs, job-render, preset-config, render, result-propagation, retry, schema-load, setup-resilience, state, status-resilience, target-label, and template-contract — but NOT the client itself. This means the integration point between retry logic, error dispatch, and the actual HTTP transport layer has zero automated verification. A mis-wired retry that double-submits requests, or an error classifier that silently swallows auth failures, would not be caught by CI.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.88,\n      \"recommendation\": \"Add a glm-client.test.mjs covering at minimum: (1) retry on transient errors with idempotency verification, (2) non-retryable error passthrough, (3) auth failure propagation, (4) timeout handling, and (5) BigModel error dispatch integration. Gate this test in CI before shipping.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"tracked-jobs.mjs modified with no dedicated test coverage\",\n      \"body\": \"scripts/lib/tracked-jobs.mjs shows 78 lines changed. This module manages job lifecycle state. The test directory has no tracked-jobs.test.mjs. Job tracking is directly responsible for preventing duplicate work and ensuring correct status reporting. A regression here could cause silent job loss or phantom stuck jobs. The only indirect coverage is via job-render.test.mjs, which tests rendering, not state correctness.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Add tracked-jobs.test.mjs covering: concurrent job creation, job state transitions, stale job cleanup, and edge cases (empty state file, corrupted JSON).\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"process.mjs deleted — potential dangling import risk\",\n      \"body\": \"scripts/lib/process.mjs shows -67 lines in the diff stat, indicating it was fully removed. Commit 'Bundle F — ReferenceError + full thread/resume scaffolding purge' references this purge. While the commit message suggests intentional cleanup, there is no test file that validates no remaining import of process.mjs exists. The check-imports.mjs script (5 lines changed) may or may not catch dangling imports at CI time. If any surviving code path imports from './process.mjs' or './lib/process.mjs', it will throw ERR_MODULE_NOT_FOUND at runtime — a failure mode that only manifests on the specific code path, not at startup.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Verify check-imports.mjs validates that no file in the repository imports from process.mjs. Add an explicit CI check that greps for any remaining 'process.mjs' import strings across the codebase. Consider adding a schema-load or import-resolution test that fails if a deleted module is still referenced.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Retry + error dispatch integration lacks end-to-end test evidence\",\n      \"body\": \"retry.mjs (203 new lines) and bigmodel-errors.mjs (168 new lines) are both new modules with dedicated unit tests (352 and 189 lines respectively). However, the integration between these two modules and glm-client.mjs (which consumes both) has no test coverage. The v0.4.5 UAT scenarios exist but are manual (shell scripts + JSON fixtures). There is no automated integration test proving that a real BigModel error triggers the correct retry classification and backoff through the client. Under stress (concurrent requests, rate limits), misclassification could cause either infinite retry loops or silent failure drops.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Add an integration test that mocks the HTTP layer and verifies the full chain: HTTP error → bigmodel-errors.mjs classification → retry.mjs backoff decision → glm-client.mjs retry/drop behavior. Validate max-retry bounds and ensure non-retryable errors never trigger retries.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Add glm-client.test.mjs with integration coverage for retry + error dispatch before merge.\",\n    \"Run a grep for 'process.mjs' across all .mjs files to confirm no dangling imports from the deleted module.\",\n    \"Add tracked-jobs.test.mjs for job lifecycle state correctness.\",\n    \"Verify check-imports.mjs catches references to deleted modules as a CI guard.\",\n    \"Consider a smoke test in CI that actually imports glm-client.mjs to catch module-resolution failures early.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T18:40:51.837Z"
+}

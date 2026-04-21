@@ -1,0 +1,49 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 13
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 1,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 129685,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The cumulative v0.4.x diff fully deletes scripts/lib/process.mjs (67 lines removed, 0 added) while simultaneously modifying at least five other modules that may have consumed it. The commit that performed this deletion explicitly references fixing a ReferenceError — proving import cleanup was incomplete at least once before. Without positive evidence that every static and dynamic import of process.mjs has been excised from glm-client.mjs, glm-companion.mjs, render.mjs, state.mjs, job-control.mjs, and friends, this change carries a real risk of hard ESM module-resolution crashes at command entry points.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Deleted process.mjs leaves potential dangling imports across modified consumer modules",
+        "body": "scripts/lib/process.mjs was fully removed as part of the 'ReferenceError + full thread/resume scaffolding purge' (Bundle F). The commit message itself documents that a ReferenceError existed — meaning imports pointed at this module and were not cleaned up before that fix. In the same cumulative diff, glm-client.mjs (155 lines changed), glm-companion.mjs (139 lines changed), render.mjs (79 lines changed), state.mjs (32 lines changed), and job-control.mjs (20 lines changed) were all modified. If any of these still contain a static import (`import ... from './process.mjs'`), a dynamic import, or a re-export referencing the deleted module, the Node.js ESM loader will throw ERR_MODULE_NOT_FOUND at import-evaluation time — crashing the entire command before any user code runs. Subsequent hotfix commits ('Bundle D3+ post-review hotfixes', '5 bugs from 3-agent full-project review') indicate the purge required multiple remediation rounds, increasing the likelihood that an import reference survived in a less-tested code path. Existing unit tests exercise individual modules but may not cover every import branch, especially dynamic imports gated by runtime conditions.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.55,
+        "recommendation": "Run `grep -rn 'process\\.mjs' scripts/` to confirm zero remaining references. If clean, add a CI gate that validates all import targets resolve to existing files (e.g., a check-no-broken-imports.sh script). Additionally, exercise every slash-command entry point (`/glm:review`, `/glm:setup`, `/glm:status`, `/glm:rescue`) in a clean install to confirm no ESM resolution failures."
+      }
+    ],
+    "next_steps": [
+      "Grep the entire scripts/ tree for any remaining reference to process.mjs — static imports, dynamic imports, and string literals",
+      "Inspect glm-client.mjs, glm-companion.mjs, render.mjs, state.mjs, and job-control.mjs for imports of the deleted module",
+      "Run every command entry point in a clean checkout to confirm no module resolution errors",
+      "If no dangling imports exist, add a pre-merge verification step to prevent future regressions of this class"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The cumulative v0.4.x diff fully deletes scripts/lib/process.mjs (67 lines removed, 0 added) while simultaneously modifying at least five other modules that may have consumed it. The commit that performed this deletion explicitly references fixing a ReferenceError — proving import cleanup was incomplete at least once before. Without positive evidence that every static and dynamic import of process.mjs has been excised from glm-client.mjs, glm-companion.mjs, render.mjs, state.mjs, job-control.mjs, and friends, this change carries a real risk of hard ESM module-resolution crashes at command entry points.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Deleted process.mjs leaves potential dangling imports across modified consumer modules\",\"body\":\"scripts/lib/process.mjs was fully removed as part of the 'ReferenceError + full thread/resume scaffolding purge' (Bundle F). The commit message itself documents that a ReferenceError existed — meaning imports pointed at this module and were not cleaned up before that fix. In the same cumulative diff, glm-client.mjs (155 lines changed), glm-companion.mjs (139 lines changed), render.mjs (79 lines changed), state.mjs (32 lines changed), and job-control.mjs (20 lines changed) were all modified. If any of these still contain a static import (`import ... from './process.mjs'`), a dynamic import, or a re-export referencing the deleted module, the Node.js ESM loader will throw ERR_MODULE_NOT_FOUND at import-evaluation time — crashing the entire command before any user code runs. Subsequent hotfix commits ('Bundle D3+ post-review hotfixes', '5 bugs from 3-agent full-project review') indicate the purge required multiple remediation rounds, increasing the likelihood that an import reference survived in a less-tested code path. Existing unit tests exercise individual modules but may not cover every import branch, especially dynamic imports gated by runtime conditions.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":67,\"confidence\":0.55,\"recommendation\":\"Run `grep -rn 'process\\\\.mjs' scripts/` to confirm zero remaining references. If clean, add a CI gate that validates all import targets resolve to existing files (e.g., a check-no-broken-imports.sh script). Additionally, exercise every slash-command entry point (`/glm:review`, `/glm:setup`, `/glm:status`, `/glm:rescue`) in a clean install to confirm no ESM resolution failures.\"}],\"next_steps\":[\"Grep the entire scripts/ tree for any remaining reference to process.mjs — static imports, dynamic imports, and string literals\",\"Inspect glm-client.mjs, glm-companion.mjs, render.mjs, state.mjs, and job-control.mjs for imports of the deleted module\",\"Run every command entry point in a clean checkout to confirm no module resolution errors\",\"If no dangling imports exist, add a pre-merge verification step to prevent future regressions of this class\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T20:07:59.435Z"
+}

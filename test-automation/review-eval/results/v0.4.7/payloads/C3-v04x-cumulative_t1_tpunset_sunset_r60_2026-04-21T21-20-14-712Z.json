@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 60
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 150882,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "Cumulative v0.4.0→v0.4.6 diff spans 84 files (+6623/-480). The most defensible risk is a test-coverage gap on the critical API-client layer: glm-client.mjs absorbed 155 lines of changes (retry/backoff integration, BigModel error dispatch) but has no dedicated test file, while less critical modules (args, preset-config, fs) each received one. The deleted process.mjs (67 lines) raises a secondary import-graph concern that cannot be fully verified from metadata alone. Review was constrained by absence of file contents for line-level inspection.",
+    "findings": [
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs significantly refactored without dedicated test coverage",
+        "body": "The API client module shows 155 lines of changes across v0.4.x, integrating the new retry.mjs (203 lines) and bigmodel-errors.mjs (168 lines) modules. Both of those new modules have dedicated test files (352 and 189 lines respectively), but the integration point — glm-client.mjs itself — does not. The client handles authentication headers, request construction, error classification, and retry orchestration. A silent regression in any of these paths would manifest as failed API calls, dropped jobs, or misclassified errors in production. Less critical modules (args.mjs, preset-config.mjs, fs.mjs) each received dedicated test suites, making this gap inconsistent with the project's own testing standard.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.7,
+        "recommendation": "Add tests/glm-client.test.mjs covering: (1) retry delegation on transient BigModel errors, (2) error classification flow through bigmodel-errors.mjs, (3) auth header construction, (4) timeout handling, and (5) the integration path where retry + error dispatch interact. If coverage exists indirectly in other test files, document that mapping explicitly so regressions are traceable."
+      },
+      {
+        "severity": "low",
+        "title": "process.mjs deleted — residual import references not verifiable from context",
+        "body": "scripts/lib/process.mjs (67 lines) was deleted entirely in the cumulative diff. The commit 'Bundle F — ReferenceError + full thread/resume scaffolding purge' suggests dangling references were addressed, but the fix and deletion land in the same cumulative change set. If any dynamic import, indirect require, or string-concatenated path still references 'lib/process', it will surface only as a runtime ReferenceError when that specific code path executes — likely in an edge case or error path during a real sweep run.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.35,
+        "recommendation": "Run `grep -r 'process\\.mjs\\|lib/process' scripts/` (or rely on check-imports.mjs) to confirm zero remaining references. Pay special attention to dynamic imports, template-literal paths, and test files that may import the deleted module for mocking."
+      },
+      {
+        "severity": "low",
+        "title": "tracked-jobs.mjs and glm-companion.mjs changed significantly without dedicated tests",
+        "body": "tracked-jobs.mjs (78 lines changed) manages job state tracking and glm-companion.mjs (139 lines changed) is the main CLI entry point. Neither has a dedicated test file. While job-render.test.mjs (144 lines) may exercise tracked-jobs indirectly, the companion's CLI argument parsing and command dispatch paths lack visible coverage. A regression in command routing would only appear at runtime during an actual invocation.",
+        "file": "scripts/glm-companion.mjs",
+        "line_start": 1,
+        "line_end": 139,
+        "confidence": 0.4,
+        "recommendation": "Confirm whether job-render.test.mjs exercises tracked-jobs.mjs paths. Consider at minimum a smoke test for glm-companion.mjs command dispatch to catch argument-parsing regressions before they reach users."
+      }
+    ],
+    "next_steps": [
+      "Provide full file contents for scripts/lib/glm-client.mjs, scripts/lib/retry.mjs, and scripts/lib/bigmodel-errors.mjs for line-level adversarial review",
+      "Run `grep -r 'process\\.mjs\\|lib/process' scripts/ tests/` to confirm no dangling references to the deleted module",
+      "Map which test files exercise glm-client.mjs integration paths; if none exist, block until tests/glm-client.test.mjs is added",
+      "Verify tracked-jobs.mjs coverage through job-render.test.mjs and document the coverage mapping"
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"Cumulative v0.4.0→v0.4.6 diff spans 84 files (+6623/-480). The most defensible risk is a test-coverage gap on the critical API-client layer: glm-client.mjs absorbed 155 lines of changes (retry/backoff integration, BigModel error dispatch) but has no dedicated test file, while less critical modules (args, preset-config, fs) each received one. The deleted process.mjs (67 lines) raises a secondary import-graph concern that cannot be fully verified from metadata alone. Review was constrained by absence of file contents for line-level inspection.\",\n  \"findings\": [\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client.mjs significantly refactored without dedicated test coverage\",\n      \"body\": \"The API client module shows 155 lines of changes across v0.4.x, integrating the new retry.mjs (203 lines) and bigmodel-errors.mjs (168 lines) modules. Both of those new modules have dedicated test files (352 and 189 lines respectively), but the integration point — glm-client.mjs itself — does not. The client handles authentication headers, request construction, error classification, and retry orchestration. A silent regression in any of these paths would manifest as failed API calls, dropped jobs, or misclassified errors in production. Less critical modules (args.mjs, preset-config.mjs, fs.mjs) each received dedicated test suites, making this gap inconsistent with the project's own testing standard.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Add tests/glm-client.test.mjs covering: (1) retry delegation on transient BigModel errors, (2) error classification flow through bigmodel-errors.mjs, (3) auth header construction, (4) timeout handling, and (5) the integration path where retry + error dispatch interact. If coverage exists indirectly in other test files, document that mapping explicitly so regressions are traceable.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"process.mjs deleted — residual import references not verifiable from context\",\n      \"body\": \"scripts/lib/process.mjs (67 lines) was deleted entirely in the cumulative diff. The commit 'Bundle F — ReferenceError + full thread/resume scaffolding purge' suggests dangling references were addressed, but the fix and deletion land in the same cumulative change set. If any dynamic import, indirect require, or string-concatenated path still references 'lib/process', it will surface only as a runtime ReferenceError when that specific code path executes — likely in an edge case or error path during a real sweep run.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.35,\n      \"recommendation\": \"Run `grep -r 'process\\\\.mjs\\\\|lib/process' scripts/` (or rely on check-imports.mjs) to confirm zero remaining references. Pay special attention to dynamic imports, template-literal paths, and test files that may import the deleted module for mocking.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"tracked-jobs.mjs and glm-companion.mjs changed significantly without dedicated tests\",\n      \"body\": \"tracked-jobs.mjs (78 lines changed) manages job state tracking and glm-companion.mjs (139 lines changed) is the main CLI entry point. Neither has a dedicated test file. While job-render.test.mjs (144 lines) may exercise tracked-jobs indirectly, the companion's CLI argument parsing and command dispatch paths lack visible coverage. A regression in command routing would only appear at runtime during an actual invocation.\",\n      \"file\": \"scripts/glm-companion.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 139,\n      \"confidence\": 0.4,\n      \"recommendation\": \"Confirm whether job-render.test.mjs exercises tracked-jobs.mjs paths. Consider at minimum a smoke test for glm-companion.mjs command dispatch to catch argument-parsing regressions before they reach users.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Provide full file contents for scripts/lib/glm-client.mjs, scripts/lib/retry.mjs, and scripts/lib/bigmodel-errors.mjs for line-level adversarial review\",\n    \"Run `grep -r 'process\\\\.mjs\\\\|lib/process' scripts/ tests/` to confirm no dangling references to the deleted module\",\n    \"Map which test files exercise glm-client.mjs integration paths; if none exist, block until tests/glm-client.test.mjs is added\",\n    \"Verify tracked-jobs.mjs coverage through job-render.test.mjs and document the coverage mapping\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T21:20:14.736Z"
+}

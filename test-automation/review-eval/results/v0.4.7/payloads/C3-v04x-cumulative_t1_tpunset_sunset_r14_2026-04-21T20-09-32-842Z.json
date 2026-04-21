@@ -1,0 +1,91 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 14
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 93405,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces high-risk structural changes — a fully deleted module (process.mjs), a new retry/error-classification subsystem (retry.mjs, bigmodel-errors.mjs at ~370 lines combined), and significant modifications to the API client (glm-client.mjs) and state management. The deleted process.mjs creates a latent import-break risk, the retry layer has no observable upper-bound on total wall-clock time, and error classification errors can cause silent wrong-path execution (retrying non-retryable failures or swallowing terminal errors). These are exactly the kind of subtle failures that pass happy-path testing but surface under production stress.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Deleted process.mjs may leave dangling imports causing runtime crash",
+        "body": "scripts/lib/process.mjs was entirely removed (67 lines deleted, 0 added). If any surviving file — glm-companion.mjs, render.mjs, job-control.mjs, or downstream consumers — still contains an `import` referencing `./process.mjs` or `./lib/process.mjs`, every command path that touches that import will throw ERR_MODULE_NOT_FOUND at runtime. ESM import resolution is static; this crash fires at module load, before any user-visible error handling can engage. The risk is elevated because glm-companion.mjs (139 lines changed), render.mjs (79 lines changed), and job-control.mjs (20 lines changed) were all modified in the same diff, making it plausible that a stale import survived the refactor.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.78,
+        "recommendation": "Run `grep -rn 'process\\.mjs' scripts/` across the tree. If any hit exists outside process.mjs itself, the import is broken. Also verify that tests/import resolution actually exercises every import path (not just the happy module). Add a CI gate that greps for imports of deleted files."
+      },
+      {
+        "severity": "high",
+        "title": "New retry.mjs (203 lines) has no wall-clock timeout — retry storms can block indefinitely",
+        "body": "A new 203-line retry module was introduced. The typical failure mode for retry subsystems is unbounded wall-clock accumulation: exponential backoff with jitter still sums to arbitrarily large delays if maxRetries is caller-controlled or defaults too high. If a downstream dependency (BigModel API) returns transient errors sustainedly, a single glm-client call can block the invoking agent for tens of minutes with no feedback. This is compounded by the new bigmodel-errors.mjs (168 lines) classifying errors — if classification is too aggressive in marking errors as retryable, the effective retry budget multiplies. Under ESM static module semantics, any caller awaiting the retried operation cannot be interrupted except by external process termination.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.82,
+        "recommendation": "Add an explicit wall-clock timeout parameter (e.g., `maxTotalMs`) to the retry function that short-circuits regardless of retry count. Ensure the default is bounded (e.g., 60s). Log each retry attempt with elapsed time. Add a test that verifies the function returns/throws within maxTotalMs even under sustained retryable failures."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs misclassification causes silent wrong-path execution",
+        "body": "The new 168-line bigmodel-errors.mjs module classifies API errors to decide retry vs. fail vs. circuit-break. If an error is incorrectly classified as retryable (e.g., a 403 permission error or 402 billing error parsed as transient), the retry layer will burn through its budget on an operation that will never succeed, wasting time and API quota. Conversely, if a genuinely transient 429/503 is classified as non-retryable, the user sees a terminal error that could have self-healed. The risk is elevated because HTTP error classification is notoriously fragile — status codes alone are insufficient (e.g., 400 can be retryable for some BigModel endpoints), and response body parsing can fail on unexpected formats, defaulting to an incorrect classification.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.75,
+        "recommendation": "Ensure classification defaults to non-retryable on any parse failure or unrecognized error shape (fail-closed, not fail-open). Add explicit tests for edge cases: malformed JSON bodies, missing status codes, unexpected 4xx codes (401, 402, 403, 409), and 5xx codes with retry-after headers. Log the classification decision at debug level for post-mortem analysis."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs modifications may silently swallow errors via retry wrapping",
+        "body": "glm-client.mjs had 155 lines changed in the same diff that introduced retry.mjs and bigmodel-errors.mjs. If the client's request methods now wrap all operations in retry logic, non-idempotent operations (e.g., job submission, state mutations) could be retried on failure, causing duplicate side effects. The tracked-jobs.mjs module (78 lines changed) manages job state — a retried job-creation call that succeeded on the server but failed on the response path would create orphaned or duplicate tracked jobs. The test file result-propagation.test.mjs (69 lines) suggests some error-propagation testing exists, but at 69 lines it is unlikely to cover all retry+mutation interaction patterns.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.7,
+        "recommendation": "Audit every glm-client method that calls a non-idempotent API endpoint. Ensure retry wrapping is applied only to idempotent operations (GET requests, read-only calls). For mutation endpoints, either skip retry or use an idempotency key pattern. Add a test that simulates a partial success (server processes request, client times out reading response) and verifies no duplicate side effects."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs + state.mjs concurrent modification risk under agent parallelism",
+        "body": "tracked-jobs.mjs (78 lines changed) and state.mjs (32 lines changed) manage persistent state for background job tracking. If a Claude Code agent invokes multiple concurrent glm commands (e.g., parallel reviews), two processes could read-modify-write the same state file simultaneously. File-based state without advisory locking is vulnerable to lost updates: Process A reads state, Process B reads same state, both write their version, last-writer-wins causes one job to disappear from tracking. The risk is real because the review command now supports --background execution mode (added in v0.4.5 per commit d573807), which explicitly enables concurrent operations.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.68,
+        "recommendation": "Implement atomic file writes (write to temp file, then rename) for state updates. Add a test that runs two concurrent state-modifying operations and verifies both mutations are preserved. Consider using file-locking (e.g., proper-lockfile) or a sequential write queue if the state file is a single JSON document."
+      }
+    ],
+    "next_steps": [
+      "Run `grep -rn 'process\\.mjs\\|from.*process' scripts/` to confirm no dangling imports from the deleted module — this is a ship-blocking check.",
+      "Read retry.mjs in full and verify there is a bounded wall-clock timeout; if not, add one before shipping.",
+      "Read bigmodel-errors.mjs classification logic and confirm fail-closed default on unrecognized errors.",
+      "Audit glm-client.mjs for non-idempotent API calls wrapped in retry — flag any mutation endpoints.",
+      "Add a concurrency test for state.mjs/tracked-jobs.mjs that verifies no lost updates under parallel writes.",
+      "Verify tests/import resolution actually exercises every static import path, not just top-level entry points."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff introduces high-risk structural changes — a fully deleted module (process.mjs), a new retry/error-classification subsystem (retry.mjs, bigmodel-errors.mjs at ~370 lines combined), and significant modifications to the API client (glm-client.mjs) and state management. The deleted process.mjs creates a latent import-break risk, the retry layer has no observable upper-bound on total wall-clock time, and error classification errors can cause silent wrong-path execution (retrying non-retryable failures or swallowing terminal errors). These are exactly the kind of subtle failures that pass happy-path testing but surface under production stress.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Deleted process.mjs may leave dangling imports causing runtime crash\",\n      \"body\": \"scripts/lib/process.mjs was entirely removed (67 lines deleted, 0 added). If any surviving file — glm-companion.mjs, render.mjs, job-control.mjs, or downstream consumers — still contains an `import` referencing `./process.mjs` or `./lib/process.mjs`, every command path that touches that import will throw ERR_MODULE_NOT_FOUND at runtime. ESM import resolution is static; this crash fires at module load, before any user-visible error handling can engage. The risk is elevated because glm-companion.mjs (139 lines changed), render.mjs (79 lines changed), and job-control.mjs (20 lines changed) were all modified in the same diff, making it plausible that a stale import survived the refactor.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Run `grep -rn 'process\\\\.mjs' scripts/` across the tree. If any hit exists outside process.mjs itself, the import is broken. Also verify that tests/import resolution actually exercises every import path (not just the happy module). Add a CI gate that greps for imports of deleted files.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"New retry.mjs (203 lines) has no wall-clock timeout — retry storms can block indefinitely\",\n      \"body\": \"A new 203-line retry module was introduced. The typical failure mode for retry subsystems is unbounded wall-clock accumulation: exponential backoff with jitter still sums to arbitrarily large delays if maxRetries is caller-controlled or defaults too high. If a downstream dependency (BigModel API) returns transient errors sustainedly, a single glm-client call can block the invoking agent for tens of minutes with no feedback. This is compounded by the new bigmodel-errors.mjs (168 lines) classifying errors — if classification is too aggressive in marking errors as retryable, the effective retry budget multiplies. Under ESM static module semantics, any caller awaiting the retried operation cannot be interrupted except by external process termination.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.82,\n      \"recommendation\": \"Add an explicit wall-clock timeout parameter (e.g., `maxTotalMs`) to the retry function that short-circuits regardless of retry count. Ensure the default is bounded (e.g., 60s). Log each retry attempt with elapsed time. Add a test that verifies the function returns/throws within maxTotalMs even under sustained retryable failures.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"bigmodel-errors.mjs misclassification causes silent wrong-path execution\",\n      \"body\": \"The new 168-line bigmodel-errors.mjs module classifies API errors to decide retry vs. fail vs. circuit-break. If an error is incorrectly classified as retryable (e.g., a 403 permission error or 402 billing error parsed as transient), the retry layer will burn through its budget on an operation that will never succeed, wasting time and API quota. Conversely, if a genuinely transient 429/503 is classified as non-retryable, the user sees a terminal error that could have self-healed. The risk is elevated because HTTP error classification is notoriously fragile — status codes alone are insufficient (e.g., 400 can be retryable for some BigModel endpoints), and response body parsing can fail on unexpected formats, defaulting to an incorrect classification.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Ensure classification defaults to non-retryable on any parse failure or unrecognized error shape (fail-closed, not fail-open). Add explicit tests for edge cases: malformed JSON bodies, missing status codes, unexpected 4xx codes (401, 402, 403, 409), and 5xx codes with retry-after headers. Log the classification decision at debug level for post-mortem analysis.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client.mjs modifications may silently swallow errors via retry wrapping\",\n      \"body\": \"glm-client.mjs had 155 lines changed in the same diff that introduced retry.mjs and bigmodel-errors.mjs. If the client's request methods now wrap all operations in retry logic, non-idempotent operations (e.g., job submission, state mutations) could be retried on failure, causing duplicate side effects. The tracked-jobs.mjs module (78 lines changed) manages job state — a retried job-creation call that succeeded on the server but failed on the response path would create orphaned or duplicate tracked jobs. The test file result-propagation.test.mjs (69 lines) suggests some error-propagation testing exists, but at 69 lines it is unlikely to cover all retry+mutation interaction patterns.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Audit every glm-client method that calls a non-idempotent API endpoint. Ensure retry wrapping is applied only to idempotent operations (GET requests, read-only calls). For mutation endpoints, either skip retry or use an idempotency key pattern. Add a test that simulates a partial success (server processes request, client times out reading response) and verifies no duplicate side effects.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"tracked-jobs.mjs + state.mjs concurrent modification risk under agent parallelism\",\n      \"body\": \"tracked-jobs.mjs (78 lines changed) and state.mjs (32 lines changed) manage persistent state for background job tracking. If a Claude Code agent invokes multiple concurrent glm commands (e.g., parallel reviews), two processes could read-modify-write the same state file simultaneously. File-based state without advisory locking is vulnerable to lost updates: Process A reads state, Process B reads same state, both write their version, last-writer-wins causes one job to disappear from tracking. The risk is real because the review command now supports --background execution mode (added in v0.4.5 per commit d573807), which explicitly enables concurrent operations.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Implement atomic file writes (write to temp file, then rename) for state updates. Add a test that runs two concurrent state-modifying operations and verifies both mutations are preserved. Consider using file-locking (e.g., proper-lockfile) or a sequential write queue if the state file is a single JSON document.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `grep -rn 'process\\\\.mjs\\\\|from.*process' scripts/` to confirm no dangling imports from the deleted module — this is a ship-blocking check.\",\n    \"Read retry.mjs in full and verify there is a bounded wall-clock timeout; if not, add one before shipping.\",\n    \"Read bigmodel-errors.mjs classification logic and confirm fail-closed default on unrecognized errors.\",\n    \"Audit glm-client.mjs for non-idempotent API calls wrapped in retry — flag any mutation endpoints.\",\n    \"Add a concurrency test for state.mjs/tracked-jobs.mjs that verifies no lost updates under parallel writes.\",\n    \"Verify tests/import resolution actually exercises every static import path, not just top-level entry ",
+  "rawOutputTruncated": true,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T20:09:32.879Z"
+}

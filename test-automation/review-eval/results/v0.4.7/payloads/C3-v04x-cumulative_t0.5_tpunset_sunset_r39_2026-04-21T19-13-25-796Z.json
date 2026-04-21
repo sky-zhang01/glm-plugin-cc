@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 39
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 213451,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces a retry/backoff system (retry.mjs), BigModel error dispatch, and job-control changes that have several concrete failure-mode gaps: retry exhaustion silently swallows the original error category, state files can be left in an indeterminate mid-transition state on crash, and the tracked-jobs module has an unguarded concurrent-write race on the JSON state file. These are the kind of silent-degradation bugs that show up under load and hide from logs.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs retry exhaustion loses original error classification",
+        "body": "The retry module retries on classified transient errors, but on final exhaustion it rethrows a generic 'Max retries exceeded' message. Callers that switch on BigModel error codes (e.g. rate-limit vs auth vs server-error) will fall through to their default handler or catch-all, producing misleading user-facing messages and potentially wrong remediation (e.g. prompting re-auth on what was actually a server error). This is a silent degradation: the caller thinks it got an unclassified error when it was actually a well-classified transient error that just timed out.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.82,
+        "recommendation": "On exhaustion, wrap/rethrow the *last* error object (with its original code/classification) rather than creating a new generic Error. Preserve the BigModel error class so upstream dispatch remains correct. Add a test case verifying that an exhausted retry propagates the original error code."
+      },
+      {
+        "severity": "high",
+        "title": "tracked-jobs.mjs has no file-locking or atomic write — concurrent processes corrupt state",
+        "body": "tracked-jobs.mjs reads and writes a JSON file tracking active jobs. Multiple glm-client or glm-companion processes can race on read-modify-write: process A reads, process B reads, A writes, B writes — B's write discards A's changes. This is not theoretical: the --wait and --background flags introduced in v0.4.5 intentionally allow concurrent access. On corruption (partial JSON), all subsequent job-tracking operations fail, and there is no recovery path — the file must be manually deleted.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_end": 78,
+        "line_start": 1,
+        "confidence": 0.78,
+        "recommendation": "Use atomic write (write to temp file in same directory, then rename). For cross-process safety, use either flock (via a lockfile) or convert to a line-append log format that doesn't require read-modify-write. At minimum, add try/catch around JSON.parse with a recovery path that logs and resets rather than crashing."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs state transitions are not crash-safe — partial writes leave corrupt state",
+        "body": "state.mjs manages persistent state (job status, configuration). The write path does a direct file write without atomic rename. If the process is killed (SIGKILL, OOM) mid-write, the state file will be truncated or contain partial JSON. On next invocation, JSON.parse throws, and there is no fallback to the previous valid state. For a tool that manages long-running background jobs, losing track of job state is a data-loss scenario: running jobs become orphans.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.75,
+        "recommendation": "Adopt write-then-rename (atomic replace) for state persistence: write to `${path}.tmp`, fsync, then rename over the real path. On read, if JSON.parse fails, attempt to load from a `.bak` copy of the last known-good state, or at minimum log a clear error with recovery instructions rather than an unhandled exception."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs error path can emit raw API keys in error messages",
+        "body": "When a BigModel API call fails at the network level (ECONNREFUSED, DNS failure), the error object may include the request configuration containing the Authorization header with the API key. If this error is logged, rendered to the user, or written to a UAT report, the key is exposed. The BigModel error dispatcher classifies API errors but does not sanitize the underlying request config before passing it through.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.6,
+        "recommendation": "In the error dispatch path, strip or redact headers (especially Authorization) from the error object before rethrowing. Add a test verifying that thrown errors do not contain the string matching the API key pattern."
+      },
+      {
+        "severity": "low",
+        "title": "retry.mjs jitter can produce sub-millisecond delays that are effectively zero",
+        "body": "The jitter implementation uses Math.random() * delay, but for small base delays (e.g. initial 50ms retry), the jitter can produce delays near 0ms, effectively making the retry immediate. Under sustained failure this means rapid-fire requests that may trigger rate limiting on the server side, defeating the purpose of backoff.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.55,
+        "recommendation": "Use full jitter with a floor: `delay = Math.max(MIN_RETRY_MS, base * Math.random())` where MIN_RETRY_MS is at least 50-100ms, or use decorrelated jitter (`delay = random(prev, prev * 3))`)."
+      }
+    ],
+    "next_steps": [
+      "Read scripts/lib/retry.mjs to verify exhaustion behavior and confirm the generic rethrow issue",
+      "Read scripts/lib/tracked-jobs.mjs to confirm no atomicity protection on the state file",
+      "Read scripts/lib/state.mjs to confirm write path lacks atomic rename",
+      "Read scripts/lib/glm-client.mjs error dispatch to check for credential leakage in network errors",
+      "Read tests/retry.test.mjs to verify whether exhaustion-preserve-error-classification is tested"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 cumulative diff introduces a retry/backoff system (retry.mjs), BigModel error dispatch, and job-control changes that have several concrete failure-mode gaps: retry exhaustion silently swallows the original error category, state files can be left in an indeterminate mid-transition state on crash, and the tracked-jobs module has an unguarded concurrent-write race on the JSON state file. These are the kind of silent-degradation bugs that show up under load and hide from logs.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs retry exhaustion loses original error classification\",\"body\":\"The retry module retries on classified transient errors, but on final exhaustion it rethrows a generic 'Max retries exceeded' message. Callers that switch on BigModel error codes (e.g. rate-limit vs auth vs server-error) will fall through to their default handler or catch-all, producing misleading user-facing messages and potentially wrong remediation (e.g. prompting re-auth on what was actually a server error). This is a silent degradation: the caller thinks it got an unclassified error when it was actually a well-classified transient error that just timed out.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.82,\"recommendation\":\"On exhaustion, wrap/rethrow the *last* error object (with its original code/classification) rather than creating a new generic Error. Preserve the BigModel error class so upstream dispatch remains correct. Add a test case verifying that an exhausted retry propagates the original error code.\"},{\"severity\":\"high\",\"title\":\"tracked-jobs.mjs has no file-locking or atomic write — concurrent processes corrupt state\",\"body\":\"tracked-jobs.mjs reads and writes a JSON file tracking active jobs. Multiple glm-client or glm-companion processes can race on read-modify-write: process A reads, process B reads, A writes, B writes — B's write discards A's changes. This is not theoretical: the --wait and --background flags introduced in v0.4.5 intentionally allow concurrent access. On corruption (partial JSON), all subsequent job-tracking operations fail, and there is no recovery path — the file must be manually deleted.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_end\":78,\"line_start\":1,\"confidence\":0.78,\"recommendation\":\"Use atomic write (write to temp file in same directory, then rename). For cross-process safety, use either flock (via a lockfile) or convert to a line-append log format that doesn't require read-modify-write. At minimum, add try/catch around JSON.parse with a recovery path that logs and resets rather than crashing.\"},{\"severity\":\"medium\",\"title\":\"state.mjs state transitions are not crash-safe — partial writes leave corrupt state\",\"body\":\"state.mjs manages persistent state (job status, configuration). The write path does a direct file write without atomic rename. If the process is killed (SIGKILL, OOM) mid-write, the state file will be truncated or contain partial JSON. On next invocation, JSON.parse throws, and there is no fallback to the previous valid state. For a tool that manages long-running background jobs, losing track of job state is a data-loss scenario: running jobs become orphans.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.75,\"recommendation\":\"Adopt write-then-rename (atomic replace) for state persistence: write to `${path}.tmp`, fsync, then rename over the real path. On read, if JSON.parse fails, attempt to load from a `.bak` copy of the last known-good state, or at minimum log a clear error with recovery instructions rather than an unhandled exception.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs error path can emit raw API keys in error messages\",\"body\":\"When a BigModel API call fails at the network level (ECONNREFUSED, DNS failure), the error object may include the request configuration containing the Authorization header with the API key. If this error is logged, rendered to the user, or written to a UAT report, the key is exposed. The BigModel error dispatcher classifies API errors but does not sanitize the underlying request config before passing it through.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.6,\"recommendation\":\"In the error dispatch path, strip or redact headers (especially Authorization) from the error object before rethrowing. Add a test verifying that thrown errors do not contain the string matching the API key pattern.\"},{\"severity\":\"low\",\"title\":\"retry.mjs jitter can produce sub-millisecond delays that are effectively zero\",\"body\":\"The jitter implementation uses Math.random() * delay, but for small base delays (e.g. initial 50ms retry), the jitter can produce delays near 0ms, effectively making the retry immediate. Under sustained failure this means rapid-fire requests that may trigger rate limiting on the server side, defeating the purpose of backoff.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.55,\"recommendation\":\"Use full jitter with a floor: `delay = Math.max(MIN_RETRY_MS, base * Math.random())` where MIN_RETRY_MS is at least 50-100ms, or use decorrelated jitter (`delay = random(prev, prev * 3))`).\"}],\"next_steps\":[\"Read scripts/lib/retry.mjs to verify exhaustion behavior and confirm the generic rethrow issue\",\"Read scripts/lib/tracked-jobs.mjs to confirm no atomicity protection on the state file\",\"Read scripts/lib/state.mjs to confirm write path lacks atomic rename\",\"Read scripts/lib/glm-client.mjs error dispatch to check for credential leakage in network errors\",\"Read tests/retry.test.mjs to verify whether exhaustion-preserve-error-classification is tested\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T19:13:25.839Z"
+}

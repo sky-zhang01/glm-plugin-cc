@@ -1,0 +1,70 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 41
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 89537,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces significant new infrastructure (retry.mjs at 203 lines, bigmodel-errors.mjs at 168 lines, deleted process.mjs) without enough observable evidence that integration paths are safe. The deletion of scripts/lib/process.mjs is the sharpest risk: a removed module can produce silent import failures that only manifest on specific code paths at runtime. Combined with new retry logic that may lack idempotency guards, this change can corrupt job state under retries or concurrent operations. Recommend explicit verification before shipping.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Deleted scripts/lib/process.mjs may leave dangling ESM imports causing runtime crash",
+        "body": "scripts/lib/process.mjs was removed entirely (67 lines deleted, 0 added). The main entry point scripts/glm-companion.mjs shows 139 lines changed in the same span, along with changes to render.mjs (79 lines) and glm-client.mjs (155 lines). If any of these modules retained a dynamic or static import referencing './process.mjs' or '../lib/process.mjs', the import will throw ERR_MODULE_NOT_FOUND at runtime. This class of failure is path-dependent: it only fires when the specific code path that imports the deleted module is exercised, making it easy to miss in ad-hoc testing but catastrophic in production. The large scope of changes (84 files, +6623/−480 lines) increases the likelihood that a dangling reference survived.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.72,
+        "recommendation": "Run a repository-wide grep for any remaining import or require of 'process.mjs' (or its exported symbols). Verify that all functionality previously in process.mjs has an active replacement in the codebase. Add a CI check that validates all static imports resolve (e.g., node --check or a custom import-resolution lint)."
+      },
+      {
+        "severity": "high",
+        "title": "New retry.mjs (203 lines) paired with glm-client.mjs changes creates idempotency risk for API calls",
+        "body": "A new 203-line retry module was added alongside 155 lines of changes to glm-client.mjs (the API client). Retry logic applied to non-idempotent HTTP operations (POST submissions, job creation) without explicit idempotency keys or request deduplication can produce duplicate resources: duplicate job submissions, duplicate state transitions, or duplicate billing events. The retry.test.mjs (352 lines) suggests unit-level coverage exists, but the test file name does not indicate integration testing of actual HTTP call idempotency under retry conditions. The tracked-jobs.mjs (78 lines changed) and state.mjs (32 lines changed) modifications in the same diff mean that job state tracking is also being modified concurrently, compounding the risk that a retried call updates state inconsistently.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.58,
+        "recommendation": "Verify that every call site in glm-client.mjs that uses retry logic is idempotent by design (GET/HEAD) or carries an idempotency key (e.g., Idempotency-Key header for POST). Add an integration test that simulates a transient failure on a mutating call and asserts no duplicate side effects. Document which API operations are safe to retry and which are not."
+      },
+      {
+        "severity": "medium",
+        "title": "Concurrent modifications to three state-management modules risk inconsistent job state under parallel operations",
+        "body": "Three files managing overlapping job/session state were all modified in this cumulative diff: scripts/lib/state.mjs (32 lines changed), scripts/lib/tracked-jobs.mjs (78 lines changed), and scripts/lib/job-control.mjs (20 lines changed). File-based state (implied by fs.mjs at 44 lines changed and the presence of state.mjs) is not concurrency-safe: two simultaneous invocations of glm-companion.mjs could read the same state, each compute a mutation, and each write back, causing last-write-wins data loss. No file-locking or atomic-write mechanism is visible in the diff stat (no new 'lock' or 'atomic' module). The job-control.mjs (20 lines) is small enough to suggest a minor change, but tracked-jobs.mjs (78 lines) is substantial, suggesting schema or logic changes that may not be backward-compatible with in-flight jobs from prior versions.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.52,
+        "recommendation": "Audit all write paths to shared state files for atomicity. If two glm-companion processes can run concurrently (e.g., two terminal sessions), add file locking (e.g., proper-lockfile) or switch to an atomic write pattern (write to temp file, rename). Add a test that runs two concurrent operations and asserts state consistency afterward."
+      }
+    ],
+    "next_steps": [
+      "Grep the entire codebase for any remaining import/require of 'process.mjs' and verify complete removal of all references.",
+      "Audit every retry-wrapped HTTP call in glm-client.mjs to confirm it is idempotent or carries an idempotency key.",
+      "Run concurrent invocation tests against state.mjs/tracked-jobs.mjs to confirm no last-write-wins data loss.",
+      "Verify that tracked-jobs.mjs schema changes are backward-compatible with jobs created by v0.4.0 clients.",
+      "Confirm that the bigmodel-errors.mjs dispatch logic correctly classifies all error codes from the BigModel API, especially rate-limit and auth errors that require different retry behavior."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff introduces significant new infrastructure (retry.mjs at 203 lines, bigmodel-errors.mjs at 168 lines, deleted process.mjs) without enough observable evidence that integration paths are safe. The deletion of scripts/lib/process.mjs is the sharpest risk: a removed module can produce silent import failures that only manifest on specific code paths at runtime. Combined with new retry logic that may lack idempotency guards, this change can corrupt job state under retries or concurrent operations. Recommend explicit verification before shipping.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Deleted scripts/lib/process.mjs may leave dangling ESM imports causing runtime crash\",\n      \"body\": \"scripts/lib/process.mjs was removed entirely (67 lines deleted, 0 added). The main entry point scripts/glm-companion.mjs shows 139 lines changed in the same span, along with changes to render.mjs (79 lines) and glm-client.mjs (155 lines). If any of these modules retained a dynamic or static import referencing './process.mjs' or '../lib/process.mjs', the import will throw ERR_MODULE_NOT_FOUND at runtime. This class of failure is path-dependent: it only fires when the specific code path that imports the deleted module is exercised, making it easy to miss in ad-hoc testing but catastrophic in production. The large scope of changes (84 files, +6623/−480 lines) increases the likelihood that a dangling reference survived.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Run a repository-wide grep for any remaining import or require of 'process.mjs' (or its exported symbols). Verify that all functionality previously in process.mjs has an active replacement in the codebase. Add a CI check that validates all static imports resolve (e.g., node --check or a custom import-resolution lint).\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"New retry.mjs (203 lines) paired with glm-client.mjs changes creates idempotency risk for API calls\",\n      \"body\": \"A new 203-line retry module was added alongside 155 lines of changes to glm-client.mjs (the API client). Retry logic applied to non-idempotent HTTP operations (POST submissions, job creation) without explicit idempotency keys or request deduplication can produce duplicate resources: duplicate job submissions, duplicate state transitions, or duplicate billing events. The retry.test.mjs (352 lines) suggests unit-level coverage exists, but the test file name does not indicate integration testing of actual HTTP call idempotency under retry conditions. The tracked-jobs.mjs (78 lines changed) and state.mjs (32 lines changed) modifications in the same diff mean that job state tracking is also being modified concurrently, compounding the risk that a retried call updates state inconsistently.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.58,\n      \"recommendation\": \"Verify that every call site in glm-client.mjs that uses retry logic is idempotent by design (GET/HEAD) or carries an idempotency key (e.g., Idempotency-Key header for POST). Add an integration test that simulates a transient failure on a mutating call and asserts no duplicate side effects. Document which API operations are safe to retry and which are not.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Concurrent modifications to three state-management modules risk inconsistent job state under parallel operations\",\n      \"body\": \"Three files managing overlapping job/session state were all modified in this cumulative diff: scripts/lib/state.mjs (32 lines changed), scripts/lib/tracked-jobs.mjs (78 lines changed), and scripts/lib/job-control.mjs (20 lines changed). File-based state (implied by fs.mjs at 44 lines changed and the presence of state.mjs) is not concurrency-safe: two simultaneous invocations of glm-companion.mjs could read the same state, each compute a mutation, and each write back, causing last-write-wins data loss. No file-locking or atomic-write mechanism is visible in the diff stat (no new 'lock' or 'atomic' module). The job-control.mjs (20 lines) is small enough to suggest a minor change, but tracked-jobs.mjs (78 lines) is substantial, suggesting schema or logic changes that may not be backward-compatible with in-flight jobs from prior versions.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.52,\n      \"recommendation\": \"Audit all write paths to shared state files for atomicity. If two glm-companion processes can run concurrently (e.g., two terminal sessions), add file locking (e.g., proper-lockfile) or switch to an atomic write pattern (write to temp file, rename). Add a test that runs two concurrent operations and asserts state consistency afterward.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Grep the entire codebase for any remaining import/require of 'process.mjs' and verify complete removal of all references.\",\n    \"Audit every retry-wrapped HTTP call in glm-client.mjs to confirm it is idempotent or carries an idempotency key.\",\n    \"Run concurrent invocation tests against state.mjs/tracked-jobs.mjs to confirm no last-write-wins data loss.\",\n    \"Verify that tracked-jobs.mjs schema changes are backward-compatible with jobs created by v0.4.0 clients.\",\n    \"Confirm that the bigmodel-errors.mjs dispatch logic correctly classifies all error codes from the BigModel API, especially rate-limit and auth errors that require different retry behavior.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T19:17:00.535Z"
+}

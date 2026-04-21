@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 59
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 140799,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "Cumulative v0.4.0→v0.4.6 diff carries 6600+ lines across 84 files with significant runtime-level changes (retry, error dispatch, job tracking, client) but the commit history itself is a red flag: multiple 'hotfix bundles' (Bundles C, D3+, E+, F) and a commit explicitly fixing a ReferenceError caused by incomplete scaffolding purge. The deletion of process.mjs and introduction of retry.mjs + bigmodel-errors.mjs are high-leverage modules with no evidence from the diff stat that glm-client.mjs, tracked-jobs.mjs, or job-control.mjs have dedicated unit tests. This change is too large and touches too many failure-prone surfaces to ship without targeted verification of the retry/error-dispatch paths under partial-failure conditions.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "process.mjs deleted — unresolved import risk across dependent modules",
+        "body": "scripts/lib/process.mjs (67 lines) was deleted entirely in this diff. The commit message 'Bundle F — ReferenceError + full thread/resume scaffolding purge' confirms this deletion caused a runtime ReferenceError that required a subsequent fix. Given glm-companion.mjs, glm-client.mjs, job-control.mjs, and render.mjs were all modified in the same span, there is a residual risk that an import path to process.mjs survives in an infrequently-executed code path (error handler, cleanup, signal trap). A ReferenceError at runtime is a silent-then-fatal failure mode that typical happy-path testing will not catch.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.7,
+        "recommendation": "Grep the entire codebase for any remaining import/require of 'process.mjs' or 'lib/process' (including dynamic imports and string concatenation). Run a smoke test that exercises every subcommand's error path to confirm no latent ReferenceError. If no evidence exists, add a CI check that verifies no deleted module is still referenced."
+      },
+      {
+        "severity": "high",
+        "title": "retry.mjs is 203 new lines of retry/backoff logic with no coverage evidence for idempotency or partial-failure safety",
+        "body": "scripts/lib/retry.mjs is a brand-new module introduced in v0.4.6 for BigModel auto retry/backoff. While tests/retry.test.mjs exists (352 lines), retry logic is one of the highest-risk patterns: if the retried operation is not idempotent (e.g., job submission, state mutation), a retry can cause duplication or corruption. The diff stat does not show any corresponding idempotency guards in glm-client.mjs or tracked-jobs.mjs. Under network partitions or timeout scenarios, a retried API call could create duplicate jobs or advance state incorrectly. The commit message does not address idempotency.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.75,
+        "recommendation": "Audit every call site that uses retry.mjs to confirm the retried operation is idempotent or guarded by an idempotency key/conditional. Add explicit tests for: (1) retry-after-partial-write, (2) retry-exhaustion propagation, (3) concurrent retry of the same operation. Document the idempotency contract at each call site."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs (155 lines changed) lacks dedicated test file",
+        "body": "scripts/lib/glm-client.mjs received 155 lines of changes but the test directory contains no glm-client.test.mjs. This module handles API communication, authentication tokens, and now integrates with both retry.mjs and bigmodel-errors.mjs. It sits on the trust boundary between the plugin and the external BigModel API. Without dedicated tests, regressions in header handling, token refresh, error classification, or response parsing would only be caught at runtime against production endpoints.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.8,
+        "recommendation": "Add tests/glm-client.test.mjs covering: (1) error classification handoff to bigmodel-errors.mjs, (2) retry integration for transient errors, (3) auth token handling on 401/403, (4) malformed response handling. This is a trust-boundary module and must not ship uncovered."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs modified (78 lines) with no corresponding test file",
+        "body": "scripts/lib/tracked-jobs.mjs was modified with 78 lines of changes and manages job lifecycle state. The test directory has no tracked-jobs.test.mjs. Job tracking is stateful and susceptible to race conditions (concurrent job starts/completions) and stale-state bugs (job completed but tracker not updated). The diff also modifies state.mjs and job-control.mjs, meaning the state management surface was refactored without a safety net of targeted tests for the job tracker specifically.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.7,
+        "recommendation": "Add tests/tracked-jobs.test.mjs with scenarios for: (1) concurrent job start/completion, (2) stale job cleanup, (3) state persistence across process restart, (4) job tracker consistency after retry-induced duplication."
+      },
+      {
+        "severity": "medium",
+        "title": "Hotfix bundle history (Bundles C, D3+, E+, F) indicates unstable foundation",
+        "body": "The commit log shows a chain of reactive hotfixes: 'Bundle C post-review hotfixes', 'Bundle D3+ post-review hotfixes', 'Bundle E+ simplify pass (4 P1 + 2 P2 cleanups)', 'Bundle F — ReferenceError + full thread/resume scaffolding purge'. Each bundle fixed problems introduced or missed by the previous one. This pattern suggests insufficient pre-merge validation and a high probability that residual defects remain. The v0.4.6 commit 'BigModel error dispatch + auto retry/backoff' was layered on top of this already-unstable base.",
+        "file": "CHANGELOG.md",
+        "line_start": 1,
+        "line_end": 521,
+        "confidence": 0.65,
+        "recommendation": "Before shipping, run a targeted integration test that exercises the full happy path AND the top 3 failure modes (network timeout, API error, malformed response) end-to-end. The hotfix chain must be closed with a validation gate, not just more fixes."
+      }
+    ],
+    "next_steps": [
+      "Grep codebase for any surviving import of 'process.mjs' or 'lib/process' to rule out latent ReferenceError",
+      "Audit every retry.mjs call site for idempotency guarantees — document or add guards",
+      "Add glm-client.test.mjs and tracked-jobs.test.mjs before merging",
+      "Run an end-to-end integration test covering network timeout + API error + malformed response paths",
+      "Confirm that the UAT test scenarios (v0.4.4, v0.4.5) are re-run against current v0.4.6 code to validate no regression"
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"Cumulative v0.4.0→v0.4.6 diff carries 6600+ lines across 84 files with significant runtime-level changes (retry, error dispatch, job tracking, client) but the commit history itself is a red flag: multiple 'hotfix bundles' (Bundles C, D3+, E+, F) and a commit explicitly fixing a ReferenceError caused by incomplete scaffolding purge. The deletion of process.mjs and introduction of retry.mjs + bigmodel-errors.mjs are high-leverage modules with no evidence from the diff stat that glm-client.mjs, tracked-jobs.mjs, or job-control.mjs have dedicated unit tests. This change is too large and touches too many failure-prone surfaces to ship without targeted verification of the retry/error-dispatch paths under partial-failure conditions.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"process.mjs deleted — unresolved import risk across dependent modules\",\n      \"body\": \"scripts/lib/process.mjs (67 lines) was deleted entirely in this diff. The commit message 'Bundle F — ReferenceError + full thread/resume scaffolding purge' confirms this deletion caused a runtime ReferenceError that required a subsequent fix. Given glm-companion.mjs, glm-client.mjs, job-control.mjs, and render.mjs were all modified in the same span, there is a residual risk that an import path to process.mjs survives in an infrequently-executed code path (error handler, cleanup, signal trap). A ReferenceError at runtime is a silent-then-fatal failure mode that typical happy-path testing will not catch.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Grep the entire codebase for any remaining import/require of 'process.mjs' or 'lib/process' (including dynamic imports and string concatenation). Run a smoke test that exercises every subcommand's error path to confirm no latent ReferenceError. If no evidence exists, add a CI check that verifies no deleted module is still referenced.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"retry.mjs is 203 new lines of retry/backoff logic with no coverage evidence for idempotency or partial-failure safety\",\n      \"body\": \"scripts/lib/retry.mjs is a brand-new module introduced in v0.4.6 for BigModel auto retry/backoff. While tests/retry.test.mjs exists (352 lines), retry logic is one of the highest-risk patterns: if the retried operation is not idempotent (e.g., job submission, state mutation), a retry can cause duplication or corruption. The diff stat does not show any corresponding idempotency guards in glm-client.mjs or tracked-jobs.mjs. Under network partitions or timeout scenarios, a retried API call could create duplicate jobs or advance state incorrectly. The commit message does not address idempotency.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Audit every call site that uses retry.mjs to confirm the retried operation is idempotent or guarded by an idempotency key/conditional. Add explicit tests for: (1) retry-after-partial-write, (2) retry-exhaustion propagation, (3) concurrent retry of the same operation. Document the idempotency contract at each call site.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client.mjs (155 lines changed) lacks dedicated test file\",\n      \"body\": \"scripts/lib/glm-client.mjs received 155 lines of changes but the test directory contains no glm-client.test.mjs. This module handles API communication, authentication tokens, and now integrates with both retry.mjs and bigmodel-errors.mjs. It sits on the trust boundary between the plugin and the external BigModel API. Without dedicated tests, regressions in header handling, token refresh, error classification, or response parsing would only be caught at runtime against production endpoints.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.8,\n      \"recommendation\": \"Add tests/glm-client.test.mjs covering: (1) error classification handoff to bigmodel-errors.mjs, (2) retry integration for transient errors, (3) auth token handling on 401/403, (4) malformed response handling. This is a trust-boundary module and must not ship uncovered.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"tracked-jobs.mjs modified (78 lines) with no corresponding test file\",\n      \"body\": \"scripts/lib/tracked-jobs.mjs was modified with 78 lines of changes and manages job lifecycle state. The test directory has no tracked-jobs.test.mjs. Job tracking is stateful and susceptible to race conditions (concurrent job starts/completions) and stale-state bugs (job completed but tracker not updated). The diff also modifies state.mjs and job-control.mjs, meaning the state management surface was refactored without a safety net of targeted tests for the job tracker specifically.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Add tests/tracked-jobs.test.mjs with scenarios for: (1) concurrent job start/completion, (2) stale job cleanup, (3) state persistence across process restart, (4) job tracker consistency after retry-induced duplication.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Hotfix bundle history (Bundles C, D3+, E+, F) indicates unstable foundation\",\n      \"body\": \"The commit log shows a chain of reactive hotfixes: 'Bundle C post-review hotfixes', 'Bundle D3+ post-review hotfixes', 'Bundle E+ simplify pass (4 P1 + 2 P2 cleanups)', 'Bundle F — ReferenceError + full thread/resume scaffolding purge'. Each bundle fixed problems introduced or missed by the previous one. This pattern suggests insufficient pre-merge validation and a high probability that residual defects remain. The v0.4.6 commit 'BigModel error dispatch + auto retry/backoff' was layered on top of this already-unstable base.\",\n      \"file\": \"CHANGELOG.md\",\n      \"line_start\": 1,\n      \"line_end\": 521,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Before shipping, run a targeted integration test that exercises the full happy path AND the top 3 failure modes (network timeout, API error, malformed response) end-to-end. The hotfix chain must be closed with a validation gate, not just more fixes.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Grep codebase for any surviving import of 'process.mjs' or 'lib/process' to rule out latent ReferenceError\",\n    \"Audit every retry.mjs call site for idempotency guarantees — document or add guards\",\n    \"Add glm-client.test.mjs and tracked-jobs.test.mjs before merging\",\n    \"Run an end-to-end integration test covering network timeout + API error + malformed response paths\",\n    \"Confirm that the UAT test scenarios (v0.4.4, v0.4.5) are re-run against current v0.4.6 code to validate no regression\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T17:53:55.432Z"
+}

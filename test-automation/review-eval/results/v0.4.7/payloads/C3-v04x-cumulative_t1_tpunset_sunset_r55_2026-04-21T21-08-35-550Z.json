@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 55
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 48418,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces a retry/backoff subsystem, BigModel error dispatch, job tracking, and significant client changes. While test coverage appears broad, several high-severity concerns remain: the retry module has exponential-backoff + jitter that could amplify into very long hangs under sustained failures, the BigModel error dispatcher classifies errors by substring matching (fragile and easy to bypass), and state/job-control files lack atomic-write guarantees that could corrupt state on crash. These are real risks for a sampling-sweep run that will hammer the API.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs exponential backoff can produce effectively unbounded sleep times with no hard ceiling",
+        "body": "Exponential backoff with jitter but without an absolute maximum delay cap means a long-running sampling sweep that hits persistent errors will eventually compute delay values that grow without practical bound. If `baseDelay * 2^attempt` exceeds reasonable thresholds (e.g., hours), the process silently hangs with no useful feedback. The caller may not realize the sweep is stuck rather than intentionally waiting. This is especially dangerous in automated/batch contexts like run 55 where no human is watching.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.75,
+        "recommendation": "Add a `maxDelay` cap (e.g., 60 seconds) enforced after the exponential calculation and before jitter is applied. Document the ceiling in the module's public API. Add a log/warning when the cap is hit so operators know backoff was truncated."
+      },
+      {
+        "severity": "high",
+        "title": "BigModel error classification by substring matching is fragile and can misclassify novel error responses",
+        "body": "scripts/lib/bigmodel-errors.mjs dispatches error handling by matching substrings in error messages. If the upstream API changes its error phrasing, returns a novel error code, or includes localized/dynamic text, the classifier falls through to a default path that may silently retry non-retryable errors (e.g., auth failures, billing errors) or fail to retry transient errors. In a sampling sweep this means either wasting quota on doomed retries or aborting prematurely on recoverable errors. The test file covers known patterns but cannot defend against future API changes.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.7,
+        "recommendation": "Add a safeguard: if no error pattern matches, log the unrecognized error body at WARN level with the raw message for monitoring. Default to non-retryable (safe) rather than retryable. Consider also matching on HTTP status codes as a primary classifier and message text as secondary, since status codes are more stable."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs and tracked-jobs.mjs lack atomic file writes — crash during write corrupts persistent state",
+        "body": "Both state.mjs and tracked-jobs.mjs write JSON to disk. If the process crashes (OOM, SIGKILL, disk full) mid-write, the file will contain partial/corrupt JSON. On next startup, JSON.parse will throw, and depending on error handling, the user may lose all tracked job history or the entire state file. For a long sampling sweep this is a real scenario: the process is running for hours and is more likely to be interrupted.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.8,
+        "recommendation": "Use atomic write: write to a temporary file in the same directory, then rename (which is atomic on most filesystems). Add a recovery path: if the main file fails to parse, attempt to load from a backup or the temp file, and log the recovery."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs changes are large but the diff stat shows no evidence of integration tests for failure-path propagation",
+        "body": "The client module grew significantly (~155 lines changed) with retry integration and BigModel error dispatch. Unit tests exist for retry and bigmodel-errors in isolation, but there is no test file for `glm-client.mjs` itself in the test list. This means the integration of retry + error classification + actual HTTP calls is untested. Silent failures where the retry layer swallows a fatal error, or where the error classifier returns a wrong category, would only surface in production during a sampling sweep.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.65,
+        "recommendation": "Add at least a minimal integration test for glm-client.mjs that exercises: (1) a retryable error triggering retry, (2) a non-retryable error failing immediately, (3) a successful call after transient failure. Mock the HTTP layer to control responses."
+      },
+      {
+        "severity": "medium",
+        "title": "Job-control and tracked-jobs changes suggest concurrent job management without locking",
+        "body": "tracked-jobs.mjs manages job state on disk. If two companion processes run simultaneously (plausible in a sweep), they could read-modify-write the same jobs file concurrently, leading to lost updates where one process's job registration overwrites another's. There is no file locking or advisory lock mechanism visible in the module.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.6,
+        "recommendation": "Add advisory file locking (e.g., `proper-lockfile` or `flock`) around read-modify-write sequences in tracked-jobs.mjs. Alternatively, use per-job files instead of a single shared file to eliminate the contention."
+      }
+    ],
+    "next_steps": [
+      "Inspect retry.mjs to confirm maxDelay cap exists or add one before the sweep",
+      "Review bigmodel-errors.mjs default classification path — ensure unknown errors are non-retryable",
+      "Add atomic write (write-then-rename) to state.mjs and tracked-jobs.mjs",
+      "Add a glm-client integration test covering retry + error classification end-to-end",
+      "Assess whether the sampling sweep will run multiple concurrent processes and if so add file locking to tracked-jobs.mjs"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 cumulative diff introduces a retry/backoff subsystem, BigModel error dispatch, job tracking, and significant client changes. While test coverage appears broad, several high-severity concerns remain: the retry module has exponential-backoff + jitter that could amplify into very long hangs under sustained failures, the BigModel error dispatcher classifies errors by substring matching (fragile and easy to bypass), and state/job-control files lack atomic-write guarantees that could corrupt state on crash. These are real risks for a sampling-sweep run that will hammer the API.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs exponential backoff can produce effectively unbounded sleep times with no hard ceiling\",\"body\":\"Exponential backoff with jitter but without an absolute maximum delay cap means a long-running sampling sweep that hits persistent errors will eventually compute delay values that grow without practical bound. If `baseDelay * 2^attempt` exceeds reasonable thresholds (e.g., hours), the process silently hangs with no useful feedback. The caller may not realize the sweep is stuck rather than intentionally waiting. This is especially dangerous in automated/batch contexts like run 55 where no human is watching.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.75,\"recommendation\":\"Add a `maxDelay` cap (e.g., 60 seconds) enforced after the exponential calculation and before jitter is applied. Document the ceiling in the module's public API. Add a log/warning when the cap is hit so operators know backoff was truncated.\"},{\"severity\":\"high\",\"title\":\"BigModel error classification by substring matching is fragile and can misclassify novel error responses\",\"body\":\"scripts/lib/bigmodel-errors.mjs dispatches error handling by matching substrings in error messages. If the upstream API changes its error phrasing, returns a novel error code, or includes localized/dynamic text, the classifier falls through to a default path that may silently retry non-retryable errors (e.g., auth failures, billing errors) or fail to retry transient errors. In a sampling sweep this means either wasting quota on doomed retries or aborting prematurely on recoverable errors. The test file covers known patterns but cannot defend against future API changes.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.7,\"recommendation\":\"Add a safeguard: if no error pattern matches, log the unrecognized error body at WARN level with the raw message for monitoring. Default to non-retryable (safe) rather than retryable. Consider also matching on HTTP status codes as a primary classifier and message text as secondary, since status codes are more stable.\"},{\"severity\":\"medium\",\"title\":\"state.mjs and tracked-jobs.mjs lack atomic file writes — crash during write corrupts persistent state\",\"body\":\"Both state.mjs and tracked-jobs.mjs write JSON to disk. If the process crashes (OOM, SIGKILL, disk full) mid-write, the file will contain partial/corrupt JSON. On next startup, JSON.parse will throw, and depending on error handling, the user may lose all tracked job history or the entire state file. For a long sampling sweep this is a real scenario: the process is running for hours and is more likely to be interrupted.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.8,\"recommendation\":\"Use atomic write: write to a temporary file in the same directory, then rename (which is atomic on most filesystems). Add a recovery path: if the main file fails to parse, attempt to load from a backup or the temp file, and log the recovery.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs changes are large but the diff stat shows no evidence of integration tests for failure-path propagation\",\"body\":\"The client module grew significantly (~155 lines changed) with retry integration and BigModel error dispatch. Unit tests exist for retry and bigmodel-errors in isolation, but there is no test file for `glm-client.mjs` itself in the test list. This means the integration of retry + error classification + actual HTTP calls is untested. Silent failures where the retry layer swallows a fatal error, or where the error classifier returns a wrong category, would only surface in production during a sampling sweep.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.65,\"recommendation\":\"Add at least a minimal integration test for glm-client.mjs that exercises: (1) a retryable error triggering retry, (2) a non-retryable error failing immediately, (3) a successful call after transient failure. Mock the HTTP layer to control responses.\"},{\"severity\":\"medium\",\"title\":\"Job-control and tracked-jobs changes suggest concurrent job management without locking\",\"body\":\"tracked-jobs.mjs manages job state on disk. If two companion processes run simultaneously (plausible in a sweep), they could read-modify-write the same jobs file concurrently, leading to lost updates where one process's job registration overwrites another's. There is no file locking or advisory lock mechanism visible in the module.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.6,\"recommendation\":\"Add advisory file locking (e.g., `proper-lockfile` or `flock`) around read-modify-write sequences in tracked-jobs.mjs. Alternatively, use per-job files instead of a single shared file to eliminate the contention.\"}],\"next_steps\":[\"Inspect retry.mjs to confirm maxDelay cap exists or add one before the sweep\",\"Review bigmodel-errors.mjs default classification path — ensure unknown errors are non-retryable\",\"Add atomic write (write-then-rename) to state.mjs and tracked-jobs.mjs\",\"Add a glm-client integration test covering retry + error classification end-to-end\",\"Assess whether the sampling sweep will run multiple concurrent processes and if so add file locking to tracked-jobs.mjs\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T21:08:35.593Z"
+}

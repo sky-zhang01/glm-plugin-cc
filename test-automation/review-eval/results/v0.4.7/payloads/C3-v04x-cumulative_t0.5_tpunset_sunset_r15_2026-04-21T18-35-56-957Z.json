@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 15
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 155907,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The cumulative v0.4.0→v0.4.6 diff introduces critical new infrastructure (retry, error dispatch, client rewrite) with notable test coverage gaps in the two modules that directly govern API communication and job lifecycle state. The deletion of process.mjs carries dangling-import risk that the commit history (explicit ReferenceError fixes) suggests was non-trivial to purge. These are not speculative concerns — glm-client.mjs and tracked-jobs.mjs sit on every hot path.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "glm-client.mjs (155 lines changed) has no dedicated test file",
+        "body": "The network client module was substantially rewritten (retry coordination, error dispatch integration, auth handling) yet no tests/glm-client.test.mjs exists. Every API call flows through this module. The retry.mjs (203 lines) and bigmodel-errors.mjs (168 lines) modules it depends on are tested individually, but their integration point — glm-client itself — is not. A mis-classified error, wrong retry condition, or auth token handling regression would silently degrade or break every API interaction without any test to catch it before release. The result-propagation.test.mjs (69 lines) is too small to meaningfully cover this surface.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.82,
+        "recommendation": "Add a dedicated tests/glm-client.test.mjs that exercises: (1) retry delegation on transient errors, (2) error classification via bigmodel-errors, (3) auth header propagation, (4) timeout/abort handling, and (5) the interaction between retry backoff and the client's request lifecycle. Without this, any regression in the most critical module in the system is undetectable before production."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs (78 lines changed) has no test coverage",
+        "body": "The tracked-jobs module manages job lifecycle state (start, track, complete, fail). It was modified alongside the job-control and retry changes but has no corresponding tests/tracked-jobs.test.mjs. State management modules are prime candidates for race conditions, orphaned state, and partial-failure corruption — exactly the class of bugs that are expensive to diagnose in production. The job-render.test.mjs (144 lines) may exercise rendering paths but does not validate job state transitions.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.75,
+        "recommendation": "Add tests/tracked-jobs.test.mjs covering: concurrent job registration, state transitions under failure, cleanup on process exit, and idempotency of job completion. Verify that the module correctly handles the case where a job ID is reused after a crash (stale state recovery)."
+      },
+      {
+        "severity": "medium",
+        "title": "Deleted process.mjs leaves latent import-failure risk",
+        "body": "scripts/lib/process.mjs (67 lines) was fully deleted in the 'Bundle F — ReferenceError + full thread/resume scaffolding purge' commit. The commit message explicitly mentions fixing ReferenceErrors, indicating the purge was complex and error-prone. While static imports were likely updated, any dynamic import(), eval-based loading, or conditional code path that references 'process.mjs' will throw ERR_MODULE_NOT_FOUND at runtime — a failure mode invisible until the specific code path is exercised.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.6,
+        "recommendation": "Run a project-wide grep for 'process' (module resolution string) across all .mjs files to confirm zero remaining references: `grep -rn \"from.*process\" scripts/`. Also grep for dynamic import patterns like `import(.*process`. Add a CI check that validates all module imports resolve (the existing check-imports.mjs script should cover this — verify it does)."
+      }
+    ],
+    "next_steps": [
+      "Add tests/glm-client.test.mjs covering the full retry/error-dispatch/auth integration surface before release.",
+      "Verify check-imports.mjs actually validates that no remaining import references the deleted process.mjs.",
+      "Add tests/tracked-jobs.test.mjs for job state lifecycle coverage.",
+      "Run a full import-resolution pass (e.g., node --check or dynamic analysis) against the final tree to confirm no dangling module references exist."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The cumulative v0.4.0→v0.4.6 diff introduces critical new infrastructure (retry, error dispatch, client rewrite) with notable test coverage gaps in the two modules that directly govern API communication and job lifecycle state. The deletion of process.mjs carries dangling-import risk that the commit history (explicit ReferenceError fixes) suggests was non-trivial to purge. These are not speculative concerns — glm-client.mjs and tracked-jobs.mjs sit on every hot path.\",\"findings\":[{\"severity\":\"high\",\"title\":\"glm-client.mjs (155 lines changed) has no dedicated test file\",\"body\":\"The network client module was substantially rewritten (retry coordination, error dispatch integration, auth handling) yet no tests/glm-client.test.mjs exists. Every API call flows through this module. The retry.mjs (203 lines) and bigmodel-errors.mjs (168 lines) modules it depends on are tested individually, but their integration point — glm-client itself — is not. A mis-classified error, wrong retry condition, or auth token handling regression would silently degrade or break every API interaction without any test to catch it before release. The result-propagation.test.mjs (69 lines) is too small to meaningfully cover this surface.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":1,\"confidence\":0.82,\"recommendation\":\"Add a dedicated tests/glm-client.test.mjs that exercises: (1) retry delegation on transient errors, (2) error classification via bigmodel-errors, (3) auth header propagation, (4) timeout/abort handling, and (5) the interaction between retry backoff and the client's request lifecycle. Without this, any regression in the most critical module in the system is undetectable before production.\"},{\"severity\":\"medium\",\"title\":\"tracked-jobs.mjs (78 lines changed) has no test coverage\",\"body\":\"The tracked-jobs module manages job lifecycle state (start, track, complete, fail). It was modified alongside the job-control and retry changes but has no corresponding tests/tracked-jobs.test.mjs. State management modules are prime candidates for race conditions, orphaned state, and partial-failure corruption — exactly the class of bugs that are expensive to diagnose in production. The job-render.test.mjs (144 lines) may exercise rendering paths but does not validate job state transitions.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":1,\"confidence\":0.75,\"recommendation\":\"Add tests/tracked-jobs.test.mjs covering: concurrent job registration, state transitions under failure, cleanup on process exit, and idempotency of job completion. Verify that the module correctly handles the case where a job ID is reused after a crash (stale state recovery).\"},{\"severity\":\"medium\",\"title\":\"Deleted process.mjs leaves latent import-failure risk\",\"body\":\"scripts/lib/process.mjs (67 lines) was fully deleted in the 'Bundle F — ReferenceError + full thread/resume scaffolding purge' commit. The commit message explicitly mentions fixing ReferenceErrors, indicating the purge was complex and error-prone. While static imports were likely updated, any dynamic import(), eval-based loading, or conditional code path that references 'process.mjs' will throw ERR_MODULE_NOT_FOUND at runtime — a failure mode invisible until the specific code path is exercised.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":67,\"confidence\":0.6,\"recommendation\":\"Run a project-wide grep for 'process' (module resolution string) across all .mjs files to confirm zero remaining references: `grep -rn \\\"from.*process\\\" scripts/`. Also grep for dynamic import patterns like `import(.*process`. Add a CI check that validates all module imports resolve (the existing check-imports.mjs script should cover this — verify it does).\"}],\"next_steps\":[\"Add tests/glm-client.test.mjs covering the full retry/error-dispatch/auth integration surface before release.\",\"Verify check-imports.mjs actually validates that no remaining import references the deleted process.mjs.\",\"Add tests/tracked-jobs.test.mjs for job state lifecycle coverage.\",\"Run a full import-resolution pass (e.g., node --check or dynamic analysis) against the final tree to confirm no dangling module references exist.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T18:35:56.977Z"
+}

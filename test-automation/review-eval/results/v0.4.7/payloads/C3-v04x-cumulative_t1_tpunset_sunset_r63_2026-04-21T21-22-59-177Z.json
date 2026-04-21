@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 63
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 63183,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces substantial new runtime paths—retry logic, BigModel error dispatch, job-control changes, and a deleted process.mjs library—without visible proof that all import sites were updated, that retries are idempotent, or that the new error-classification surface is exhaustive. The deletion of process.mjs (67 lines removed) is a latent runtime bomb if any transitive import was missed. I cannot confirm safety for shipment.",
+    "findings": [
+      {
+        "severity": "critical",
+        "title": "process.mjs deleted but import breakage risk unverified",
+        "body": "scripts/lib/process.mjs (67 lines) was entirely removed. If any file in the tree still contains `import … from './lib/process.mjs'` or `import … from '../lib/process.mjs'`, the import will resolve to a non-existent module and throw at require-time. This class of bug is invisible to static analysis if the import graph isn't re-validated and will only surface at runtime when the affected code-path is exercised.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.85,
+        "recommendation": "Run `grep -r 'process\\.mjs' scripts/` and confirm zero remaining references. Add a CI check that validates every import resolves (e.g., node --check or a lint rule for no-unresolved)."
+      },
+      {
+        "severity": "high",
+        "title": "New retry.mjs has no visible circuit-breaker or max-concurrency guard",
+        "body": "scripts/lib/retry.mjs is 203 lines of brand-new retry/backoff logic. From the diff stat alone there is no evidence of a circuit-breaker, global retry-budget, or max-concurrent-retries cap. Under sustained failures, every in-flight request will independently back off and retry, potentially amplifying load on an already-degraded BigModel API. Retry without idempotency guarantees also risks duplicate side-effects on non-GET operations.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.7,
+        "recommendation": "Confirm that: (1) a global or per-endpoint retry budget exists, (2) retries are only applied to idempotent operations or include idempotency keys, (3) jitter is applied to backoff to avoid thundering-herd synchronization."
+      },
+      {
+        "severity": "high",
+        "title": "bigmodel-errors.mjs error dispatch may silently swallow unclassified errors",
+        "body": "scripts/lib/bigmodel-errors.mjs (168 lines) introduces a new error-classification layer. If the classification logic does not cover all possible HTTP status codes or error shapes from BigModel, unrecognised errors will either be misclassified or dropped, hiding real failures from callers and making debugging extremely difficult. The existing test file (tests/bigmodel-errors.test.mjs, 189 lines) may not cover all edge cases.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.65,
+        "recommendation": "Audit the classifier to ensure there is a catch-all/fallback category that logs the raw error at warn level. Add an explicit test for an unknown status code and an unexpected error shape to confirm they surface rather than vanish."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs and tracked-jobs.mjs mutations lack visible concurrency protection",
+        "body": "Both scripts/lib/state.mjs and scripts/lib/tracked-jobs.mjs were modified. If job state is written to a shared filesystem or JSON file without file-locking or atomic writes, concurrent glm-companion processes can interleave writes and corrupt the state file. This is especially dangerous for the retry/backoff system which reads and writes job state on each attempt.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.6,
+        "recommendation": "Verify that state writes use atomic-rename (write-to-temp → rename) and that tracked-jobs uses advisory locking or a lockfile if multiple processes can run simultaneously."
+      }
+    ],
+    "next_steps": [
+      "Grep for all remaining references to process.mjs and confirm zero hits",
+      "Review retry.mjs in full for circuit-breaker, idempotency-key, and jitter implementations",
+      "Inspect bigmodel-errors.mjs classifier for a catch-all fallback path and corresponding test",
+      "Validate atomicity of state.mjs and tracked-jobs.mjs file writes under concurrent access",
+      "Run the full test suite against a clean checkout to catch any import-time failures from the process.mjs deletion"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 cumulative diff introduces substantial new runtime paths—retry logic, BigModel error dispatch, job-control changes, and a deleted process.mjs library—without visible proof that all import sites were updated, that retries are idempotent, or that the new error-classification surface is exhaustive. The deletion of process.mjs (67 lines removed) is a latent runtime bomb if any transitive import was missed. I cannot confirm safety for shipment.\",\"findings\":[{\"severity\":\"critical\",\"title\":\"process.mjs deleted but import breakage risk unverified\",\"body\":\"scripts/lib/process.mjs (67 lines) was entirely removed. If any file in the tree still contains `import … from './lib/process.mjs'` or `import … from '../lib/process.mjs'`, the import will resolve to a non-existent module and throw at require-time. This class of bug is invisible to static analysis if the import graph isn't re-validated and will only surface at runtime when the affected code-path is exercised.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":67,\"confidence\":0.85,\"recommendation\":\"Run `grep -r 'process\\\\.mjs' scripts/` and confirm zero remaining references. Add a CI check that validates every import resolves (e.g., node --check or a lint rule for no-unresolved).\"},{\"severity\":\"high\",\"title\":\"New retry.mjs has no visible circuit-breaker or max-concurrency guard\",\"body\":\"scripts/lib/retry.mjs is 203 lines of brand-new retry/backoff logic. From the diff stat alone there is no evidence of a circuit-breaker, global retry-budget, or max-concurrent-retries cap. Under sustained failures, every in-flight request will independently back off and retry, potentially amplifying load on an already-degraded BigModel API. Retry without idempotency guarantees also risks duplicate side-effects on non-GET operations.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.7,\"recommendation\":\"Confirm that: (1) a global or per-endpoint retry budget exists, (2) retries are only applied to idempotent operations or include idempotency keys, (3) jitter is applied to backoff to avoid thundering-herd synchronization.\"},{\"severity\":\"high\",\"title\":\"bigmodel-errors.mjs error dispatch may silently swallow unclassified errors\",\"body\":\"scripts/lib/bigmodel-errors.mjs (168 lines) introduces a new error-classification layer. If the classification logic does not cover all possible HTTP status codes or error shapes from BigModel, unrecognised errors will either be misclassified or dropped, hiding real failures from callers and making debugging extremely difficult. The existing test file (tests/bigmodel-errors.test.mjs, 189 lines) may not cover all edge cases.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.65,\"recommendation\":\"Audit the classifier to ensure there is a catch-all/fallback category that logs the raw error at warn level. Add an explicit test for an unknown status code and an unexpected error shape to confirm they surface rather than vanish.\"},{\"severity\":\"medium\",\"title\":\"state.mjs and tracked-jobs.mjs mutations lack visible concurrency protection\",\"body\":\"Both scripts/lib/state.mjs and scripts/lib/tracked-jobs.mjs were modified. If job state is written to a shared filesystem or JSON file without file-locking or atomic writes, concurrent glm-companion processes can interleave writes and corrupt the state file. This is especially dangerous for the retry/backoff system which reads and writes job state on each attempt.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.6,\"recommendation\":\"Verify that state writes use atomic-rename (write-to-temp → rename) and that tracked-jobs uses advisory locking or a lockfile if multiple processes can run simultaneously.\"}],\"next_steps\":[\"Grep for all remaining references to process.mjs and confirm zero hits\",\"Review retry.mjs in full for circuit-breaker, idempotency-key, and jitter implementations\",\"Inspect bigmodel-errors.mjs classifier for a catch-all fallback path and corresponding test\",\"Validate atomicity of state.mjs and tracked-jobs.mjs file writes under concurrent access\",\"Run the full test suite against a clean checkout to catch any import-time failures from the process.mjs deletion\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T21:22:59.205Z"
+}

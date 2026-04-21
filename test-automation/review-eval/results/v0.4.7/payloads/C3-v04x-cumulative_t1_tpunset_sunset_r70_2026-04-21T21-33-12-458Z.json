@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 70
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 189646,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces a retry library (retry.mjs), BigModel error dispatch (bigmodel-errors.mjs), and significant changes to glm-client.mjs and state management without sufficient guards against partial failure, stale state, or concurrent mutation. The retry mechanism and error classification need closer inspection before shipping, as misclassified errors could cause infinite retry loops or silent drops of legitimate failures.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs likely retries non-idempotent operations without guarding against partial success",
+        "body": "The new retry.mjs module (203 lines added) provides generic retry infrastructure. If callers use it around non-idempotent GLM API calls (e.g., job submission, state transitions), a timeout after the server has accepted the request but before the client reads the response will cause a duplicate submission on retry. The diff stat shows glm-client.mjs changed significantly (155 lines modified) and retry.mjs is new (203 lines). Without request idempotency keys or deduplication, retries on mutating calls risk data duplication or double-execution of expensive operations.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.7,
+        "recommendation": "Audit every call site that uses retry to confirm the operation is read-only or idempotent. For mutating calls, implement an idempotency key or check-before-submit guard. Document which operations are safe to retry."
+      },
+      {
+        "severity": "high",
+        "title": "bigmodel-errors.mjs error classification could misclassify transient auth failures as retryable",
+        "body": "The new bigmodel-errors.mjs (168 lines) classifies errors for retry/backoff decisions. If an authentication or authorization failure (401/403) is misclassified as retryable, the system will burn through retry budgets and potentially trigger rate-limiting or account lockout without ever succeeding. Conversely, if a transient 5xx is classified as fatal, the user loses work silently. The risk is elevated because error classification is fragile and provider-specific, and there are no negative-path tests visible in the test file (tests/bigmodel-errors.test.mjs at 189 lines) that verify non-retryable status codes.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.65,
+        "recommendation": "Verify that 401, 403, and 422 are explicitly classified as non-retryable. Add test cases for each HTTP status class. Add a maximum retry budget guard that logs a clear diagnostic when exhausted, so failures are observable."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs changes (32 lines modified) may corrupt persisted state under concurrent hook invocations",
+        "body": "state.mjs has 32 lines changed. If the state file is read-modify-written without file locking, concurrent hook invocations (e.g., two review commands running simultaneously) will race and one write will silently overwrite the other's changes. This is a classic TOCTOU issue in file-based state. The tracked-jobs.mjs module (78 lines changed) likely compounds this if job tracking state is stored in the same file.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.6,
+        "recommendation": "Verify that all state mutations use atomic write patterns (write-to-temp then rename) and that concurrent access is either serialized or uses advisory locking. Add a test that runs two concurrent state mutations and verifies no data loss."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs changes (155 lines modified) may swallow errors from the BigModel API",
+        "body": "The glm-client.mjs module had significant changes. Combined with the new retry and error-dispatch layers, there is risk that errors from the GLM API are caught, wrapped, and re-thrown with lost context (original status code, response body, request ID). If the error path loses the original diagnostic information, production debugging of failures becomes much harder — a silent observability gap.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.6,
+        "recommendation": "Verify that every error thrown from glm-client preserves the original HTTP status, response headers (especially x-request-id), and truncated response body. Add a test that asserts error objects carry these fields through the retry/dispatch layers."
+      },
+      {
+        "severity": "medium",
+        "title": "process.mjs deleted (67 lines removed) — callers may have unresolved imports",
+        "body": "scripts/lib/process.mjs was entirely deleted (67 lines removed). If any other module imports from it, those imports will fail at runtime with MODULE_NOT_FOUND, crashing the tool. The diff shows check-imports.mjs was modified (5 lines), suggesting some cleanup was attempted, but runtime import resolution in ESM is not always catchable by static analysis.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.55,
+        "recommendation": "Grep the entire codebase for any remaining import or require of 'process.mjs' or 'lib/process'. Run the full test suite and verify no MODULE_NOT_FOUND errors. Consider adding a CI check that validates all imports resolve."
+      }
+    ],
+    "next_steps": [
+      "Read retry.mjs fully and trace every call site to classify idempotency",
+      "Read bigmodel-errors.mjs and verify 401/403 are non-retryable",
+      "Audit state.mjs and tracked-jobs.mjs for atomic write patterns",
+      "Verify no remaining imports of deleted process.mjs",
+      "Run the full test suite to check for import resolution failures"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 diff introduces a retry library (retry.mjs), BigModel error dispatch (bigmodel-errors.mjs), and significant changes to glm-client.mjs and state management without sufficient guards against partial failure, stale state, or concurrent mutation. The retry mechanism and error classification need closer inspection before shipping, as misclassified errors could cause infinite retry loops or silent drops of legitimate failures.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs likely retries non-idempotent operations without guarding against partial success\",\"body\":\"The new retry.mjs module (203 lines added) provides generic retry infrastructure. If callers use it around non-idempotent GLM API calls (e.g., job submission, state transitions), a timeout after the server has accepted the request but before the client reads the response will cause a duplicate submission on retry. The diff stat shows glm-client.mjs changed significantly (155 lines modified) and retry.mjs is new (203 lines). Without request idempotency keys or deduplication, retries on mutating calls risk data duplication or double-execution of expensive operations.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.7,\"recommendation\":\"Audit every call site that uses retry to confirm the operation is read-only or idempotent. For mutating calls, implement an idempotency key or check-before-submit guard. Document which operations are safe to retry.\"},{\"severity\":\"high\",\"title\":\"bigmodel-errors.mjs error classification could misclassify transient auth failures as retryable\",\"body\":\"The new bigmodel-errors.mjs (168 lines) classifies errors for retry/backoff decisions. If an authentication or authorization failure (401/403) is misclassified as retryable, the system will burn through retry budgets and potentially trigger rate-limiting or account lockout without ever succeeding. Conversely, if a transient 5xx is classified as fatal, the user loses work silently. The risk is elevated because error classification is fragile and provider-specific, and there are no negative-path tests visible in the test file (tests/bigmodel-errors.test.mjs at 189 lines) that verify non-retryable status codes.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.65,\"recommendation\":\"Verify that 401, 403, and 422 are explicitly classified as non-retryable. Add test cases for each HTTP status class. Add a maximum retry budget guard that logs a clear diagnostic when exhausted, so failures are observable.\"},{\"severity\":\"medium\",\"title\":\"state.mjs changes (32 lines modified) may corrupt persisted state under concurrent hook invocations\",\"body\":\"state.mjs has 32 lines changed. If the state file is read-modify-written without file locking, concurrent hook invocations (e.g., two review commands running simultaneously) will race and one write will silently overwrite the other's changes. This is a classic TOCTOU issue in file-based state. The tracked-jobs.mjs module (78 lines changed) likely compounds this if job tracking state is stored in the same file.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.6,\"recommendation\":\"Verify that all state mutations use atomic write patterns (write-to-temp then rename) and that concurrent access is either serialized or uses advisory locking. Add a test that runs two concurrent state mutations and verifies no data loss.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs changes (155 lines modified) may swallow errors from the BigModel API\",\"body\":\"The glm-client.mjs module had significant changes. Combined with the new retry and error-dispatch layers, there is risk that errors from the GLM API are caught, wrapped, and re-thrown with lost context (original status code, response body, request ID). If the error path loses the original diagnostic information, production debugging of failures becomes much harder — a silent observability gap.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.6,\"recommendation\":\"Verify that every error thrown from glm-client preserves the original HTTP status, response headers (especially x-request-id), and truncated response body. Add a test that asserts error objects carry these fields through the retry/dispatch layers.\"},{\"severity\":\"medium\",\"title\":\"process.mjs deleted (67 lines removed) — callers may have unresolved imports\",\"body\":\"scripts/lib/process.mjs was entirely deleted (67 lines removed). If any other module imports from it, those imports will fail at runtime with MODULE_NOT_FOUND, crashing the tool. The diff shows check-imports.mjs was modified (5 lines), suggesting some cleanup was attempted, but runtime import resolution in ESM is not always catchable by static analysis.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":67,\"confidence\":0.55,\"recommendation\":\"Grep the entire codebase for any remaining import or require of 'process.mjs' or 'lib/process'. Run the full test suite and verify no MODULE_NOT_FOUND errors. Consider adding a CI check that validates all imports resolve.\"}],\"next_steps\":[\"Read retry.mjs fully and trace every call site to classify idempotency\",\"Read bigmodel-errors.mjs and verify 401/403 are non-retryable\",\"Audit state.mjs and tracked-jobs.mjs for atomic write patterns\",\"Verify no remaining imports of deleted process.mjs\",\"Run the full test suite to check for import resolution failures\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T21:33:12.506Z"
+}

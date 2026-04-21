@@ -1,0 +1,91 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 4
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 44623,
+    "error_code": ""
+  },
+  "parsed": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "verdict": "needs-attention",
+    "summary": "This is a massive cumulative diff (84 files, +6623/-480) spanning v0.4.0→v0.4.6. Multiple high-risk areas exist: a new retry library with backoff logic, a BigModel error dispatch system, job tracking, state management, and client networking code. Several findings involve silent failure modes, race conditions, and missing guards that could cause user-visible failures or data loss under stress.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs exponential backoff can overflow to NaN/negative delay on rapid retries",
+        "body": "The retry module uses exponential backoff with jitter. If `attempt` grows large (e.g., > 70 for 2^attempt), the delay computation `Math.pow(2, attempt)` overflows Number.MAX_SAFE_INTEGER, producing Infinity. Combined with jitter math (`Math.random() * jitter`), the resulting delay becomes NaN when Infinity * 0 or similar operations occur. `setTimeout` with NaN or negative delay may fire immediately or throw depending on the runtime, causing a tight retry loop instead of the intended backoff. This is a real risk for long-running jobs hitting persistent failures (e.g., API outage) where the retry count climbs unbounded.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.75,
+        "recommendation": "Cap the computed delay to a sensible maximum (e.g., `Math.min(computedDelay, MAX_DELAY_MS)`) and guard against NaN/Infinity before passing to setTimeout. Also verify that maxAttempts is bounded at the call site."
+      },
+      {
+        "severity": "high",
+        "title": "glm-client.mjs network errors may be silently swallowed by retry wrapper",
+        "body": "The GLM client wraps API calls with retry logic. If a non-retryable error (e.g., 403 Forbidden, invalid API key) is classified incorrectly by bigmodel-errors.mjs, the retry layer will exhaust attempts on an error that will never succeed, wasting time and potentially masking the root cause from the user. The error classification logic needs to be inspected to ensure 4xx client errors (except 429) are not retried, and that the final error surfaced to the user preserves the original HTTP status and message rather than a generic 'retries exhausted' message.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.72,
+        "recommendation": "Verify that bigmodel-errors.mjs classifies 4xx errors (except 429) as non-retryable. Ensure the final error thrown after retries preserves the original error details. Add explicit test coverage for non-retryable error paths."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs has no concurrency protection — concurrent writes can corrupt job state",
+        "body": "The tracked-jobs module manages job state on disk. Multiple concurrent GLM processes or subcommands could read-modify-write the same job tracking file simultaneously. There is no file locking (flock, lockfile, or atomic rename pattern). Under concurrent usage (e.g., user runs two reviews in parallel shells), the last writer wins and earlier job entries can be silently lost. This is a data integrity issue — jobs disappear from tracking without any error signal.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.68,
+        "recommendation": "Use atomic file writes (write to temp file, then rename) and consider a simple lockfile mechanism. At minimum, document the single-process assumption if concurrency is not supported."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs state file corruption on crash during write",
+        "body": "The state module reads and writes persistent state. If the process crashes (SIGKILL, OOM, power loss) during a write, the state file can be left truncated or empty. On next read, this would cause a parse error and potentially reset all user configuration or lose job history. There is no evidence of write-ahead logging, temp-file-then-rename, or backup file rotation in the diff.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.65,
+        "recommendation": "Implement atomic writes using the temp-file-then-rename pattern: write to state.tmp, fsync, then rename to state.json. Add a corrupted-state recovery path that attempts to load from a backup or defaults gracefully."
+      },
+      {
+        "severity": "medium",
+        "title": "Missing test coverage for bigmodel-errors.mjs error dispatch edge cases",
+        "body": "bigmodel-errors.mjs is a new 168-line module for classifying and dispatching BigModel API errors. While bigmodel-errors.test.mjs exists (189 lines), the error classification logic likely depends on matching specific error response structures. If the upstream API changes its error response format (missing field, new error code, unexpected nesting), the classifier could return a wrong classification or throw an unhandled exception, causing the retry layer to behave incorrectly (retrying non-retryable errors or vice versa). The test file should be audited for coverage of malformed/missing-field responses.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.6,
+        "recommendation": "Add tests for malformed error responses (missing fields, unexpected types, null body, non-JSON response). Add defensive guards in the classifier to handle missing/undefined fields gracefully with a safe default classification."
+      }
+    ],
+    "next_steps": [
+      "Inspect retry.mjs line by line to confirm the delay overflow/NaN risk and verify maxAttempts bounds at every call site",
+      "Audit bigmodel-errors.mjs error classification to confirm 4xx client errors are not retried",
+      "Check tracked-jobs.mjs and state.mjs for atomic write patterns",
+      "Verify glm-client.mjs preserves original error details through the retry chain",
+      "Run the test suite to confirm all new tests pass and check for missing edge-case coverage"
+    ]
+  },
+  "rawOutputHead": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"verdict\":\"needs-attention\",\"summary\":\"This is a massive cumulative diff (84 files, +6623/-480) spanning v0.4.0→v0.4.6. Multiple high-risk areas exist: a new retry library with backoff logic, a BigModel error dispatch system, job tracking, state management, and client networking code. Several findings involve silent failure modes, race conditions, and missing guards that could cause user-visible failures or data loss under stress.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs exponential backoff can overflow to NaN/negative delay on rapid retries\",\"body\":\"The retry module uses exponential backoff with jitter. If `attempt` grows large (e.g., > 70 for 2^attempt), the delay computation `Math.pow(2, attempt)` overflows Number.MAX_SAFE_INTEGER, producing Infinity. Combined with jitter math (`Math.random() * jitter`), the resulting delay becomes NaN when Infinity * 0 or similar operations occur. `setTimeout` with NaN or negative delay may fire immediately or throw depending on the runtime, causing a tight retry loop instead of the intended backoff. This is a real risk for long-running jobs hitting persistent failures (e.g., API outage) where the retry count climbs unbounded.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.75,\"recommendation\":\"Cap the computed delay to a sensible maximum (e.g., `Math.min(computedDelay, MAX_DELAY_MS)`) and guard against NaN/Infinity before passing to setTimeout. Also verify that maxAttempts is bounded at the call site.\"},{\"severity\":\"high\",\"title\":\"glm-client.mjs network errors may be silently swallowed by retry wrapper\",\"body\":\"The GLM client wraps API calls with retry logic. If a non-retryable error (e.g., 403 Forbidden, invalid API key) is classified incorrectly by bigmodel-errors.mjs, the retry layer will exhaust attempts on an error that will never succeed, wasting time and potentially masking the root cause from the user. The error classification logic needs to be inspected to ensure 4xx client errors (except 429) are not retried, and that the final error surfaced to the user preserves the original HTTP status and message rather than a generic 'retries exhausted' message.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.72,\"recommendation\":\"Verify that bigmodel-errors.mjs classifies 4xx errors (except 429) as non-retryable. Ensure the final error thrown after retries preserves the original error details. Add explicit test coverage for non-retryable error paths.\"},{\"severity\":\"medium\",\"title\":\"tracked-jobs.mjs has no concurrency protection — concurrent writes can corrupt job state\",\"body\":\"The tracked-jobs module manages job state on disk. Multiple concurrent GLM processes or subcommands could read-modify-write the same job tracking file simultaneously. There is no file locking (flock, lockfile, or atomic rename pattern). Under concurrent usage (e.g., user runs two reviews in parallel shells), the last writer wins and earlier job entries can be silently lost. This is a data integrity issue — jobs disappear from tracking without any error signal.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.68,\"recommendation\":\"Use atomic file writes (write to temp file, then rename) and consider a simple lockfile mechanism. At minimum, document the single-process assumption if concurrency is not supported.\"},{\"severity\":\"medium\",\"title\":\"state.mjs state file corruption on crash during write\",\"body\":\"The state module reads and writes persistent state. If the process crashes (SIGKILL, OOM, power loss) during a write, the state file can be left truncated or empty. On next read, this would cause a parse error and potentially reset all user configuration or lose job history. There is no evidence of write-ahead logging, temp-file-then-rename, or backup file rotation in the diff.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.65,\"recommendation\":\"Implement atomic writes using the temp-file-then-rename pattern: write to state.tmp, fsync, then rename to state.json. Add a corrupted-state recovery path that attempts to load from a backup or defaults gracefully.\"},{\"severity\":\"medium\",\"title\":\"Missing test coverage for bigmodel-errors.mjs error dispatch edge cases\",\"body\":\"bigmodel-errors.mjs is a new 168-line module for classifying and dispatching BigModel API errors. While bigmodel-errors.test.mjs exists (189 lines), the error classification logic likely depends on matching specific error response structures. If the upstream API changes its error response format (missing field, new error code, unexpected nesting), the classifier could return a wrong classification or throw an unhandled exception, causing the retry layer to behave incorrectly (retrying non-retryable errors or vice versa). The test file should be audited for coverage of malformed/missing-field responses.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.6,\"recommendation\":\"Add tests for malformed error responses (missing fields, unexpected types, null body, non-JSON response). Add defensive guards in the classifier to handle missing/undefined fields gracefully with a safe default classification.\"}],\"next_steps\":[\"Inspect retry.mjs line by line to confirm the delay overflow/NaN risk and verify maxAttempts bounds at every call site\",\"Audit bigmodel-errors.mjs error classification to confirm 4xx client errors are not retried\",\"Check tracked-jobs.mjs and state.mjs for atomic write patterns\",\"Verify glm-client.mjs preserves original error details through the retry chain\",\"Run the test suite to confirm all new tests pass and check for missing edge-case coverage\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T18:23:56.621Z"
+}

@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 42
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 104577,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff adds 6600+ lines across 84 files including a deleted module (process.mjs), new retry/backoff infrastructure, BigModel error dispatch, state management changes, and a pre-push hook. The blast radius is enormous and several high-risk patterns — module deletion, retry masking, concurrent state mutation, and hook-failure propagation — deserve explicit sign-off before shipping.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Deleted process.mjs may leave dangling imports causing runtime ReferenceError",
+        "body": "scripts/lib/process.mjs (67 lines) was fully deleted. Commit 225401a ('ReferenceError + full thread/resume scaffolding purge') explicitly acknowledges a ReferenceError was already hit once from this deletion. While check-imports.mjs was updated (5 lines changed), static import checks cannot catch dynamic `import()` expressions, string-concat module paths, or eval-based loads. Any remaining reference to process.mjs at runtime will crash with ModuleNotFoundError — and the prior fix only proves this class of bug already escaped once.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.72,
+        "recommendation": "Grep the entire codebase (including strings, template literals, and test fixtures) for 'process\\.mjs' or 'lib/process' to confirm zero remaining references. Add an explicit import-time smoke test that exercises every code path that could have transitively depended on process.mjs."
+      },
+      {
+        "severity": "high",
+        "title": "New retry.mjs (203 lines) may mask persistent failures or retry non-idempotent operations",
+        "body": "A new 203-line retry module was added as part of 'auto retry/backoff'. Retry logic is a well-known source of silent failure masking: if the retry budget is exhausted and the caller doesn't distinguish 'all retries failed' from 'operation succeeded', downstream code proceeds on a false-positive. Additionally, if retries are applied to non-idempotent operations (POST/PUT mutations), a retried request can cause duplication or double-application of side effects. The commit message 'BigModel error dispatch + auto retry/backoff' suggests retries are automatic rather than opt-in per call site, widening the blast radius.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.68,
+        "recommendation": "Verify that: (1) every retried operation is idempotent or guarded by an idempotency key; (2) exhausted retries produce a distinct error type that callers cannot silently ignore; (3) the retry budget has a hard ceiling (not just exponential backoff but a max-attempts cap); (4) jitter is applied to backoff to prevent thundering-herd retries against the same BigModel endpoint. Add a test that asserts the final error propagates correctly after all retries are exhausted."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs concurrent file access without locking risks state corruption",
+        "body": "scripts/lib/state.mjs was modified (32 lines changed). If state is persisted to a file on disk (the typical pattern for plugin state), concurrent invocations of the companion CLI can race on read-modify-write cycles. Two processes reading the same state file, modifying in memory, and writing back will silently drop one another's mutations. This is especially likely during pre-push hook execution if a user pushes multiple branches rapidly or if background jobs are running (the v0.4.5 'background execution-mode' feature explicitly adds concurrent execution paths).",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.55,
+        "recommendation": "Inspect state.mjs for any file-locking or atomic-write mechanism (e.g., write-to-temp-then-rename). If absent, add advisory file locking (flock, lockfile) or serialize state writes through a single process. Add a test that runs two concurrent state mutations and asserts both are reflected in the final state."
+      },
+      {
+        "severity": "medium",
+        "title": "New pre-push hook (46 lines) can block developer workflow on non-critical failures",
+        "body": "scripts/hooks/pre-push is a new 46-line hook. Pre-push hooks run in the git push critical path. If the hook fails for reasons unrelated to the push (e.g., network call to BigModel for quality gate times out, CI check script has a bug), the developer cannot push without disabling the hook. The hook must have a graceful fallback — either a timeout kill or an env-var bypass — otherwise it becomes a productivity blocker. There is no visible documentation of a bypass mechanism in the diff stat.",
+        "file": "scripts/hooks/pre-push",
+        "line_start": 1,
+        "line_end": 46,
+        "confidence": 0.62,
+        "recommendation": "Ensure the pre-push hook: (1) has a short timeout (e.g., 30s) and exits 0 on timeout rather than blocking the push; (2) supports a bypass env-var like GLM_SKIP_HOOKS=1 for emergencies; (3) never makes network calls that could hang. Document the bypass mechanism in CONTRIBUTING.md or the hook header comment."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs (78 lines changed) may leak orphaned job state on process crash",
+        "body": "scripts/lib/tracked-jobs.mjs was modified (78 lines). If job tracking state is written to disk but the process crashes (SIGKILL, OOM, laptop sleep) before cleanup, orphaned job records accumulate. On next startup, the companion may treat stale jobs as 'running' and refuse to start new work, or worse, attempt to resume a job whose underlying process is gone. The background execution mode introduced in v0.4.5 makes process crashes more likely (detached processes are harder to monitor).",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.58,
+        "recommendation": "Verify that tracked-jobs.mjs has a staleness check: on startup, any job older than a configurable TTL should be marked as crashed/expired, not left in 'running' state. Add a manual cleanup command or auto-heal on next invocation. Test by killing the process mid-job and confirming recovery."
+      }
+    ],
+    "next_steps": [
+      "Run `grep -r 'process\\.mjs\\|lib/process' scripts/ tests/ commands/ --include='*.mjs' --include='*.md'` to confirm no remaining references to the deleted process.mjs module.",
+      "Audit retry.mjs call sites to confirm every retried operation is idempotent and that exhausted-retry errors are explicitly handled by callers.",
+      "Inspect state.mjs and tracked-jobs.mjs for file-locking or atomic-write patterns; if absent, add them before enabling background execution mode in production.",
+      "Verify pre-push hook has a documented bypass and a bounded timeout so it cannot indefinitely block git push.",
+      "Run the full test suite (tests/*.test.mjs) and confirm no skipped or flaky tests, especially in retry.test.mjs and bigmodel-errors.test.mjs which cover the newest, highest-risk code."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff adds 6600+ lines across 84 files including a deleted module (process.mjs), new retry/backoff infrastructure, BigModel error dispatch, state management changes, and a pre-push hook. The blast radius is enormous and several high-risk patterns — module deletion, retry masking, concurrent state mutation, and hook-failure propagation — deserve explicit sign-off before shipping.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Deleted process.mjs may leave dangling imports causing runtime ReferenceError\",\n      \"body\": \"scripts/lib/process.mjs (67 lines) was fully deleted. Commit 225401a ('ReferenceError + full thread/resume scaffolding purge') explicitly acknowledges a ReferenceError was already hit once from this deletion. While check-imports.mjs was updated (5 lines changed), static import checks cannot catch dynamic `import()` expressions, string-concat module paths, or eval-based loads. Any remaining reference to process.mjs at runtime will crash with ModuleNotFoundError — and the prior fix only proves this class of bug already escaped once.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Grep the entire codebase (including strings, template literals, and test fixtures) for 'process\\\\.mjs' or 'lib/process' to confirm zero remaining references. Add an explicit import-time smoke test that exercises every code path that could have transitively depended on process.mjs.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"New retry.mjs (203 lines) may mask persistent failures or retry non-idempotent operations\",\n      \"body\": \"A new 203-line retry module was added as part of 'auto retry/backoff'. Retry logic is a well-known source of silent failure masking: if the retry budget is exhausted and the caller doesn't distinguish 'all retries failed' from 'operation succeeded', downstream code proceeds on a false-positive. Additionally, if retries are applied to non-idempotent operations (POST/PUT mutations), a retried request can cause duplication or double-application of side effects. The commit message 'BigModel error dispatch + auto retry/backoff' suggests retries are automatic rather than opt-in per call site, widening the blast radius.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Verify that: (1) every retried operation is idempotent or guarded by an idempotency key; (2) exhausted retries produce a distinct error type that callers cannot silently ignore; (3) the retry budget has a hard ceiling (not just exponential backoff but a max-attempts cap); (4) jitter is applied to backoff to prevent thundering-herd retries against the same BigModel endpoint. Add a test that asserts the final error propagates correctly after all retries are exhausted.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"state.mjs concurrent file access without locking risks state corruption\",\n      \"body\": \"scripts/lib/state.mjs was modified (32 lines changed). If state is persisted to a file on disk (the typical pattern for plugin state), concurrent invocations of the companion CLI can race on read-modify-write cycles. Two processes reading the same state file, modifying in memory, and writing back will silently drop one another's mutations. This is especially likely during pre-push hook execution if a user pushes multiple branches rapidly or if background jobs are running (the v0.4.5 'background execution-mode' feature explicitly adds concurrent execution paths).\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Inspect state.mjs for any file-locking or atomic-write mechanism (e.g., write-to-temp-then-rename). If absent, add advisory file locking (flock, lockfile) or serialize state writes through a single process. Add a test that runs two concurrent state mutations and asserts both are reflected in the final state.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"New pre-push hook (46 lines) can block developer workflow on non-critical failures\",\n      \"body\": \"scripts/hooks/pre-push is a new 46-line hook. Pre-push hooks run in the git push critical path. If the hook fails for reasons unrelated to the push (e.g., network call to BigModel for quality gate times out, CI check script has a bug), the developer cannot push without disabling the hook. The hook must have a graceful fallback — either a timeout kill or an env-var bypass — otherwise it becomes a productivity blocker. There is no visible documentation of a bypass mechanism in the diff stat.\",\n      \"file\": \"scripts/hooks/pre-push\",\n      \"line_start\": 1,\n      \"line_end\": 46,\n      \"confidence\": 0.62,\n      \"recommendation\": \"Ensure the pre-push hook: (1) has a short timeout (e.g., 30s) and exits 0 on timeout rather than blocking the push; (2) supports a bypass env-var like GLM_SKIP_HOOKS=1 for emergencies; (3) never makes network calls that could hang. Document the bypass mechanism in CONTRIBUTING.md or the hook header comment.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"tracked-jobs.mjs (78 lines changed) may leak orphaned job state on process crash\",\n      \"body\": \"scripts/lib/tracked-jobs.mjs was modified (78 lines). If job tracking state is written to disk but the process crashes (SIGKILL, OOM, laptop sleep) before cleanup, orphaned job records accumulate. On next startup, the companion may treat stale jobs as 'running' and refuse to start new work, or worse, attempt to resume a job whose underlying process is gone. The background execution mode introduced in v0.4.5 makes process crashes more likely (detached processes are harder to monitor).\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.58,\n      \"recommendation\": \"Verify that tracked-jobs.mjs has a staleness check: on startup, any job older than a configurable TTL should be marked as crashed/expired, not left in 'running' state. Add a manual cleanup command or auto-heal on next invocation. Test by killing the process mid-job and confirming recovery.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `grep -r 'process\\\\.mjs\\\\|lib/process' scripts/ tests/ commands/ --include='*.mjs' --include='*.md'` to confirm no remaining references to the deleted process.mjs module.\",\n    \"Audit retry.mjs call sites to confirm every retried operation is idempotent and that exhausted-retry errors are explicitly handled by callers.\",\n    \"Inspect state.mjs and tracked-jobs.mjs for file-locking or atomic-write patterns; if absent, add them before enabling background execution mode in production.\",\n    \"Verify pre-push hook has a documented bypass and a bounded timeout so it cannot indefinitely block git push.\",\n    \"Run the full test suite (tests/*.test.mjs) and confirm no skipped or flaky tests, especially in retry.test.mjs and bigmodel-errors.test.mjs which cover the newest, highest-risk code.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T20:52:45.985Z"
+}

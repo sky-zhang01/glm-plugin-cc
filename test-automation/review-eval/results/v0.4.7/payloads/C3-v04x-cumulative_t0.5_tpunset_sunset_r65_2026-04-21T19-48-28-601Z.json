@@ -1,0 +1,79 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 65
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 89245,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces retry, error-dispatch, and job-tracking infrastructure but leaves the critical integration layer in glm-client.mjs (155 lines changed) without a dedicated test file. The three most dangerous modules—retry, error classification, and the client that wires them—are individually tested but their integration is not, creating a high-risk gap for silent retries on non-idempotent operations, misclassified errors that suppress retry, and state corruption under concurrent job dispatch.",
+    "findings": [
+      {
+        "severity": "critical",
+        "title": "glm-client.mjs has 155 lines of changes but no dedicated test file",
+        "body": "glm-client.mjs is the integration point that wires retry.mjs and bigmodel-errors.mjs into actual API calls. It has the largest change footprint of any module (155 lines) yet has no corresponding tests/glm-client.test.mjs. The individual modules (retry: 352 test lines, bigmodel-errors: 189 test lines) have good coverage, but the integration layer where misclassified errors cause silent suppression or where retries hit non-idempotent endpoints is completely untested. A regression here would be user-visible (hung jobs, duplicate submissions, or silently dropped results) and hard to diagnose because the unit tests for each submodule would still pass.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.92,
+        "recommendation": "Add tests/glm-client.test.mjs covering at minimum: (1) retry integration on transient BigModel errors, (2) error-classification fallback when bigmodel-errors.mjs returns unknown, (3) idempotency behavior when retry fires on a request that may have already been accepted server-side, (4) concurrent dispatch interleaving with tracked-jobs state."
+      },
+      {
+        "severity": "high",
+        "title": "tracked-jobs.mjs (78 lines changed) has no test coverage",
+        "body": "tracked-jobs.mjs manages job lifecycle state and is modified in this diff. It interacts with retry logic and glm-client dispatch. Without tests, race conditions in job-state transitions (e.g., a job marked 'completed' while a retry is still in-flight, or a stale job resuming after a timeout) are undetectable until production failure. The module name 'tracked-jobs' implies mutable shared state, which is the highest-risk category for concurrent corruption.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.85,
+        "recommendation": "Add tests/tracked-jobs.test.mjs covering: (1) concurrent start/complete transitions, (2) job resumption after simulated retry exhaustion, (3) stale-state detection and cleanup, (4) idempotency of status updates."
+      },
+      {
+        "severity": "high",
+        "title": "process.mjs deleted but import cleanup completeness is unverifiable",
+        "body": "scripts/lib/process.mjs was removed (67 lines deleted, — in diff stat). The check-imports.mjs script was modified (5 lines changed), suggesting an import-rewrite effort, but no CI gate or test verifies that no remaining import of process.mjs exists in runtime code. A missed import will produce a runtime ModuleNotFoundError that only triggers when the specific code path executes—likely in production under load rather than in development.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.78,
+        "recommendation": "Verify with `grep -r \"from.*['\\\"].*lib/process['\\\"]\" scripts/` that no remaining imports exist. Add a CI check (or extend check-imports.mjs) to assert that deleted modules are not referenced anywhere in the codebase, not just that existing imports resolve."
+      },
+      {
+        "severity": "medium",
+        "title": "Retry on potentially non-idempotent operations without request deduplication guard",
+        "body": "The retry.mjs module (203 lines new) provides generic retry infrastructure used by glm-client.mjs. If the underlying API calls are not idempotent (e.g., job submission, review dispatch), a retry after a network timeout could result in duplicate operations. The diff shows no deduplication key, request-id header, or idempotency token mechanism. This is the classic 'at-least-once delivery without dedup' pattern that causes data duplication under transient failures.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.7,
+        "recommendation": "Either (1) document which API endpoints are idempotent and restrict retries to those, or (2) add an idempotency-key header to outgoing requests so the server can deduplicate, or (3) add a guard in glm-client.mjs that checks tracked-jobs state before retrying a submission to avoid double-dispatch."
+      }
+    ],
+    "next_steps": [
+      "Add tests/glm-client.test.mjs covering retry+error-dispatch integration before shipping v0.4.7.",
+      "Add tests/tracked-jobs.test.mjs with concurrent-state and resumption scenarios.",
+      "Run `grep -rn 'process' scripts/lib/*.mjs scripts/*.mjs` to confirm no dangling imports from deleted process.mjs.",
+      "Verify idempotency semantics of any API endpoint that retry.mjs can hit—document or add guards."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff introduces retry, error-dispatch, and job-tracking infrastructure but leaves the critical integration layer in glm-client.mjs (155 lines changed) without a dedicated test file. The three most dangerous modules—retry, error classification, and the client that wires them—are individually tested but their integration is not, creating a high-risk gap for silent retries on non-idempotent operations, misclassified errors that suppress retry, and state corruption under concurrent job dispatch.\",\n  \"findings\": [\n    {\n      \"severity\": \"critical\",\n      \"title\": \"glm-client.mjs has 155 lines of changes but no dedicated test file\",\n      \"body\": \"glm-client.mjs is the integration point that wires retry.mjs and bigmodel-errors.mjs into actual API calls. It has the largest change footprint of any module (155 lines) yet has no corresponding tests/glm-client.test.mjs. The individual modules (retry: 352 test lines, bigmodel-errors: 189 test lines) have good coverage, but the integration layer where misclassified errors cause silent suppression or where retries hit non-idempotent endpoints is completely untested. A regression here would be user-visible (hung jobs, duplicate submissions, or silently dropped results) and hard to diagnose because the unit tests for each submodule would still pass.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.92,\n      \"recommendation\": \"Add tests/glm-client.test.mjs covering at minimum: (1) retry integration on transient BigModel errors, (2) error-classification fallback when bigmodel-errors.mjs returns unknown, (3) idempotency behavior when retry fires on a request that may have already been accepted server-side, (4) concurrent dispatch interleaving with tracked-jobs state.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"tracked-jobs.mjs (78 lines changed) has no test coverage\",\n      \"body\": \"tracked-jobs.mjs manages job lifecycle state and is modified in this diff. It interacts with retry logic and glm-client dispatch. Without tests, race conditions in job-state transitions (e.g., a job marked 'completed' while a retry is still in-flight, or a stale job resuming after a timeout) are undetectable until production failure. The module name 'tracked-jobs' implies mutable shared state, which is the highest-risk category for concurrent corruption.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.85,\n      \"recommendation\": \"Add tests/tracked-jobs.test.mjs covering: (1) concurrent start/complete transitions, (2) job resumption after simulated retry exhaustion, (3) stale-state detection and cleanup, (4) idempotency of status updates.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"process.mjs deleted but import cleanup completeness is unverifiable\",\n      \"body\": \"scripts/lib/process.mjs was removed (67 lines deleted, — in diff stat). The check-imports.mjs script was modified (5 lines changed), suggesting an import-rewrite effort, but no CI gate or test verifies that no remaining import of process.mjs exists in runtime code. A missed import will produce a runtime ModuleNotFoundError that only triggers when the specific code path executes—likely in production under load rather than in development.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Verify with `grep -r \\\"from.*['\\\\\\\"].*lib/process['\\\\\\\"]\\\" scripts/` that no remaining imports exist. Add a CI check (or extend check-imports.mjs) to assert that deleted modules are not referenced anywhere in the codebase, not just that existing imports resolve.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Retry on potentially non-idempotent operations without request deduplication guard\",\n      \"body\": \"The retry.mjs module (203 lines new) provides generic retry infrastructure used by glm-client.mjs. If the underlying API calls are not idempotent (e.g., job submission, review dispatch), a retry after a network timeout could result in duplicate operations. The diff shows no deduplication key, request-id header, or idempotency token mechanism. This is the classic 'at-least-once delivery without dedup' pattern that causes data duplication under transient failures.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Either (1) document which API endpoints are idempotent and restrict retries to those, or (2) add an idempotency-key header to outgoing requests so the server can deduplicate, or (3) add a guard in glm-client.mjs that checks tracked-jobs state before retrying a submission to avoid double-dispatch.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Add tests/glm-client.test.mjs covering retry+error-dispatch integration before shipping v0.4.7.\",\n    \"Add tests/tracked-jobs.test.mjs with concurrent-state and resumption scenarios.\",\n    \"Run `grep -rn 'process' scripts/lib/*.mjs scripts/*.mjs` to confirm no dangling imports from deleted process.mjs.\",\n    \"Verify idempotency semantics of any API endpoint that retry.mjs can hit—document or add guards.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T19:48:28.630Z"
+}

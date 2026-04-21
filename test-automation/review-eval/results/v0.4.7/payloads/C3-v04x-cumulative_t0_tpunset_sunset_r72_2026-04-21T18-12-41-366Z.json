@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 72
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 65086,
+    "error_code": ""
+  },
+  "parsed": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces a retry/backoff subsystem (retry.mjs), BigModel error dispatch (bigmodel-errors.mjs), and significant changes to glm-client.mjs and job-control state management. Several material defects were identified: the retry module has a class-hierarchy mismatch that silently misclassifies retriable vs non-retriable errors on the fallback path, the state module's atomic-write-then-rename pattern can lose the entire state file on crash, and the tracked-jobs module has no concurrency guard around its read-modify-write of the jobs JSON file. These are the kinds of silent-failure and data-loss bugs that are expensive to detect in production.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs classifyError returns string but callers check against RetryError class hierarchy — retriable errors silently treated as non-retriable on fallback",
+        "body": "The `classifyError` function in retry.mjs returns a string tag (e.g. 'RATE_LIMIT', 'NETWORK', 'FATAL'), but the retry logic in `withRetry` dispatches behavior based on `instanceof` checks against subclasses of `RetryError`. If an error reaches the classifier that doesn't map to a known BigModel error code (e.g. an unexpected system error, a serialized/deserialized error that lost its prototype, or an error from a different source), `classifyError` returns the string directly or 'UNKNOWN'. The `withRetry` function then falls through to the default non-retriable path without logging a classification miss. This means transient infrastructure errors that should be retried will instead surface as permanent failures to the user. Under the stated focus of a cumulative sampling-sweep run, this would manifest as silently dropped or failed API calls with no retry attempt and no diagnostic trail.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.78,
+        "recommendation": "Audit the full control flow of `withRetry` → `classifyError` → BigModel error dispatch. Add an explicit `default` or catch-all branch in `withRetry` that: (1) logs the unclassifed error with full detail at warn level, (2) applies a conservative retry policy (1-2 retries with backoff) rather than treating it as fatal, since false negatives (not retrying a retriable error) are more costly than false positives (retrying a non-retriable error once). Add a test case for an error that has no BigModel error code and is not an instance of any known error class."
+      },
+      {
+        "severity": "high",
+        "title": "State file write uses atomic rename but no crash-recovery for partial writes — corrupted state on SIGKILL/OOM mid-write",
+        "body": "The state.mjs module writes the JSON state file using an atomic rename pattern (write to temp file, then rename). However, if the process is killed (SIGKILL, OOM) between writing the temp file and the rename, or if the temp file write itself is partial, there is no recovery mechanism. On next load, the state file is either stale (pre-rename) or the temp file is orphaned. More critically, if the temp file write succeeds partially (truncated JSON) and then rename somehow executes (which on some NFS or weird filesystems can succeed with a partial file), the state file is corrupted with no backup. There is no journal, no backup copy, and no validation on read that would detect truncation.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.72,
+        "recommendation": "Before overwriting state, write the current state to a `.bak` file. On load, if the primary state file fails JSON parse, attempt to load from `.bak`. This gives crash recovery for the partial-write case. Also add a try/catch around the read with a log warning when falling back to the backup or empty state."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs has read-modify-write race — concurrent processes can lose job records",
+        "body": "The tracked-jobs.mjs module reads the jobs JSON file, modifies it in memory, and writes it back. If two processes (e.g. two concurrent glm-companion invocations) read the file simultaneously, both see the same initial state, each modifies its in-memory copy, and whichever writes last wins — the other's modifications are silently lost. This is a classic TOCTOU race. Since the companion tool can be invoked in background mode (v0.4.5 added --background), concurrent access is now a realistic scenario rather than a theoretical one. Lost job records mean lost tracking of in-progress operations, which could lead to orphaned jobs or stale state that accumulates indefinitely.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.75,
+        "recommendation": "Use a lockfile (e.g. write-lock with stale detection via PID + timestamp) around the read-modify-write sequence in tracked-jobs.mjs. Alternatively, use an append-only log format that can be compacted periodically, which is inherently safe under concurrent appends. At minimum, document the single-writer assumption in the module header if the team decides concurrent access is out of scope."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs error handling can swallow the original response body on non-JSON error responses",
+        "body": "The GLM client reads the response body and attempts JSON parsing. If the upstream API returns a non-200 status with a non-JSON body (e.g. an HTML error page from a reverse proxy, a 502 from a load balancer, or a plain-text error), the JSON parse fails and the error handler catches the parse exception. The original status code and response body text may be lost or only partially preserved in the thrown error. This matters because the retry/backoff logic in retry.mjs needs the status code to classify the error correctly (e.g. 429 → rate limit, 503 → transient). If the status code is lost, the error is misclassified and either retried unnecessarily or not retried when it should be.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.7,
+        "recommendation": "Before attempting JSON parse, capture the status code and raw body text. In the catch block for JSON parse failure, construct the error using the captured status code and include the first N bytes of the raw body in the error message for diagnostics. Ensure this error is classified correctly by the retry logic (network/transient for 5xx from proxies, fatal for 4xx)."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error code map may diverge from upstream API — no version pinning or schema validation",
+        "body": "The bigmodel-errors.mjs module maintains a static mapping of BigModel error codes to retry behavior. This mapping is embedded in the client code with no mechanism to detect when the upstream API adds, removes, or changes error codes. If BigModel introduces a new rate-limit signal or changes a transient error code to permanent (or vice versa), the client will misclassify errors until the code is updated. There is no schema validation of the error response against the expected structure, so a changed response format would silently fall through to the default classification.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.65,
+        "recommendation": "Add response schema validation that logs a warning when the error response structure doesn't match expected fields. Add a default classification for unknown error codes that is conservative (retry once with backoff) rather than fatal. Consider adding a version header check or a log-only mode for unmapped error codes in the first release to gather data on real-world error code usage."
+      }
+    ],
+    "next_steps": [
+      "Trace the full error propagation path: glm-client.mjs → bigmodel-errors.mjs → retry.mjs with a focus on what happens when an error doesn't match any known code or class. Write a test that injects an unexpected error type and asserts the retry behavior.",
+      "Add a state backup/recovery mechanism to state.mjs before shipping, or document the single-process assumption and the consequences of corruption.",
+      "Audit tracked-jobs.mjs for concurrent access scenarios enabled by the --background flag added in v0.4.5. Add lockfile or document the limitation.",
+      "Verify that the retry.test.mjs (352 lines) covers the edge cases identified here — specifically unclassifiable errors, partial state corruption, and concurrent job tracking."
+    ]
+  },
+  "rawOutputHead": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 diff introduces a retry/backoff subsystem (retry.mjs), BigModel error dispatch (bigmodel-errors.mjs), and significant changes to glm-client.mjs and job-control state management. Several material defects were identified: the retry module has a class-hierarchy mismatch that silently misclassifies retriable vs non-retriable errors on the fallback path, the state module's atomic-write-then-rename pattern can lose the entire state file on crash, and the tracked-jobs module has no concurrency guard around its read-modify-write of the jobs JSON file. These are the kinds of silent-failure and data-loss bugs that are expensive to detect in production.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs classifyError returns string but callers check against RetryError class hierarchy — retriable errors silently treated as non-retriable on fallback\",\"body\":\"The `classifyError` function in retry.mjs returns a string tag (e.g. 'RATE_LIMIT', 'NETWORK', 'FATAL'), but the retry logic in `withRetry` dispatches behavior based on `instanceof` checks against subclasses of `RetryError`. If an error reaches the classifier that doesn't map to a known BigModel error code (e.g. an unexpected system error, a serialized/deserialized error that lost its prototype, or an error from a different source), `classifyError` returns the string directly or 'UNKNOWN'. The `withRetry` function then falls through to the default non-retriable path without logging a classification miss. This means transient infrastructure errors that should be retried will instead surface as permanent failures to the user. Under the stated focus of a cumulative sampling-sweep run, this would manifest as silently dropped or failed API calls with no retry attempt and no diagnostic trail.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.78,\"recommendation\":\"Audit the full control flow of `withRetry` → `classifyError` → BigModel error dispatch. Add an explicit `default` or catch-all branch in `withRetry` that: (1) logs the unclassifed error with full detail at warn level, (2) applies a conservative retry policy (1-2 retries with backoff) rather than treating it as fatal, since false negatives (not retrying a retriable error) are more costly than false positives (retrying a non-retriable error once). Add a test case for an error that has no BigModel error code and is not an instance of any known error class.\"},{\"severity\":\"high\",\"title\":\"State file write uses atomic rename but no crash-recovery for partial writes — corrupted state on SIGKILL/OOM mid-write\",\"body\":\"The state.mjs module writes the JSON state file using an atomic rename pattern (write to temp file, then rename). However, if the process is killed (SIGKILL, OOM) between writing the temp file and the rename, or if the temp file write itself is partial, there is no recovery mechanism. On next load, the state file is either stale (pre-rename) or the temp file is orphaned. More critically, if the temp file write succeeds partially (truncated JSON) and then rename somehow executes (which on some NFS or weird filesystems can succeed with a partial file), the state file is corrupted with no backup. There is no journal, no backup copy, and no validation on read that would detect truncation.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.72,\"recommendation\":\"Before overwriting state, write the current state to a `.bak` file. On load, if the primary state file fails JSON parse, attempt to load from `.bak`. This gives crash recovery for the partial-write case. Also add a try/catch around the read with a log warning when falling back to the backup or empty state.\"},{\"severity\":\"medium\",\"title\":\"tracked-jobs.mjs has read-modify-write race — concurrent processes can lose job records\",\"body\":\"The tracked-jobs.mjs module reads the jobs JSON file, modifies it in memory, and writes it back. If two processes (e.g. two concurrent glm-companion invocations) read the file simultaneously, both see the same initial state, each modifies its in-memory copy, and whichever writes last wins — the other's modifications are silently lost. This is a classic TOCTOU race. Since the companion tool can be invoked in background mode (v0.4.5 added --background), concurrent access is now a realistic scenario rather than a theoretical one. Lost job records mean lost tracking of in-progress operations, which could lead to orphaned jobs or stale state that accumulates indefinitely.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.75,\"recommendation\":\"Use a lockfile (e.g. write-lock with stale detection via PID + timestamp) around the read-modify-write sequence in tracked-jobs.mjs. Alternatively, use an append-only log format that can be compacted periodically, which is inherently safe under concurrent appends. At minimum, document the single-writer assumption in the module header if the team decides concurrent access is out of scope.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs error handling can swallow the original response body on non-JSON error responses\",\"body\":\"The GLM client reads the response body and attempts JSON parsing. If the upstream API returns a non-200 status with a non-JSON body (e.g. an HTML error page from a reverse proxy, a 502 from a load balancer, or a plain-text error), the JSON parse fails and the error handler catches the parse exception. The original status code and response body text may be lost or only partially preserved in the thrown error. This matters because the retry/backoff logic in retry.mjs needs the status code to classify the error correctly (e.g. 429 → rate limit, 503 → transient). If the status code is lost, the error is misclassified and either retried unnecessarily or not retried when it should be.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.70,\"recommendation\":\"Before attempting JSON parse, capture the status code and raw body text. In the catch block for JSON parse failure, construct the error using the captured status code and include the first N bytes of the raw body in the error message for diagnostics. Ensure this error is classified correctly by the retry logic (network/transient for 5xx from proxies, fatal for 4xx).\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors.mjs error code map may diverge from upstream API — no version pinning or schema validation\",\"body\":\"The bigmodel-errors.mjs module maintains a static mapping of BigModel error codes to retry behavior. This mapping is embedded in the client code with no mechanism to detect when the upstream API adds, removes, or changes error codes. If BigModel introduces a new rate-limit signal or changes a transient error code to permanent (or vice versa), the client will misclassify errors until the code is updated. There is no schema validation of the error response against the expected structure, so a changed response format would silently fall through to the default classification.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.65,\"recommendation\":\"Add response schema validation that logs a warning when the error response structure doesn't match expected fields. Add a default classification for unknown error codes that is conservative (retry once with backoff) rather than fatal. Consider adding a version header check or a log-only mode for unmapped error codes in the first release to gather data on real-world error code usage.\"}],\"next_steps\":[\"Trace the full error propagation path: glm-client.mjs → bigmodel-errors.mjs → retry.mjs with a focus on what happens when an error doesn't match any known code or class. Write a test that injects an unexpected error type and asserts the retry behavior.\",\"Add a state backup/recovery mechanism to state.mjs before shipping, or document the single-process assumption and the consequences of corruption.\",\"Audit tracked-jobs.mjs for concurrent access scenarios enabled by the --background flag added in v0.4.5. Add lockfile or document the limitation.\",\"Verify that the ",
+  "rawOutputTruncated": true,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T18:12:41.407Z"
+}

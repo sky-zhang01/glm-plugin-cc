@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 46
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 86988,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative delta is massive (+6623/−480 across 84 files) and introduces several high-risk patterns: a deleted module (process.mjs) that could orphan imports, new retry/backoff logic without visible idempotency guards, and error-dispatch code that could misclassify permanent failures as retryable. The scope alone warrants caution, but the deleted-file risk and retry-without-idempotency pattern are concrete enough to block shipment until verified.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Deleted process.mjs may leave orphaned imports causing runtime crashes",
+        "body": "scripts/lib/process.mjs shows 67 deletions and 0 additions — the file was entirely removed. While scripts/check-imports.mjs was modified (5 lines changed), static import checking typically cannot detect dynamic import() calls, conditional requires, or references in non-JS files (shell scripts, markdown templates). If any code path still references process.mjs at runtime, the entire companion will crash with MODULE_NOT_FOUND, likely in production after the pre-push hook or during background job execution where the failure is hardest to observe.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.72,
+        "recommendation": "Run `grep -r \"process\\.mjs\" scripts/ commands/ hooks/` and `grep -r \"lib/process\" scripts/` across the entire repo. Also check dynamic patterns like `import(path)` or template literals that resolve to process.mjs. Add an explicit import-resolution test case that exercises every known code path."
+      },
+      {
+        "severity": "high",
+        "title": "New retry.mjs (203 lines) lacks visible idempotency guards for retried operations",
+        "body": "The new retry module (scripts/lib/retry.mjs) implements auto retry/backoff for BigModel API calls. The v0.4.6 commit message confirms: 'BigModel error dispatch + auto retry/backoff'. If the underlying API calls are not idempotent — for example, operations that create resources, submit jobs, or mutate state — automatic retries will produce duplicate side effects. The diff stat shows no corresponding idempotency-key, deduplication, or request-deduplication module. The 352-line test file tests/retry.test.mjs may cover retry mechanics but likely does not test side-effect deduplication under real API conditions.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.68,
+        "recommendation": "Audit every call site that uses the retry wrapper. For each, determine if the underlying operation is idempotent. If any are not (e.g., job submission, state mutation), add idempotency keys or a request deduplication layer before enabling automatic retries. At minimum, document which operations are safe to retry."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error classification could misclassify permanent failures as retryable",
+        "body": "scripts/lib/bigmodel-errors.mjs (168 new lines) implements error dispatch for BigModel API responses. If the error classification logic incorrectly marks a permanent failure (e.g., invalid auth, quota exceeded, model not found) as retryable, the system will waste retry budget on unrecoverable errors and potentially mask the real failure from the user. The 189-line test file exists but error classification is notoriously fragile — new error codes or response formats from the upstream API can silently fall through to a default 'retryable' classification.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.65,
+        "recommendation": "Ensure the error dispatch has a safe default: unknown/unrecognized errors should be treated as NON-retryable (fail fast) rather than retryable. Add a test case for an unrecognized error code verifying it is not retried. Log the full error response when classification falls through to default."
+      },
+      {
+        "severity": "medium",
+        "title": "State and job-control modules changed simultaneously — race condition surface area",
+        "body": "Three interdependent modules were all modified in this delta: scripts/lib/state.mjs (32 lines changed), scripts/lib/job-control.mjs (20 lines changed), and scripts/lib/tracked-jobs.mjs (78 lines changed). These modules collectively manage job lifecycle state. Simultaneous changes to all three create a high risk of race conditions — especially if jobs can be submitted, cancelled, or completed concurrently. The --wait/--background execution-mode flags added in v0.4.5 introduce concurrency paths that exercise these modules in new ways. No integration test file for concurrent job operations is visible in the test directory.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.58,
+        "recommendation": "Add an integration test that exercises concurrent job submission, cancellation, and completion against the state/jobs modules. Verify that state remains consistent when multiple jobs transition simultaneously. Consider file-locking or atomic writes if state files are shared across concurrent processes."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs changes (155 lines) may alter error propagation contract",
+        "body": "scripts/lib/glm-client.mjs has 155 lines changed in a diff that adds both bigmodel-errors.mjs error dispatch and retry.mjs backoff. The client is the integration point. If the client now catches and retries errors that previously propagated to callers, downstream code that expected immediate failure (and performed cleanup or fallback) will silently continue with stale or incorrect results. This is a contract change that may not be caught by unit tests alone.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.55,
+        "recommendation": "Compare the pre- and post-change error propagation behavior of glm-client.mjs. Verify that callers in glm-companion.mjs and session-lifecycle-hook.mjs correctly handle the new retry-wrapped responses (success after retries, exhaustion after max retries). Add a contract test that verifies error types and messages are preserved through the retry layer."
+      }
+    ],
+    "next_steps": [
+      "Run `grep -r 'process\\.mjs\\|lib/process' scripts/ commands/ hooks/` to confirm no orphaned references to the deleted module exist anywhere in the runtime path.",
+      "Audit every call site wrapped by retry.mjs to confirm the underlying operation is idempotent; document non-idempotent call sites and add guards or disable retries for them.",
+      "Verify that bigmodel-errors.mjs defaults unknown error codes to non-retryable (fail-closed) rather than retryable (fail-open).",
+      "Add an integration test for concurrent job state mutations exercising state.mjs + job-control.mjs + tracked-jobs.mjs together.",
+      "Run the full UAT suite (test-automation/uat-reports/) against a live BigModel endpoint with injected failures to validate retry and error-dispatch behavior end-to-end."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative delta is massive (+6623/−480 across 84 files) and introduces several high-risk patterns: a deleted module (process.mjs) that could orphan imports, new retry/backoff logic without visible idempotency guards, and error-dispatch code that could misclassify permanent failures as retryable. The scope alone warrants caution, but the deleted-file risk and retry-without-idempotency pattern are concrete enough to block shipment until verified.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Deleted process.mjs may leave orphaned imports causing runtime crashes\",\n      \"body\": \"scripts/lib/process.mjs shows 67 deletions and 0 additions — the file was entirely removed. While scripts/check-imports.mjs was modified (5 lines changed), static import checking typically cannot detect dynamic import() calls, conditional requires, or references in non-JS files (shell scripts, markdown templates). If any code path still references process.mjs at runtime, the entire companion will crash with MODULE_NOT_FOUND, likely in production after the pre-push hook or during background job execution where the failure is hardest to observe.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Run `grep -r \\\"process\\\\.mjs\\\" scripts/ commands/ hooks/` and `grep -r \\\"lib/process\\\" scripts/` across the entire repo. Also check dynamic patterns like `import(path)` or template literals that resolve to process.mjs. Add an explicit import-resolution test case that exercises every known code path.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"New retry.mjs (203 lines) lacks visible idempotency guards for retried operations\",\n      \"body\": \"The new retry module (scripts/lib/retry.mjs) implements auto retry/backoff for BigModel API calls. The v0.4.6 commit message confirms: 'BigModel error dispatch + auto retry/backoff'. If the underlying API calls are not idempotent — for example, operations that create resources, submit jobs, or mutate state — automatic retries will produce duplicate side effects. The diff stat shows no corresponding idempotency-key, deduplication, or request-deduplication module. The 352-line test file tests/retry.test.mjs may cover retry mechanics but likely does not test side-effect deduplication under real API conditions.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Audit every call site that uses the retry wrapper. For each, determine if the underlying operation is idempotent. If any are not (e.g., job submission, state mutation), add idempotency keys or a request deduplication layer before enabling automatic retries. At minimum, document which operations are safe to retry.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"bigmodel-errors.mjs error classification could misclassify permanent failures as retryable\",\n      \"body\": \"scripts/lib/bigmodel-errors.mjs (168 new lines) implements error dispatch for BigModel API responses. If the error classification logic incorrectly marks a permanent failure (e.g., invalid auth, quota exceeded, model not found) as retryable, the system will waste retry budget on unrecoverable errors and potentially mask the real failure from the user. The 189-line test file exists but error classification is notoriously fragile — new error codes or response formats from the upstream API can silently fall through to a default 'retryable' classification.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Ensure the error dispatch has a safe default: unknown/unrecognized errors should be treated as NON-retryable (fail fast) rather than retryable. Add a test case for an unrecognized error code verifying it is not retried. Log the full error response when classification falls through to default.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"State and job-control modules changed simultaneously — race condition surface area\",\n      \"body\": \"Three interdependent modules were all modified in this delta: scripts/lib/state.mjs (32 lines changed), scripts/lib/job-control.mjs (20 lines changed), and scripts/lib/tracked-jobs.mjs (78 lines changed). These modules collectively manage job lifecycle state. Simultaneous changes to all three create a high risk of race conditions — especially if jobs can be submitted, cancelled, or completed concurrently. The --wait/--background execution-mode flags added in v0.4.5 introduce concurrency paths that exercise these modules in new ways. No integration test file for concurrent job operations is visible in the test directory.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.58,\n      \"recommendation\": \"Add an integration test that exercises concurrent job submission, cancellation, and completion against the state/jobs modules. Verify that state remains consistent when multiple jobs transition simultaneously. Consider file-locking or atomic writes if state files are shared across concurrent processes.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client.mjs changes (155 lines) may alter error propagation contract\",\n      \"body\": \"scripts/lib/glm-client.mjs has 155 lines changed in a diff that adds both bigmodel-errors.mjs error dispatch and retry.mjs backoff. The client is the integration point. If the client now catches and retries errors that previously propagated to callers, downstream code that expected immediate failure (and performed cleanup or fallback) will silently continue with stale or incorrect results. This is a contract change that may not be caught by unit tests alone.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Compare the pre- and post-change error propagation behavior of glm-client.mjs. Verify that callers in glm-companion.mjs and session-lifecycle-hook.mjs correctly handle the new retry-wrapped responses (success after retries, exhaustion after max retries). Add a contract test that verifies error types and messages are preserved through the retry layer.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `grep -r 'process\\\\.mjs\\\\|lib/process' scripts/ commands/ hooks/` to confirm no orphaned references to the deleted module exist anywhere in the runtime path.\",\n    \"Audit every call site wrapped by retry.mjs to confirm the underlying operation is idempotent; document non-idempotent call sites and add guards or disable retries for them.\",\n    \"Verify that bigmodel-errors.mjs defaults unknown error codes to non-retryable (fail-closed) rather than retryable (fail-open).\",\n    \"Add an integration test for concurrent job state mutations exercising state.mjs + job-control.mjs + tracked-jobs.mjs together.\",\n    \"Run the full UAT suite (test-automation/uat-reports/) against a live BigModel endpoint with injected failures to validate retry and error-dispatch behavior end-to-end.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T20:57:09.389Z"
+}

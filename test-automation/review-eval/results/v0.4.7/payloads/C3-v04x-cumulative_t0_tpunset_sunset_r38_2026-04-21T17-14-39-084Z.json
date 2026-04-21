@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 38
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 97779,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff spans 84 files with 6600+ additions and a critical full-file deletion of `scripts/lib/process.mjs`. The most dangerous structural risk is that a 67-line module was purged entirely ('full thread/resume scaffolding purge') while multiple other files were modified in the same span. If even one import site was missed, the result is a runtime module-not-found crash on any code path that touches the old exports. The new retry/backoff subsystem (retry.mjs, 203 lines; bigmodel-errors.mjs, 168 lines) introduces a critical-path dependency where silent error swallowing on exhaustion or misclassification of upstream errors would be invisible to users. These are not speculative — they are the exact failure modes that the commit messages describe building toward, and the diff breadth makes missing an import site statistically likely.",
+    "findings": [
+      {
+        "severity": "critical",
+        "title": "Complete deletion of scripts/lib/process.mjs risks unresolved import crashes",
+        "body": "scripts/lib/process.mjs was removed entirely (67 lines deleted, 0 added). The commit message 'ReferenceError + full thread/resume scaffolding purge' confirms intentional removal. However, the diff also modifies scripts/glm-companion.mjs (139 lines changed), scripts/lib/render.mjs (79 lines), scripts/lib/state.mjs (32 lines), scripts/lib/tracked-jobs.mjs (78 lines), and scripts/lib/fs.mjs (44 lines). If any of these — or any unmodified file — still contains an `import` referencing `process.mjs` or its named exports, the runtime will throw ERR_MODULE_NOT_FOUND or a ReferenceError at call time. This is exactly the kind of failure that passes review because the import is on a less-tested code path (e.g., error recovery, resume, background mode). The check-imports.mjs script was modified (5 lines changed), but there is no evidence it validates that no file imports a deleted module.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.72,
+        "recommendation": "Run `grep -r 'process\\.mjs\\|from.*process' scripts/ commands/` across the entire tree to confirm zero import references remain. Add a CI gate that fails if any .mjs file imports a path that does not resolve to an existing file (static import analysis)."
+      },
+      {
+        "severity": "high",
+        "title": "New retry.mjs subsystem may silently swallow terminal errors on exhaustion",
+        "body": "scripts/lib/retry.mjs (203 lines, entirely new) is the backbone of the v0.4.6 'auto retry/backoff' feature. The common defect pattern in retry wrappers is returning `undefined` or a falsy value instead of re-throwing when all retries are exhausted. Since this module feeds into glm-client.mjs (the upstream API call path), a silent return on exhaustion means the user gets no output and no error — the job appears to complete successfully with empty content. The test file (tests/retry.test.mjs, 352 lines) suggests non-trivial branching. Without verifying that every exhaustion path throws or returns a distinguishable error object, this is a data-loss-silent-failure risk on the main user-facing happy path.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.65,
+        "recommendation": "Verify that retry exhaustion always throws a typed error (never returns undefined). Add an explicit test case: 'after max retries exhausted with terminal error, the returned/rejected value is a non-falsy Error instance with the original cause attached.' Ensure the caller in glm-client.mjs propagates this error to the user, not just logs it."
+      },
+      {
+        "severity": "high",
+        "title": "BigModel error classification dispatch could misroute retriable vs terminal errors",
+        "body": "scripts/lib/bigmodel-errors.mjs (168 lines, entirely new) classifies upstream API errors to decide retry behavior. If the classification logic is incomplete — for example, treating a 401/403 (which should be terminal) as retriable, or treating a 429/503 (which should be retriable with backoff) as terminal — the consequences are: (a) wasted API calls and potential rate-limit escalation, or (b) permanent user-visible failure that should have been transient. The commit message 'BigModel error dispatch' suggests this is new logic for a specific upstream provider. Provider-specific error schemas change without notice, making hardcoded classification fragile.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.6,
+        "recommendation": "Audit the error classifier for: (1) explicit handling of 401/403/404 as terminal, (2) explicit handling of 429/500/502/503 as retriable, (3) a safe default (terminal, not retriable) for any unrecognized error shape. Add a test that verifies a new/unknown error structure defaults to terminal, not to infinite retry."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs and state.mjs concurrent mutation without visible locking",
+        "body": "Both scripts/lib/tracked-jobs.mjs (78 lines changed) and scripts/lib/state.mjs (32 lines changed) manage persistent job/state data. The diff introduces --wait/--background execution modes (from the v0.4.5 commit), meaning multiple jobs can now run concurrently. File-based state with concurrent writers risks interleaved writes corrupting the JSON state file (truncated writes, partial JSON). The tracked-jobs test file is not in the diff, raising the question of whether concurrency scenarios are tested at all.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.55,
+        "recommendation": "Verify that all state writes use atomic file replacement (write to temp file, then rename). Add a test that runs two concurrent job-state mutations and asserts the final state file is valid JSON with both mutations reflected. If there is no locking, flag this as a known limitation in documentation."
+      }
+    ],
+    "next_steps": [
+      "Run `grep -rn 'process\\.mjs' scripts/ commands/ hooks/` and confirm zero hits before merge.",
+      "Inspect retry.mjs exhaust path: verify it always throws/rejects, never returns undefined.",
+      "Inspect bigmodel-errors.mjs default branch: confirm unknown errors are classified as terminal (not retriable).",
+      "Verify state file writes in tracked-jobs.mjs use atomic write (write-then-rename pattern).",
+      "Run the full test suite (`node --test tests/*.test.mjs`) and confirm zero failures before tagging release."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff spans 84 files with 6600+ additions and a critical full-file deletion of `scripts/lib/process.mjs`. The most dangerous structural risk is that a 67-line module was purged entirely ('full thread/resume scaffolding purge') while multiple other files were modified in the same span. If even one import site was missed, the result is a runtime module-not-found crash on any code path that touches the old exports. The new retry/backoff subsystem (retry.mjs, 203 lines; bigmodel-errors.mjs, 168 lines) introduces a critical-path dependency where silent error swallowing on exhaustion or misclassification of upstream errors would be invisible to users. These are not speculative — they are the exact failure modes that the commit messages describe building toward, and the diff breadth makes missing an import site statistically likely.\",\n  \"findings\": [\n    {\n      \"severity\": \"critical\",\n      \"title\": \"Complete deletion of scripts/lib/process.mjs risks unresolved import crashes\",\n      \"body\": \"scripts/lib/process.mjs was removed entirely (67 lines deleted, 0 added). The commit message 'ReferenceError + full thread/resume scaffolding purge' confirms intentional removal. However, the diff also modifies scripts/glm-companion.mjs (139 lines changed), scripts/lib/render.mjs (79 lines), scripts/lib/state.mjs (32 lines), scripts/lib/tracked-jobs.mjs (78 lines), and scripts/lib/fs.mjs (44 lines). If any of these — or any unmodified file — still contains an `import` referencing `process.mjs` or its named exports, the runtime will throw ERR_MODULE_NOT_FOUND or a ReferenceError at call time. This is exactly the kind of failure that passes review because the import is on a less-tested code path (e.g., error recovery, resume, background mode). The check-imports.mjs script was modified (5 lines changed), but there is no evidence it validates that no file imports a deleted module.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Run `grep -r 'process\\\\.mjs\\\\|from.*process' scripts/ commands/` across the entire tree to confirm zero import references remain. Add a CI gate that fails if any .mjs file imports a path that does not resolve to an existing file (static import analysis).\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"New retry.mjs subsystem may silently swallow terminal errors on exhaustion\",\n      \"body\": \"scripts/lib/retry.mjs (203 lines, entirely new) is the backbone of the v0.4.6 'auto retry/backoff' feature. The common defect pattern in retry wrappers is returning `undefined` or a falsy value instead of re-throwing when all retries are exhausted. Since this module feeds into glm-client.mjs (the upstream API call path), a silent return on exhaustion means the user gets no output and no error — the job appears to complete successfully with empty content. The test file (tests/retry.test.mjs, 352 lines) suggests non-trivial branching. Without verifying that every exhaustion path throws or returns a distinguishable error object, this is a data-loss-silent-failure risk on the main user-facing happy path.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Verify that retry exhaustion always throws a typed error (never returns undefined). Add an explicit test case: 'after max retries exhausted with terminal error, the returned/rejected value is a non-falsy Error instance with the original cause attached.' Ensure the caller in glm-client.mjs propagates this error to the user, not just logs it.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"BigModel error classification dispatch could misroute retriable vs terminal errors\",\n      \"body\": \"scripts/lib/bigmodel-errors.mjs (168 lines, entirely new) classifies upstream API errors to decide retry behavior. If the classification logic is incomplete — for example, treating a 401/403 (which should be terminal) as retriable, or treating a 429/503 (which should be retriable with backoff) as terminal — the consequences are: (a) wasted API calls and potential rate-limit escalation, or (b) permanent user-visible failure that should have been transient. The commit message 'BigModel error dispatch' suggests this is new logic for a specific upstream provider. Provider-specific error schemas change without notice, making hardcoded classification fragile.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Audit the error classifier for: (1) explicit handling of 401/403/404 as terminal, (2) explicit handling of 429/500/502/503 as retriable, (3) a safe default (terminal, not retriable) for any unrecognized error shape. Add a test that verifies a new/unknown error structure defaults to terminal, not to infinite retry.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"tracked-jobs.mjs and state.mjs concurrent mutation without visible locking\",\n      \"body\": \"Both scripts/lib/tracked-jobs.mjs (78 lines changed) and scripts/lib/state.mjs (32 lines changed) manage persistent job/state data. The diff introduces --wait/--background execution modes (from the v0.4.5 commit), meaning multiple jobs can now run concurrently. File-based state with concurrent writers risks interleaved writes corrupting the JSON state file (truncated writes, partial JSON). The tracked-jobs test file is not in the diff, raising the question of whether concurrency scenarios are tested at all.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Verify that all state writes use atomic file replacement (write to temp file, then rename). Add a test that runs two concurrent job-state mutations and asserts the final state file is valid JSON with both mutations reflected. If there is no locking, flag this as a known limitation in documentation.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `grep -rn 'process\\\\.mjs' scripts/ commands/ hooks/` and confirm zero hits before merge.\",\n    \"Inspect retry.mjs exhaust path: verify it always throws/rejects, never returns undefined.\",\n    \"Inspect bigmodel-errors.mjs default branch: confirm unknown errors are classified as terminal (not retriable).\",\n    \"Verify state file writes in tracked-jobs.mjs use atomic write (write-then-rename pattern).\",\n    \"Run the full test suite (`node --test tests/*.test.mjs`) and confirm zero failures before tagging release.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T17:14:39.120Z"
+}

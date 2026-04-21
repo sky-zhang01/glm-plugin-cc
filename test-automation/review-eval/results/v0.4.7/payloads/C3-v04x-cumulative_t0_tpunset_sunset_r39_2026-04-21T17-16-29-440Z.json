@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 39
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.5,
+    "citation_false_file_hits": 0,
+    "latency_ms": 110319,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces a new retry subsystem (retry.mjs, 203 lines), error dispatch layer (bigmodel-errors.mjs, 168 lines), and significant changes to the API client (glm-client.mjs, 155 lines) and job tracking (tracked-jobs.mjs, 78 lines) — yet three of those four core modules have no dedicated test files. The deleted process.mjs (67 lines removed) creates a latent import-failure risk. Shipping without test coverage on the primary HTTP client and job-state machinery is a regression hazard under retry/backoff stress.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "No test coverage for glm-client.mjs despite 155 lines of auth/retry/error changes",
+        "body": "glm-client.mjs is the primary API communication module. It received ~155 lines of changes across v0.4.x integrating the new retry.mjs backoff, bigmodel-errors.mjs error dispatch, and likely auth/connection handling. There is no corresponding test file (tests/glm-client.test.mjs is absent from the test listing). This means the retry-integration path, error-classification fallback, and auth-failure recovery are all untested. Under degraded-network or rate-limit conditions, a misclassified error or botched retry could silently swallow a job result or enter an infinite-retry loop with no test to catch it.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.85,
+        "recommendation": "Add tests/glm-client.test.mjs covering at minimum: (1) retry exhaustion propagates a distinguishable error, (2) BigModel error classification maps to correct retry/backoff strategy, (3) transient auth failures retry correctly, (4) non-retryable errors fail fast without retries."
+      },
+      {
+        "severity": "high",
+        "title": "No test coverage for tracked-jobs.mjs — job state corruption risk under concurrency",
+        "body": "scripts/lib/tracked-jobs.mjs (78 lines changed) manages job lifecycle state, likely persisted to the filesystem. File-based state with no dedicated test file (tests/tracked-jobs.test.mjs is absent) means race conditions between concurrent job create/complete/fail transitions are untested. A partially written state file or crash mid-update could leave jobs in an unrecoverable state with no automated guard against it.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.8,
+        "recommendation": "Add tests/tracked-jobs.test.mjs covering: (1) concurrent job create + complete does not corrupt state, (2) crash-recovery scenario where state file is partially written, (3) job lifecycle transitions enforce valid state machine ordering."
+      },
+      {
+        "severity": "medium",
+        "title": "process.mjs deleted (67 lines) — dangling import risk if callers not fully migrated",
+        "body": "scripts/lib/process.mjs was entirely removed (67 ---, 0 +++). scripts/check-imports.mjs was updated (5 lines changed), suggesting awareness of the migration. However, if any runtime code path still imports from './lib/process.mjs' or if the import checker has gaps (e.g., dynamic imports, re-exports, or string-concatenated paths), it would produce an ERR_MODULE_NOT_FOUND at runtime with no compile-time warning in an ESM-only project.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.6,
+        "recommendation": "Run a full grep for 'process' across all .mjs files (including dynamic import patterns and template literals) to confirm no dangling references. Add a CI check that validates all static imports resolve before merge."
+      },
+      {
+        "severity": "medium",
+        "title": "No test coverage for job-control.mjs — retry/interrupt interaction untested",
+        "body": "scripts/lib/job-control.mjs (20 lines changed) controls job execution flow and likely interacts with the new retry.mjs subsystem. Without a dedicated test (tests/job-control.test.mjs absent), the interaction between job cancellation, retry backoff, and state cleanup is unverified. A retry that fires after job cancellation could write stale state or re-queue a dead job.",
+        "file": "scripts/lib/job-control.mjs",
+        "line_start": 1,
+        "line_end": 20,
+        "confidence": 0.7,
+        "recommendation": "Add tests for job-control.mjs specifically testing: (1) retry does not fire after explicit job cancellation, (2) interrupted jobs clean up state correctly, (3) concurrent cancel + retry does not leave ghost jobs."
+      }
+    ],
+    "next_steps": [
+      "Add tests/glm-client.test.mjs with retry-exhaustion, error-classification, and auth-failure scenarios before shipping.",
+      "Add tests/tracked-jobs.test.mjs with concurrent-access and crash-recovery scenarios.",
+      "Grep all .mjs files for any remaining import of or reference to scripts/lib/process.mjs (including dynamic imports).",
+      "Run the full test suite under simulated network degradation to verify retry.mjs integration with glm-client.mjs behaves correctly at the boundary.",
+      "Verify that the retry subsystem has a hard ceiling on total retry duration and cannot exceed reasonable resource limits under sustained failure."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff introduces a new retry subsystem (retry.mjs, 203 lines), error dispatch layer (bigmodel-errors.mjs, 168 lines), and significant changes to the API client (glm-client.mjs, 155 lines) and job tracking (tracked-jobs.mjs, 78 lines) — yet three of those four core modules have no dedicated test files. The deleted process.mjs (67 lines removed) creates a latent import-failure risk. Shipping without test coverage on the primary HTTP client and job-state machinery is a regression hazard under retry/backoff stress.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"No test coverage for glm-client.mjs despite 155 lines of auth/retry/error changes\",\n      \"body\": \"glm-client.mjs is the primary API communication module. It received ~155 lines of changes across v0.4.x integrating the new retry.mjs backoff, bigmodel-errors.mjs error dispatch, and likely auth/connection handling. There is no corresponding test file (tests/glm-client.test.mjs is absent from the test listing). This means the retry-integration path, error-classification fallback, and auth-failure recovery are all untested. Under degraded-network or rate-limit conditions, a misclassified error or botched retry could silently swallow a job result or enter an infinite-retry loop with no test to catch it.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.85,\n      \"recommendation\": \"Add tests/glm-client.test.mjs covering at minimum: (1) retry exhaustion propagates a distinguishable error, (2) BigModel error classification maps to correct retry/backoff strategy, (3) transient auth failures retry correctly, (4) non-retryable errors fail fast without retries.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"No test coverage for tracked-jobs.mjs — job state corruption risk under concurrency\",\n      \"body\": \"scripts/lib/tracked-jobs.mjs (78 lines changed) manages job lifecycle state, likely persisted to the filesystem. File-based state with no dedicated test file (tests/tracked-jobs.test.mjs is absent) means race conditions between concurrent job create/complete/fail transitions are untested. A partially written state file or crash mid-update could leave jobs in an unrecoverable state with no automated guard against it.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.8,\n      \"recommendation\": \"Add tests/tracked-jobs.test.mjs covering: (1) concurrent job create + complete does not corrupt state, (2) crash-recovery scenario where state file is partially written, (3) job lifecycle transitions enforce valid state machine ordering.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"process.mjs deleted (67 lines) — dangling import risk if callers not fully migrated\",\n      \"body\": \"scripts/lib/process.mjs was entirely removed (67 ---, 0 +++). scripts/check-imports.mjs was updated (5 lines changed), suggesting awareness of the migration. However, if any runtime code path still imports from './lib/process.mjs' or if the import checker has gaps (e.g., dynamic imports, re-exports, or string-concatenated paths), it would produce an ERR_MODULE_NOT_FOUND at runtime with no compile-time warning in an ESM-only project.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Run a full grep for 'process' across all .mjs files (including dynamic import patterns and template literals) to confirm no dangling references. Add a CI check that validates all static imports resolve before merge.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"No test coverage for job-control.mjs — retry/interrupt interaction untested\",\n      \"body\": \"scripts/lib/job-control.mjs (20 lines changed) controls job execution flow and likely interacts with the new retry.mjs subsystem. Without a dedicated test (tests/job-control.test.mjs absent), the interaction between job cancellation, retry backoff, and state cleanup is unverified. A retry that fires after job cancellation could write stale state or re-queue a dead job.\",\n      \"file\": \"scripts/lib/job-control.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 20,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Add tests for job-control.mjs specifically testing: (1) retry does not fire after explicit job cancellation, (2) interrupted jobs clean up state correctly, (3) concurrent cancel + retry does not leave ghost jobs.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Add tests/glm-client.test.mjs with retry-exhaustion, error-classification, and auth-failure scenarios before shipping.\",\n    \"Add tests/tracked-jobs.test.mjs with concurrent-access and crash-recovery scenarios.\",\n    \"Grep all .mjs files for any remaining import of or reference to scripts/lib/process.mjs (including dynamic imports).\",\n    \"Run the full test suite under simulated network degradation to verify retry.mjs integration with glm-client.mjs behaves correctly at the boundary.\",\n    \"Verify that the retry subsystem has a hard ceiling on total retry duration and cannot exceed reasonable resource limits under sustained failure.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T17:16:29.471Z"
+}

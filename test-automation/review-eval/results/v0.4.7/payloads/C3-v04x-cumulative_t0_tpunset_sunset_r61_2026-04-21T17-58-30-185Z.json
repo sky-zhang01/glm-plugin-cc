@@ -1,0 +1,70 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 61
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 101250,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "Cannot complete a defensible adversarial review — only the diff stat and commit log were provided, not the actual diff content. Two structural risks are visible: (1) scripts/lib/process.mjs was entirely deleted, creating a dangling-import crash risk if anything still references it, and (2) 6600+ lines across 84 files introduce new retry, error-dispatch, and job-tracking subsystems whose integration correctness cannot be verified from metadata alone. Ship approval requires reading the actual code.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Deleted process.mjs risks unresolved ESM imports at runtime",
+        "body": "scripts/lib/process.mjs was entirely removed (67 lines deleted per diff stat). If any remaining module still contains `import … from './process.mjs'` or `'../lib/process.mjs'`, Node will throw ERR_MODULE_NOT_FOUND at load time with no fallback. ESM static imports fail before any user code runs, producing an opaque crash. scripts/check-imports.mjs was modified (±5 lines) which may address this, but without confirming the import graph, this is an unvalidated kill-switch risk.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.7,
+        "recommendation": "Run `grep -rn \"process\\.mjs\" scripts/` to confirm zero remaining references. If check-imports.mjs validates this, add a comment documenting the validation. Add the check to CI (pr-check.yml) so regressions are caught automatically."
+      },
+      {
+        "severity": "medium",
+        "title": "New retry.mjs (203 lines) and bigmodel-errors.mjs (168 lines) lack integration-level verification against modified glm-client.mjs",
+        "body": "The diff adds two new critical-path modules (retry with backoff, error dispatch for BigModel) and heavily modifies glm-client.mjs (±155 lines). Unit tests exist for each in isolation (retry.test.mjs 352 lines, bigmodel-errors.test.mjs 189 lines), but the interaction surface — retry logic calling back into glm-client, error dispatch deciding retry-vs-fail, tracked-jobs.mjs updating state on exhausted retries — is not verifiable from the summary. A bug in this chain could cause silent job loss (retry exhausts without persisting failure state) or indefinite hangs (backoff never terminates).",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.55,
+        "recommendation": "Before ship: (1) verify retry.mjs has a hard max-attempts ceiling that cannot be exceeded, (2) confirm glm-client.mjs propagates retry exhaustion to tracked-jobs.mjs as a terminal failure state, (3) add at least one integration test covering the full retry→exhaust→state-transition path."
+      },
+      {
+        "severity": "medium",
+        "title": "Scope and version-spread make rollback safety uncertain",
+        "body": "The changeset spans v0.4.0→v0.4.6 across 84 files with 6600+ additions — effectively 6 minor releases bundled into one diff. If a defect is discovered post-ship, rollback to v0.4.0 reverts all 6 releases worth of fixes. State files (state.mjs modified ±32 lines), job tracking (tracked-jobs.mjs ±78 lines), and preset config (preset-config.mjs ±15 lines) may have schema or format changes that make rolling back unsafe (v0.4.6 persisted state unreadable by v0.4.0).",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.5,
+        "recommendation": "Verify that state.mjs persisted data formats are backward-compatible with v0.4.0 readers, or that a migration path exists. Document rollback procedure and any state-format incompatibilities in release_card.md."
+      }
+    ],
+    "next_steps": [
+      "Provide the actual diff content (git diff v0.4.0..HEAD) so line-level adversarial review can be completed",
+      "Run `grep -rn 'process\\.mjs' scripts/` to confirm the deleted module has zero remaining importers",
+      "Inspect retry.mjs for hard max-attempts ceiling and confirm exhausted retries produce a terminal persisted state",
+      "Verify state.mjs data format backward compatibility or document migration/rollback constraints",
+      "Confirm tracked-jobs.mjs cleans up resources when retry exhausts (no leaked temp files, zombie processes, or orphaned state)"
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"Cannot complete a defensible adversarial review — only the diff stat and commit log were provided, not the actual diff content. Two structural risks are visible: (1) scripts/lib/process.mjs was entirely deleted, creating a dangling-import crash risk if anything still references it, and (2) 6600+ lines across 84 files introduce new retry, error-dispatch, and job-tracking subsystems whose integration correctness cannot be verified from metadata alone. Ship approval requires reading the actual code.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Deleted process.mjs risks unresolved ESM imports at runtime\",\n      \"body\": \"scripts/lib/process.mjs was entirely removed (67 lines deleted per diff stat). If any remaining module still contains `import … from './process.mjs'` or `'../lib/process.mjs'`, Node will throw ERR_MODULE_NOT_FOUND at load time with no fallback. ESM static imports fail before any user code runs, producing an opaque crash. scripts/check-imports.mjs was modified (±5 lines) which may address this, but without confirming the import graph, this is an unvalidated kill-switch risk.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Run `grep -rn \\\"process\\\\.mjs\\\" scripts/` to confirm zero remaining references. If check-imports.mjs validates this, add a comment documenting the validation. Add the check to CI (pr-check.yml) so regressions are caught automatically.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"New retry.mjs (203 lines) and bigmodel-errors.mjs (168 lines) lack integration-level verification against modified glm-client.mjs\",\n      \"body\": \"The diff adds two new critical-path modules (retry with backoff, error dispatch for BigModel) and heavily modifies glm-client.mjs (±155 lines). Unit tests exist for each in isolation (retry.test.mjs 352 lines, bigmodel-errors.test.mjs 189 lines), but the interaction surface — retry logic calling back into glm-client, error dispatch deciding retry-vs-fail, tracked-jobs.mjs updating state on exhausted retries — is not verifiable from the summary. A bug in this chain could cause silent job loss (retry exhausts without persisting failure state) or indefinite hangs (backoff never terminates).\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Before ship: (1) verify retry.mjs has a hard max-attempts ceiling that cannot be exceeded, (2) confirm glm-client.mjs propagates retry exhaustion to tracked-jobs.mjs as a terminal failure state, (3) add at least one integration test covering the full retry→exhaust→state-transition path.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Scope and version-spread make rollback safety uncertain\",\n      \"body\": \"The changeset spans v0.4.0→v0.4.6 across 84 files with 6600+ additions — effectively 6 minor releases bundled into one diff. If a defect is discovered post-ship, rollback to v0.4.0 reverts all 6 releases worth of fixes. State files (state.mjs modified ±32 lines), job tracking (tracked-jobs.mjs ±78 lines), and preset config (preset-config.mjs ±15 lines) may have schema or format changes that make rolling back unsafe (v0.4.6 persisted state unreadable by v0.4.0).\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.5,\n      \"recommendation\": \"Verify that state.mjs persisted data formats are backward-compatible with v0.4.0 readers, or that a migration path exists. Document rollback procedure and any state-format incompatibilities in release_card.md.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Provide the actual diff content (git diff v0.4.0..HEAD) so line-level adversarial review can be completed\",\n    \"Run `grep -rn 'process\\\\.mjs' scripts/` to confirm the deleted module has zero remaining importers\",\n    \"Inspect retry.mjs for hard max-attempts ceiling and confirm exhausted retries produce a terminal persisted state\",\n    \"Verify state.mjs data format backward compatibility or document migration/rollback constraints\",\n    \"Confirm tracked-jobs.mjs cleans up resources when retry exhausts (no leaked temp files, zombie processes, or orphaned state)\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T17:58:30.212Z"
+}

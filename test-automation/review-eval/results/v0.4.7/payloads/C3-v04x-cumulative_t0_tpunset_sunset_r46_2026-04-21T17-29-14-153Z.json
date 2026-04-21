@@ -1,0 +1,91 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 46
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 135386,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces 6600+ lines across 84 files including a deleted process-management module, new retry/BigModel-error infrastructure, job-tracking, and state mutations—all without a clear migration guard. The deletion of scripts/lib/process.mjs (−67 lines) and the large untested surface area of retry.mjs (+203 lines) present the highest ship-blocking risk: any latent import of the removed module will throw at runtime, and non-idempotent retries can silently duplicate side effects under the exact transient-failure conditions they aim to recover from.",
+    "findings": [
+      {
+        "severity": "critical",
+        "title": "Deleted process.mjs may leave dangling imports causing runtime ReferenceError",
+        "body": "scripts/lib/process.mjs (67 lines) was completely removed. The commit log entry 'Bundle F — ReferenceError + full thread/resume scaffolding purge' confirms prior purge attempts, but the diff stat still shows glm-companion.mjs (+139 lines changed), glm-client.mjs (+155), job-control.mjs (+20), and render.mjs (+79) all modified in the same window. If any dynamic import or indirect dependency still references process.mjs, it will throw a ReferenceError at invocation time—exactly the class of failure that hid in the v0.4.3 'ReferenceError' hotfix. Without a grep-style guard confirming zero remaining imports, this is a regression risk.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.82,
+        "recommendation": "Run a repository-wide search for any import/require of 'process.mjs' or './process' or '../process'. Add a CI check in check-imports.mjs (itself modified) that explicitly fails if any reference to the deleted module remains. Consider adding a re-export stub that throws a descriptive error to catch latent imports at test time rather than in production."
+      },
+      {
+        "severity": "high",
+        "title": "New retry.mjs (203 lines) lacks idempotency guards for non-idempotent operations",
+        "body": "The retry module is the largest new addition at 203 lines. Retry logic is safe only when the retried operation is idempotent or when the caller provides an idempotency key. The diff context shows glm-client.mjs (the API client) and job-control.mjs both changed in the same release, strongly suggesting API calls are being retried. If a BigModel API call mutates state server-side (e.g., submitting a review, creating a resource), a retry after a network timeout—where the server actually processed the request—will silently duplicate the operation. The tests/retry.test.mjs file (352 lines) exists but test count alone doesn't confirm idempotency-key propagation or dedup logic.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.74,
+        "recommendation": "Verify that retry.mjs exposes an option to mark operations as non-idempotent (disabling retry for those). For BigModel API calls, confirm the client either sends idempotency keys or only retries on errors guaranteed pre-commit (connection refused, DNS failure). Add a test case that asserts a non-idempotent operation is NOT retried on ambiguous failures (e.g., HTTP 504)."
+      },
+      {
+        "severity": "high",
+        "title": "tracked-jobs.mjs concurrent access and crash-recovery safety unclear",
+        "body": "scripts/lib/tracked-jobs.mjs is a new 78-line module for job tracking. Job tracking typically writes to a persistent store (file, DB) to survive process crashes. If the store is a JSON file written non-atomically (write-in-place rather than write-to-temp-then-rename), a crash mid-write corrupts the job ledger, losing all tracked job state. The diff also shows state.mjs changed by 32 lines and fs.mjs by 44 lines, suggesting filesystem-based state. No fsync or atomic-rename pattern is confirmable from context. This is a data-integrity risk under the exact crash/retry scenarios the retry module is meant to handle.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.68,
+        "recommendation": "Audit tracked-jobs.mjs for atomic write patterns: writes should go to a temp file then be renamed over the target. Verify fsync is called before rename. Add a test that simulates a process kill mid-write and asserts the job store remains parseable (or is recreated cleanly). Document the crash-recovery guarantee in the module header."
+      },
+      {
+        "severity": "medium",
+        "title": "BigModel error dispatch may swallow unrecognized error types",
+        "body": "scripts/lib/bigmodel-errors.mjs (168 new lines) implements error dispatch for BigModel API errors. Error dispatch modules commonly handle a known set of error codes and fall through to a generic handler for unknown codes. If the generic handler logs but does not re-throw, or returns a falsy value that callers interpret as 'no error', then new or changed API error responses from the provider will be silently ignored. This is especially dangerous because the retry module likely uses this dispatch to decide whether to retry—misclassifying a fatal error as retryable wastes resources and delays user-visible failure reporting.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.65,
+        "recommendation": "Ensure the default/unknown error case in the dispatch throws or returns a strongly-typed error object that callers cannot ignore. Add a test with a completely fabricated error code that asserts the error propagates to the caller rather than being swallowed. Log unrecognized error codes at WARN level for observability."
+      },
+      {
+        "severity": "medium",
+        "title": "Cumulative v0.4.0→v0.4.6 diff lacks integration test for cross-module retry→error→state flow",
+        "body": "The tests/ directory adds 14 new test files covering individual modules (retry, bigmodel-errors, state, render, etc.) but there is no visible integration test file. The critical happy-path flow—API call fails → bigmodel-errors dispatches → retry.mjs backs off → state.mjs records attempt → job-control.mjs updates status—crosses at least four new/changed modules. Unit tests pass but the integration point is where transient-failure bugs hide. The UAT reports cover v0.4.4 and v0.4.5 scenarios only; no v0.4.6 UAT report is visible in the diff, meaning the retry/backoff feature has no end-to-end evidence.",
+        "file": "tests/retry.test.mjs",
+        "line_start": 1,
+        "line_end": 352,
+        "confidence": 0.72,
+        "recommendation": "Add an integration test that simulates a transient BigModel API failure and asserts the full retry→dispatch→state-update pipeline completes correctly. Create a v0.4.6 UAT report covering the retry/backoff scenario before shipping. If the user focus is 'sampling-sweep run 46', this integration path is the sweep's highest-risk gap."
+      }
+    ],
+    "next_steps": [
+      "Run: git grep -n 'process\\.mjs\\|/process' scripts/ to verify zero dangling imports of the deleted module",
+      "Audit retry.mjs for idempotency-key support and verify glm-client.mjs only retries on pre-commit errors",
+      "Verify tracked-jobs.mjs uses atomic file writes (temp+rename+fsync) for crash safety",
+      "Confirm bigmodel-errors.mjs default case throws rather than returns undefined",
+      "Add a v0.4.6 UAT report with at minimum one scenario exercising the retry/backoff path end-to-end",
+      "Block ship until integration test for the retry→error→state pipeline is added and passing"
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff introduces 6600+ lines across 84 files including a deleted process-management module, new retry/BigModel-error infrastructure, job-tracking, and state mutations—all without a clear migration guard. The deletion of scripts/lib/process.mjs (−67 lines) and the large untested surface area of retry.mjs (+203 lines) present the highest ship-blocking risk: any latent import of the removed module will throw at runtime, and non-idempotent retries can silently duplicate side effects under the exact transient-failure conditions they aim to recover from.\",\n  \"findings\": [\n    {\n      \"severity\": \"critical\",\n      \"title\": \"Deleted process.mjs may leave dangling imports causing runtime ReferenceError\",\n      \"body\": \"scripts/lib/process.mjs (67 lines) was completely removed. The commit log entry 'Bundle F — ReferenceError + full thread/resume scaffolding purge' confirms prior purge attempts, but the diff stat still shows glm-companion.mjs (+139 lines changed), glm-client.mjs (+155), job-control.mjs (+20), and render.mjs (+79) all modified in the same window. If any dynamic import or indirect dependency still references process.mjs, it will throw a ReferenceError at invocation time—exactly the class of failure that hid in the v0.4.3 'ReferenceError' hotfix. Without a grep-style guard confirming zero remaining imports, this is a regression risk.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.82,\n      \"recommendation\": \"Run a repository-wide search for any import/require of 'process.mjs' or './process' or '../process'. Add a CI check in check-imports.mjs (itself modified) that explicitly fails if any reference to the deleted module remains. Consider adding a re-export stub that throws a descriptive error to catch latent imports at test time rather than in production.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"New retry.mjs (203 lines) lacks idempotency guards for non-idempotent operations\",\n      \"body\": \"The retry module is the largest new addition at 203 lines. Retry logic is safe only when the retried operation is idempotent or when the caller provides an idempotency key. The diff context shows glm-client.mjs (the API client) and job-control.mjs both changed in the same release, strongly suggesting API calls are being retried. If a BigModel API call mutates state server-side (e.g., submitting a review, creating a resource), a retry after a network timeout—where the server actually processed the request—will silently duplicate the operation. The tests/retry.test.mjs file (352 lines) exists but test count alone doesn't confirm idempotency-key propagation or dedup logic.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.74,\n      \"recommendation\": \"Verify that retry.mjs exposes an option to mark operations as non-idempotent (disabling retry for those). For BigModel API calls, confirm the client either sends idempotency keys or only retries on errors guaranteed pre-commit (connection refused, DNS failure). Add a test case that asserts a non-idempotent operation is NOT retried on ambiguous failures (e.g., HTTP 504).\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"tracked-jobs.mjs concurrent access and crash-recovery safety unclear\",\n      \"body\": \"scripts/lib/tracked-jobs.mjs is a new 78-line module for job tracking. Job tracking typically writes to a persistent store (file, DB) to survive process crashes. If the store is a JSON file written non-atomically (write-in-place rather than write-to-temp-then-rename), a crash mid-write corrupts the job ledger, losing all tracked job state. The diff also shows state.mjs changed by 32 lines and fs.mjs by 44 lines, suggesting filesystem-based state. No fsync or atomic-rename pattern is confirmable from context. This is a data-integrity risk under the exact crash/retry scenarios the retry module is meant to handle.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Audit tracked-jobs.mjs for atomic write patterns: writes should go to a temp file then be renamed over the target. Verify fsync is called before rename. Add a test that simulates a process kill mid-write and asserts the job store remains parseable (or is recreated cleanly). Document the crash-recovery guarantee in the module header.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"BigModel error dispatch may swallow unrecognized error types\",\n      \"body\": \"scripts/lib/bigmodel-errors.mjs (168 new lines) implements error dispatch for BigModel API errors. Error dispatch modules commonly handle a known set of error codes and fall through to a generic handler for unknown codes. If the generic handler logs but does not re-throw, or returns a falsy value that callers interpret as 'no error', then new or changed API error responses from the provider will be silently ignored. This is especially dangerous because the retry module likely uses this dispatch to decide whether to retry—misclassifying a fatal error as retryable wastes resources and delays user-visible failure reporting.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Ensure the default/unknown error case in the dispatch throws or returns a strongly-typed error object that callers cannot ignore. Add a test with a completely fabricated error code that asserts the error propagates to the caller rather than being swallowed. Log unrecognized error codes at WARN level for observability.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Cumulative v0.4.0→v0.4.6 diff lacks integration test for cross-module retry→error→state flow\",\n      \"body\": \"The tests/ directory adds 14 new test files covering individual modules (retry, bigmodel-errors, state, render, etc.) but there is no visible integration test file. The critical happy-path flow—API call fails → bigmodel-errors dispatches → retry.mjs backs off → state.mjs records attempt → job-control.mjs updates status—crosses at least four new/changed modules. Unit tests pass but the integration point is where transient-failure bugs hide. The UAT reports cover v0.4.4 and v0.4.5 scenarios only; no v0.4.6 UAT report is visible in the diff, meaning the retry/backoff feature has no end-to-end evidence.\",\n      \"file\": \"tests/retry.test.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 352,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Add an integration test that simulates a transient BigModel API failure and asserts the full retry→dispatch→state-update pipeline completes correctly. Create a v0.4.6 UAT report covering the retry/backoff scenario before shipping. If the user focus is 'sampling-sweep run 46', this integration path is the sweep's highest-risk gap.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run: git grep -n 'process\\\\.mjs\\\\|/process' scripts/ to verify zero dangling imports of the deleted module\",\n    \"Audit retry.mjs for idempotency-key support and verify glm-client.mjs only retries on pre-commit errors\",\n    \"Verify tracked-jobs.mjs uses atomic file writes (temp+rename+fsync) for crash safety\",\n    \"Confirm bigmodel-errors.mjs default case throws rather than returns undefined\",\n    \"Add a v0.4.6 UAT report with at minimum one scenario exercising the retry/backoff path end-to-end\",\n    \"Block ship until integration test for the retry→error→state pipeline is added and passing\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T17:29:14.198Z"
+}

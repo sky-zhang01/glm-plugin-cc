@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 171818,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "Cumulative v0.4.0→v0.4.6 diff adds 6600+ lines across 84 files, including new retry/error-dispatch infrastructure and a deleted library module. Three material gaps remain: (1) tracked-jobs.mjs is 78 lines of new stateful job-tracking logic with zero test coverage — the only new library module without tests; (2) process.mjs was deleted, creating a latent MODULE_NOT_FOUND crash risk if any importer survived the Bundle F purge; (3) glm-client.mjs absorbed 155 lines of retry/error-dispatch integration without a dedicated test file, leaving the most critical API-surface error chain only indirectly exercised. Any one of these can produce silent failures or hard crashes under real workloads.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "tracked-jobs.mjs: new stateful job-tracking module with no test coverage",
+        "body": "scripts/lib/tracked-jobs.mjs adds 78 lines of job state management — inherently stateful, concurrency-sensitive, and directly affecting data integrity. Every other new library module (retry.mjs, bigmodel-errors.mjs, fs.mjs, state.mjs, preset-config.mjs, render.mjs, args.mjs) has a dedicated test file. tracked-jobs.mjs does not. No tests/tracked-jobs.test.mjs appears anywhere in the diff. Race conditions in concurrent job creation, stale-state accumulation, or cleanup failures on cancellation/timeout will ship undetected. Job tracking errors can cause lost work, duplicated submissions, or orphaned state — all expensive to recover from and hard to diagnose without tests defining expected behavior.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.88,
+        "recommendation": "Add tests/tracked-jobs.test.mjs covering: concurrent job creation races, all state transitions (created→running→done/failed/cancelled), cleanup on timeout, and stale-state recovery. Block release until this coverage exists."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs: core client retry integration untested at unit level",
+        "body": "scripts/lib/glm-client.mjs received 155 lines of changes integrating the new retry.mjs and bigmodel-errors.mjs modules. No dedicated test file exists (no tests/glm-client.test.mjs in the diff). This is the primary API surface — the full error-handling chain (glm-client → retry.mjs → bigmodel-errors.mjs) is only exercised indirectly through render tests and result-propagation tests. Incorrect error classification, retry on non-idempotent operations, or swallowed errors in this chain would silently degrade or corrupt every downstream command's behavior.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.72,
+        "recommendation": "Add tests/glm-client.test.mjs with mocked HTTP responses covering: retry on transient errors, non-retry on permanent errors, error-classification propagation from bigmodel-errors.mjs, timeout behavior, and abort-signal cancellation. At minimum, add integration tests that exercise the full retry→error-dispatch→client chain end-to-end."
+      },
+      {
+        "severity": "medium",
+        "title": "process.mjs deleted — latent dangling-import crash risk",
+        "body": "scripts/lib/process.mjs (67 lines) was removed, apparently during 'Bundle F — ReferenceError + full thread/resume scaffolding purge'. If any surviving module still imports from './lib/process.mjs' or 'scripts/lib/process.mjs', the import will fail at runtime with MODULE_NOT_FOUND — a hard crash with no fallback. The purge commit references fixing ReferenceErrors, suggesting removal was reactive. The check-imports.mjs script was modified (5 lines changed) but there is no evidence it validates that imports resolve to existing files rather than just checking import style. Without a systematic grep, this risk remains open across 6 subsequent versions.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.58,
+        "recommendation": "Run `grep -rn 'process\\.mjs' scripts/` and verify zero surviving imports. If check-imports.mjs does not verify import targets exist, add that check to prevent future regressions of this class."
+      }
+    ],
+    "next_steps": [
+      "Add tests/tracked-jobs.test.mjs — this is the strongest blocking gap (stateful module, zero tests, data-integrity impact).",
+      "Verify no surviving imports reference scripts/lib/process.mjs: `grep -rn 'process\\.mjs' scripts/`.",
+      "Add unit or integration tests for glm-client.mjs covering the retry→error-dispatch→client chain.",
+      "Confirm check-imports.mjs validates that import targets resolve to existing files, preventing future dangling-import regressions."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"Cumulative v0.4.0→v0.4.6 diff adds 6600+ lines across 84 files, including new retry/error-dispatch infrastructure and a deleted library module. Three material gaps remain: (1) tracked-jobs.mjs is 78 lines of new stateful job-tracking logic with zero test coverage — the only new library module without tests; (2) process.mjs was deleted, creating a latent MODULE_NOT_FOUND crash risk if any importer survived the Bundle F purge; (3) glm-client.mjs absorbed 155 lines of retry/error-dispatch integration without a dedicated test file, leaving the most critical API-surface error chain only indirectly exercised. Any one of these can produce silent failures or hard crashes under real workloads.\",\"findings\":[{\"severity\":\"high\",\"title\":\"tracked-jobs.mjs: new stateful job-tracking module with no test coverage\",\"body\":\"scripts/lib/tracked-jobs.mjs adds 78 lines of job state management — inherently stateful, concurrency-sensitive, and directly affecting data integrity. Every other new library module (retry.mjs, bigmodel-errors.mjs, fs.mjs, state.mjs, preset-config.mjs, render.mjs, args.mjs) has a dedicated test file. tracked-jobs.mjs does not. No tests/tracked-jobs.test.mjs appears anywhere in the diff. Race conditions in concurrent job creation, stale-state accumulation, or cleanup failures on cancellation/timeout will ship undetected. Job tracking errors can cause lost work, duplicated submissions, or orphaned state — all expensive to recover from and hard to diagnose without tests defining expected behavior.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.88,\"recommendation\":\"Add tests/tracked-jobs.test.mjs covering: concurrent job creation races, all state transitions (created→running→done/failed/cancelled), cleanup on timeout, and stale-state recovery. Block release until this coverage exists.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs: core client retry integration untested at unit level\",\"body\":\"scripts/lib/glm-client.mjs received 155 lines of changes integrating the new retry.mjs and bigmodel-errors.mjs modules. No dedicated test file exists (no tests/glm-client.test.mjs in the diff). This is the primary API surface — the full error-handling chain (glm-client → retry.mjs → bigmodel-errors.mjs) is only exercised indirectly through render tests and result-propagation tests. Incorrect error classification, retry on non-idempotent operations, or swallowed errors in this chain would silently degrade or corrupt every downstream command's behavior.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.72,\"recommendation\":\"Add tests/glm-client.test.mjs with mocked HTTP responses covering: retry on transient errors, non-retry on permanent errors, error-classification propagation from bigmodel-errors.mjs, timeout behavior, and abort-signal cancellation. At minimum, add integration tests that exercise the full retry→error-dispatch→client chain end-to-end.\"},{\"severity\":\"medium\",\"title\":\"process.mjs deleted — latent dangling-import crash risk\",\"body\":\"scripts/lib/process.mjs (67 lines) was removed, apparently during 'Bundle F — ReferenceError + full thread/resume scaffolding purge'. If any surviving module still imports from './lib/process.mjs' or 'scripts/lib/process.mjs', the import will fail at runtime with MODULE_NOT_FOUND — a hard crash with no fallback. The purge commit references fixing ReferenceErrors, suggesting removal was reactive. The check-imports.mjs script was modified (5 lines changed) but there is no evidence it validates that imports resolve to existing files rather than just checking import style. Without a systematic grep, this risk remains open across 6 subsequent versions.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":67,\"confidence\":0.58,\"recommendation\":\"Run `grep -rn 'process\\\\.mjs' scripts/` and verify zero surviving imports. If check-imports.mjs does not verify import targets exist, add that check to prevent future regressions of this class.\"}],\"next_steps\":[\"Add tests/tracked-jobs.test.mjs — this is the strongest blocking gap (stateful module, zero tests, data-integrity impact).\",\"Verify no surviving imports reference scripts/lib/process.mjs: `grep -rn 'process\\\\.mjs' scripts/`.\",\"Add unit or integration tests for glm-client.mjs covering the retry→error-dispatch→client chain.\",\"Confirm check-imports.mjs validates that import targets resolve to existing files, preventing future dangling-import regressions.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T18:21:37.458Z"
+}

@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 17
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 75071,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit introduces a potentially breaking npm scope rename alongside setup command behavior changes, with no visible migration path or backward compatibility. The scope rename is the highest-risk item: any existing installation, lockfile, or configuration referencing the old scope will silently break. The release_card.md diff is massive (326 lines) and may document behavior not yet stabilized. Should not ship without confirming the scope rename won't strand existing users.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change with no visible migration path",
+        "body": "The commit message explicitly states 'rename npm scope', and package.json shows 4 lines changed (likely the package name and possibly a dependency reference). Renaming an npm scope breaks every existing installation that references the old scope — lockfiles, require/import paths, plugin manifests, and any user configuration pointing at the old name will fail. There is no indication in the diff of an alias, deprecation notice, or migration guide. If the old scoped package is not republished as a redirect or deprecated with instructions, users will encounter opaque 'package not found' errors.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.82,
+        "recommendation": "Before shipping: (1) verify the old scope package is deprecated with a clear message pointing to the new scope, (2) confirm no other files or documentation still reference the old scope, (3) grep the entire repo for the old scope name to catch stale references. If this is a consumer-facing package, treat this as a major version bump with a migration guide."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive menu added to setup may break scripted or non-interactive usage",
+        "body": "commands/setup.md has 19 lines changed, adding an interactive menu when already configured. If the setup command previously completed without requiring user input on re-run, any CI/CD pipelines, automated setup scripts, or non-interactive terminals that invoke this command will now hang waiting for menu input or fail. Without a non-interactive flag or timeout, this is a latent failure that won't show up until someone re-runs setup in automation.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.65,
+        "recommendation": "Add a non-interactive or silent mode flag to the setup command that skips the menu and either re-applies defaults or exits cleanly. Document the new interactive behavior and provide an escape hatch for automation."
+      },
+      {
+        "severity": "medium",
+        "title": "Plugin config changes in marketplace.json and plugin.json may affect discovery or loading",
+        "body": "Both .claude-plugin/marketplace.json (4 lines changed) and .claude-plugin/plugin.json (2 lines changed) are modified in the same commit that renames the npm scope. If these files contain references to the old scope name that are being updated, any cached or installed plugin copies that still have the old values will fail to resolve or register correctly. Partial state — old plugin.json on disk, new scope in marketplace — could cause silent misconfiguration.",
+        "file": ".claude-plugin/marketplace.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.55,
+        "recommendation": "Verify that both config files are atomically consistent with the new scope. If the plugin loader validates these files at runtime, ensure stale copies fail loudly rather than silently falling back to broken defaults."
+      },
+      {
+        "severity": "low",
+        "title": "Massive release_card.md rewrite may document unimplemented or unstable behavior",
+        "body": "release_card.md has 326 lines changed (273 additions, 103 deletions). This is a disproportionately large documentation change for what the commit message describes as a setup menu addition and scope rename. If the release card documents capabilities not yet implemented or tested, it creates an expectations mismatch with users. Documentation drift from implementation is a common source of silent failure in plugin ecosystems.",
+        "file": "release_card.md",
+        "line_start": 1,
+        "line_end": 326,
+        "confidence": 0.4,
+        "recommendation": "Cross-reference every claim in the updated release_card.md against the actual implemented behavior. Remove or clearly mark any features described as aspirational or planned-but-not-yet-available."
+      }
+    ],
+    "next_steps": [
+      "Inspect the full diff of package.json to confirm exactly which scope identifiers changed and whether the old scope is handled.",
+      "Grep the entire repository for the old scope name to find any stale references not caught in this commit.",
+      "Read commands/setup.md to verify the interactive menu has a non-interactive escape hatch or default path.",
+      "Verify .claude-plugin/plugin.json and marketplace.json are self-consistent and won't break plugin loading if a user has a partially updated installation.",
+      "Confirm the old npm package is deprecated with migration instructions before publishing under the new scope."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"This commit introduces a potentially breaking npm scope rename alongside setup command behavior changes, with no visible migration path or backward compatibility. The scope rename is the highest-risk item: any existing installation, lockfile, or configuration referencing the old scope will silently break. The release_card.md diff is massive (326 lines) and may document behavior not yet stabilized. Should not ship without confirming the scope rename won't strand existing users.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename is a breaking change with no visible migration path\",\n      \"body\": \"The commit message explicitly states 'rename npm scope', and package.json shows 4 lines changed (likely the package name and possibly a dependency reference). Renaming an npm scope breaks every existing installation that references the old scope — lockfiles, require/import paths, plugin manifests, and any user configuration pointing at the old name will fail. There is no indication in the diff of an alias, deprecation notice, or migration guide. If the old scoped package is not republished as a redirect or deprecated with instructions, users will encounter opaque 'package not found' errors.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.82,\n      \"recommendation\": \"Before shipping: (1) verify the old scope package is deprecated with a clear message pointing to the new scope, (2) confirm no other files or documentation still reference the old scope, (3) grep the entire repo for the old scope name to catch stale references. If this is a consumer-facing package, treat this as a major version bump with a migration guide.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Interactive menu added to setup may break scripted or non-interactive usage\",\n      \"body\": \"commands/setup.md has 19 lines changed, adding an interactive menu when already configured. If the setup command previously completed without requiring user input on re-run, any CI/CD pipelines, automated setup scripts, or non-interactive terminals that invoke this command will now hang waiting for menu input or fail. Without a non-interactive flag or timeout, this is a latent failure that won't show up until someone re-runs setup in automation.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Add a non-interactive or silent mode flag to the setup command that skips the menu and either re-applies defaults or exits cleanly. Document the new interactive behavior and provide an escape hatch for automation.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Plugin config changes in marketplace.json and plugin.json may affect discovery or loading\",\n      \"body\": \"Both .claude-plugin/marketplace.json (4 lines changed) and .claude-plugin/plugin.json (2 lines changed) are modified in the same commit that renames the npm scope. If these files contain references to the old scope name that are being updated, any cached or installed plugin copies that still have the old values will fail to resolve or register correctly. Partial state — old plugin.json on disk, new scope in marketplace — could cause silent misconfiguration.\",\n      \"file\": \".claude-plugin/marketplace.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Verify that both config files are atomically consistent with the new scope. If the plugin loader validates these files at runtime, ensure stale copies fail loudly rather than silently falling back to broken defaults.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"Massive release_card.md rewrite may document unimplemented or unstable behavior\",\n      \"body\": \"release_card.md has 326 lines changed (273 additions, 103 deletions). This is a disproportionately large documentation change for what the commit message describes as a setup menu addition and scope rename. If the release card documents capabilities not yet implemented or tested, it creates an expectations mismatch with users. Documentation drift from implementation is a common source of silent failure in plugin ecosystems.\",\n      \"file\": \"release_card.md\",\n      \"line_start\": 1,\n      \"line_end\": 326,\n      \"confidence\": 0.4,\n      \"recommendation\": \"Cross-reference every claim in the updated release_card.md against the actual implemented behavior. Remove or clearly mark any features described as aspirational or planned-but-not-yet-available.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect the full diff of package.json to confirm exactly which scope identifiers changed and whether the old scope is handled.\",\n    \"Grep the entire repository for the old scope name to find any stale references not caught in this commit.\",\n    \"Read commands/setup.md to verify the interactive menu has a non-interactive escape hatch or default path.\",\n    \"Verify .claude-plugin/plugin.json and marketplace.json are self-consistent and won't break plugin loading if a user has a partially updated installation.\",\n    \"Confirm the old npm package is deprecated with migration instructions before publishing under the new scope.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T17:09:27.645Z"
+}

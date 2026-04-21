@@ -89,19 +89,20 @@ Bash({
   `gpt-5.4`). Use `--thinking off` only if the latency / token cost is
   prohibitive. BigModel API only exposes binary enabled/disabled.
 - `--temperature <0-2>` / `--top-p <0-1>` / `--seed <int>` — sampling
-  parameters. Same semantics as `/glm:review`. The v0.4.7 149-run
+  parameters. Same semantics as `/glm:review`. The v0.4.7 457-run
   sweep (summarised in `/glm:review`'s "Diff size guidance" section)
-  detected no statistically significant temperature effect on schema
-  compliance across small / medium / large fixtures (underpowered for
-  ~15pct-per-step effects), and observed **zero cross-project
+  returned a **properly-powered null** (~80% Fisher power at N=81-84
+  per large-diff cell) — all three C3 pairwise p > 0.5 and observed
+  rates flatten to 92-95%. It also observed **zero cross-project
   file hallucinations and zero out-of-diff file citations across all
-  149 runs at any temperature**. The fabricated-citation concern that
-  originally motivated exposing these flags was partially a
-  scoring-rubric artifact on diff-meta findings; genuine line-level
-  content fabrication still exists (the scoring rubric can't fully
-  validate quoted claims), but is not correlated with temperature in
-  this data. Plugin ships no opinionated default;
-  `/glm:adversarial-review` uses BigModel's server-side default
-  unless overridden.
+  457 runs at any temperature** (227 parsed C1 findings audited at
+  N=42-44 per cell). The fabricated-citation concern that originally
+  motivated exposing these flags was partially a scoring-rubric
+  artifact on diff-meta findings; genuine line-level content
+  fabrication still exists (the scoring rubric can't fully validate
+  quoted claims — "correctness without faithfulness" per Wallat 2024),
+  but is not correlated with temperature in this data. Plugin ships
+  no opinionated default; `/glm:adversarial-review` uses BigModel's
+  server-side default unless overridden.
 - `--wait` / `--background` — execution mode bypass. See "Execution mode rules" above.
 - Trailing tokens after flags are treated as free-form focus text.

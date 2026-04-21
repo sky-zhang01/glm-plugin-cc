@@ -1,0 +1,79 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 42
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 70152,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.4→v0.4.6 cumulative delta introduces a retry/backoff subsystem and error-dispatch layer (retry.mjs, bigmodel-errors.mjs) plus a deleted process.mjs, but carries no UAT evidence beyond v0.4.5. The highest-risk paths — retry idempotency, error-classification correctness, concurrent job state — lack observable validation for the v0.4.6+ changes. This is a ship risk for a sampling-sweep run.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "No UAT coverage for v0.4.6 retry/backoff/error-dispatch changes",
+        "body": "UAT report directories exist for v0.4.4 and v0.4.5 only. The v0.4.6 release (commit e0a9ba8) introduced BigModel error dispatch, auto retry/backoff — the single most consequential reliability change in the entire diff. The target v0.4.7 sampling-sweep run (C3-v04x-cumulative) would be exercising this code at scale for the first time without any prior structured validation. Retry logic that misclassifies a non-retryable error as retryable will burn API quota and may produce duplicate submissions; the inverse silently drops work. Neither path has UAT evidence.",
+        "file": "test-automation/uat-reports",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.88,
+        "recommendation": "Create a test-automation/uat-reports/v0.4.6/ directory with scenarios covering: (1) a retryable API error triggering backoff, (2) a non-retryable error failing fast, (3) concurrent job retries not corrupting shared state, (4) retry budget exhaustion. Run these before the sampling-sweep."
+      },
+      {
+        "severity": "high",
+        "title": "process.mjs deleted — risk of dangling imports causing runtime crash",
+        "body": "scripts/lib/process.mjs shows 67 lines removed and no additions in the diff stat, and the Bundle F commit message references a 'full thread/resume scaffolding purge.' If any remaining module (glm-companion.mjs, glm-client.mjs, tracked-jobs.mjs, etc.) still contains a static import of process.mjs, the Node.js module loader will throw ERR_MODULE_NOT_FOUND at startup — a silent, total failure with no partial functionality.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.72,
+        "recommendation": "Grep the entire codebase for any remaining import or require of 'process.mjs' or './process' or '../process'. Verify scripts/check-imports.mjs (which itself changed) covers this case. Add a CI lint rule that flags imports of deleted modules."
+      },
+      {
+        "severity": "medium",
+        "title": "Concurrent job retry writes may corrupt shared state in state.mjs",
+        "body": "state.mjs (32 lines changed) and tracked-jobs.mjs (78 lines changed) manage job state that the new retry.mjs (203 lines) reads and writes. If two tracked jobs fail simultaneously and both trigger retry state updates, there is no evidence of file-locking, atomic writes, or CAS semantics. A lost update could mark a job as 'completed' when it was actually 'retrying', or vice versa — a data-integrity bug that would be invisible until the sampling-sweep exercises parallelism.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.65,
+        "recommendation": "Inspect state.mjs for atomic write semantics (write-to-temp-then-rename, file locks, or serialized writes). If absent, add write serialization or a lockfile mechanism. Add a test to tests/state.test.mjs that exercises concurrent writes from two retry paths."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error classification drives retry correctness but has no negative-path tests visible",
+        "body": "bigmodel-errors.mjs (168 new lines) is the decision layer for retry vs. fail-fast. tests/bigmodel-errors.test.mjs exists (189 lines), which is good. However, the diff stat does not show any integration test that wires bigmodel-errors → retry → glm-client end-to-end. A unit test may pass while the integration chain breaks on an edge case (e.g., an HTTP 429 with a non-standard body that the classifier doesn't recognize, causing an infinite retry loop instead of backoff).",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.58,
+        "recommendation": "Add an integration-level test (or UAT scenario) that sends a real-ish HTTP response through the full chain: glm-client receives error → bigmodel-errors classifies it → retry.mjs decides to retry with backoff → verify backoff timing and eventual success/failure. Cover at least: 429 rate-limit, 503 transient, 401 permanent, and a malformed response body."
+      }
+    ],
+    "next_steps": [
+      "Run `grep -rn 'process\\.mjs\\|/process\"' scripts/` to confirm no dangling imports from the deleted module before any sweep run.",
+      "Create and execute v0.4.6 UAT scenarios focused on retry/backoff/error-classification before proceeding with the C3-v04x-cumulative sweep.",
+      "Audit state.mjs and tracked-jobs.mjs for atomic write guarantees under concurrent retry scenarios.",
+      "Verify retry.mjs has a maximum retry budget/ceiling that prevents infinite loops on misclassified errors."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.4→v0.4.6 cumulative delta introduces a retry/backoff subsystem and error-dispatch layer (retry.mjs, bigmodel-errors.mjs) plus a deleted process.mjs, but carries no UAT evidence beyond v0.4.5. The highest-risk paths — retry idempotency, error-classification correctness, concurrent job state — lack observable validation for the v0.4.6+ changes. This is a ship risk for a sampling-sweep run.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"No UAT coverage for v0.4.6 retry/backoff/error-dispatch changes\",\n      \"body\": \"UAT report directories exist for v0.4.4 and v0.4.5 only. The v0.4.6 release (commit e0a9ba8) introduced BigModel error dispatch, auto retry/backoff — the single most consequential reliability change in the entire diff. The target v0.4.7 sampling-sweep run (C3-v04x-cumulative) would be exercising this code at scale for the first time without any prior structured validation. Retry logic that misclassifies a non-retryable error as retryable will burn API quota and may produce duplicate submissions; the inverse silently drops work. Neither path has UAT evidence.\",\n      \"file\": \"test-automation/uat-reports\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.88,\n      \"recommendation\": \"Create a test-automation/uat-reports/v0.4.6/ directory with scenarios covering: (1) a retryable API error triggering backoff, (2) a non-retryable error failing fast, (3) concurrent job retries not corrupting shared state, (4) retry budget exhaustion. Run these before the sampling-sweep.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"process.mjs deleted — risk of dangling imports causing runtime crash\",\n      \"body\": \"scripts/lib/process.mjs shows 67 lines removed and no additions in the diff stat, and the Bundle F commit message references a 'full thread/resume scaffolding purge.' If any remaining module (glm-companion.mjs, glm-client.mjs, tracked-jobs.mjs, etc.) still contains a static import of process.mjs, the Node.js module loader will throw ERR_MODULE_NOT_FOUND at startup — a silent, total failure with no partial functionality.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Grep the entire codebase for any remaining import or require of 'process.mjs' or './process' or '../process'. Verify scripts/check-imports.mjs (which itself changed) covers this case. Add a CI lint rule that flags imports of deleted modules.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Concurrent job retry writes may corrupt shared state in state.mjs\",\n      \"body\": \"state.mjs (32 lines changed) and tracked-jobs.mjs (78 lines changed) manage job state that the new retry.mjs (203 lines) reads and writes. If two tracked jobs fail simultaneously and both trigger retry state updates, there is no evidence of file-locking, atomic writes, or CAS semantics. A lost update could mark a job as 'completed' when it was actually 'retrying', or vice versa — a data-integrity bug that would be invisible until the sampling-sweep exercises parallelism.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Inspect state.mjs for atomic write semantics (write-to-temp-then-rename, file locks, or serialized writes). If absent, add write serialization or a lockfile mechanism. Add a test to tests/state.test.mjs that exercises concurrent writes from two retry paths.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"bigmodel-errors.mjs error classification drives retry correctness but has no negative-path tests visible\",\n      \"body\": \"bigmodel-errors.mjs (168 new lines) is the decision layer for retry vs. fail-fast. tests/bigmodel-errors.test.mjs exists (189 lines), which is good. However, the diff stat does not show any integration test that wires bigmodel-errors → retry → glm-client end-to-end. A unit test may pass while the integration chain breaks on an edge case (e.g., an HTTP 429 with a non-standard body that the classifier doesn't recognize, causing an infinite retry loop instead of backoff).\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.58,\n      \"recommendation\": \"Add an integration-level test (or UAT scenario) that sends a real-ish HTTP response through the full chain: glm-client receives error → bigmodel-errors classifies it → retry.mjs decides to retry with backoff → verify backoff timing and eventual success/failure. Cover at least: 429 rate-limit, 503 transient, 401 permanent, and a malformed response body.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `grep -rn 'process\\\\.mjs\\\\|/process\\\"' scripts/` to confirm no dangling imports from the deleted module before any sweep run.\",\n    \"Create and execute v0.4.6 UAT scenarios focused on retry/backoff/error-classification before proceeding with the C3-v04x-cumulative sweep.\",\n    \"Audit state.mjs and tracked-jobs.mjs for atomic write guarantees under concurrent retry scenarios.\",\n    \"Verify retry.mjs has a maximum retry budget/ceiling that prevents infinite loops on misclassified errors.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T17:20:32.049Z"
+}

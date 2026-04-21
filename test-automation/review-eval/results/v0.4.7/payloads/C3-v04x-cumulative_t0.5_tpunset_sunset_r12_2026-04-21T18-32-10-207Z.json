@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 12
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 109003,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff adds 6600+ lines across 84 files, including two entirely new core modules (retry.mjs, bigmodel-errors.mjs) and significant changes to the HTTP client (glm-client.mjs) and job tracking. The most defensible blocker is that glm-client.mjs — the sole integration point wiring retry + error dispatch to actual network I/O — has no dedicated test file. The unit tests for retry and error classification in isolation cannot prove the composed pipeline handles real failure modes correctly. Secondary gaps exist in job-control and tracked-jobs test coverage, and the deletion of process.mjs poses a latent runtime risk if any import was missed during migration.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "glm-client.mjs lacks dedicated test coverage despite being the critical retry+error-dispatch integration point",
+        "body": "glm-client.mjs carries 155 lines of changes and is the only module that actually invokes retry.mjs and bigmodel-errors.mjs against real HTTP requests. The test directory contains retry.test.mjs (352 lines) and bigmodel-errors.test.mjs (189 lines) for unit coverage, but there is no glm-client.test.mjs or any integration test that exercises the composed pipeline (client → error dispatch → retry → backoff → final success/failure). If the client mis-wires retry (e.g., retries on non-idempotent POSTs, swallows auth errors, or passes the wrong argument shape to retry()), all dependent commands silently degrade. Unit tests on the sub-modules cannot catch integration defects.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.92,
+        "recommendation": "Add a glm-client.test.mjs that exercises the full request→error-classify→retry→succeed/fail path with mocked HTTP responses. At minimum, test: (1) retryable server error triggers backoff and eventual success, (2) non-retryable auth error fails immediately without retries, (3) max-retries-exhausted returns a clear error, (4) retry-after header is respected. This can be shipped as a follow-up, but the gap should be acknowledged in release notes."
+      },
+      {
+        "severity": "medium",
+        "title": "process.mjs deleted without visible proof that all callers were migrated",
+        "body": "scripts/lib/process.mjs (67 lines) was removed entirely. If any remaining module imports from './lib/process.mjs' or '../lib/process.mjs', the runtime will throw ERR_MODULE_NOT_FOUND on first access. The modification to check-imports.mjs (5 lines changed) suggests awareness of the migration, but static import checking cannot catch dynamic imports, lazy requires, or string-concatenated import paths. No test file explicitly validates that process.mjs's former consumers were rewritten. This is a latent crash risk that would only surface under specific code paths at runtime.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.65,
+        "recommendation": "Verify with `grep -r 'process\\.mjs' scripts/ commands/` that no references remain. Add a CI check or pre-push hook that validates all local imports resolve. Consider adding a smoke test that imports every module entry point to catch dangling references before they reach users."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs and job-control.mjs have no dedicated test coverage",
+        "body": "tracked-jobs.mjs (78 lines changed) and job-control.mjs (20 lines changed) manage job lifecycle state. These are inherently stateful and sensitive to race conditions (concurrent job creation, cancellation mid-flight, crash recovery with stale state). The test file list includes job-render.test.mjs (144 lines) which likely tests rendering, not job control logic itself. Without tests exercising concurrent job creation, cancellation, and crash-recovery scenarios, regressions in job state management could cause duplicate submissions, lost jobs, or corrupted state files.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.72,
+        "recommendation": "Add a tracked-jobs.test.mjs covering: (1) create → list → cancel lifecycle, (2) concurrent create calls for the same job ID, (3) recovery from a partially written state file, (4) state file corruption/missing file handling. This is especially important given the cumulative nature of this diff where job-control.mjs was also modified."
+      }
+    ],
+    "next_steps": [
+      "Confirm no dangling imports from deleted process.mjs with a repository-wide grep.",
+      "Add integration tests for glm-client.mjs covering the retry+error-dispatch pipeline with mocked HTTP before promoting to v0.4.7.",
+      "Add targeted tests for tracked-jobs.mjs state lifecycle including concurrent and crash-recovery scenarios.",
+      "Consider running the existing UAT scenarios (test-automation/uat-reports/) against the current branch to validate end-to-end behavior before release."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff adds 6600+ lines across 84 files, including two entirely new core modules (retry.mjs, bigmodel-errors.mjs) and significant changes to the HTTP client (glm-client.mjs) and job tracking. The most defensible blocker is that glm-client.mjs — the sole integration point wiring retry + error dispatch to actual network I/O — has no dedicated test file. The unit tests for retry and error classification in isolation cannot prove the composed pipeline handles real failure modes correctly. Secondary gaps exist in job-control and tracked-jobs test coverage, and the deletion of process.mjs poses a latent runtime risk if any import was missed during migration.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"glm-client.mjs lacks dedicated test coverage despite being the critical retry+error-dispatch integration point\",\n      \"body\": \"glm-client.mjs carries 155 lines of changes and is the only module that actually invokes retry.mjs and bigmodel-errors.mjs against real HTTP requests. The test directory contains retry.test.mjs (352 lines) and bigmodel-errors.test.mjs (189 lines) for unit coverage, but there is no glm-client.test.mjs or any integration test that exercises the composed pipeline (client → error dispatch → retry → backoff → final success/failure). If the client mis-wires retry (e.g., retries on non-idempotent POSTs, swallows auth errors, or passes the wrong argument shape to retry()), all dependent commands silently degrade. Unit tests on the sub-modules cannot catch integration defects.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.92,\n      \"recommendation\": \"Add a glm-client.test.mjs that exercises the full request→error-classify→retry→succeed/fail path with mocked HTTP responses. At minimum, test: (1) retryable server error triggers backoff and eventual success, (2) non-retryable auth error fails immediately without retries, (3) max-retries-exhausted returns a clear error, (4) retry-after header is respected. This can be shipped as a follow-up, but the gap should be acknowledged in release notes.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"process.mjs deleted without visible proof that all callers were migrated\",\n      \"body\": \"scripts/lib/process.mjs (67 lines) was removed entirely. If any remaining module imports from './lib/process.mjs' or '../lib/process.mjs', the runtime will throw ERR_MODULE_NOT_FOUND on first access. The modification to check-imports.mjs (5 lines changed) suggests awareness of the migration, but static import checking cannot catch dynamic imports, lazy requires, or string-concatenated import paths. No test file explicitly validates that process.mjs's former consumers were rewritten. This is a latent crash risk that would only surface under specific code paths at runtime.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Verify with `grep -r 'process\\\\.mjs' scripts/ commands/` that no references remain. Add a CI check or pre-push hook that validates all local imports resolve. Consider adding a smoke test that imports every module entry point to catch dangling references before they reach users.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"tracked-jobs.mjs and job-control.mjs have no dedicated test coverage\",\n      \"body\": \"tracked-jobs.mjs (78 lines changed) and job-control.mjs (20 lines changed) manage job lifecycle state. These are inherently stateful and sensitive to race conditions (concurrent job creation, cancellation mid-flight, crash recovery with stale state). The test file list includes job-render.test.mjs (144 lines) which likely tests rendering, not job control logic itself. Without tests exercising concurrent job creation, cancellation, and crash-recovery scenarios, regressions in job state management could cause duplicate submissions, lost jobs, or corrupted state files.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Add a tracked-jobs.test.mjs covering: (1) create → list → cancel lifecycle, (2) concurrent create calls for the same job ID, (3) recovery from a partially written state file, (4) state file corruption/missing file handling. This is especially important given the cumulative nature of this diff where job-control.mjs was also modified.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Confirm no dangling imports from deleted process.mjs with a repository-wide grep.\",\n    \"Add integration tests for glm-client.mjs covering the retry+error-dispatch pipeline with mocked HTTP before promoting to v0.4.7.\",\n    \"Add targeted tests for tracked-jobs.mjs state lifecycle including concurrent and crash-recovery scenarios.\",\n    \"Consider running the existing UAT scenarios (test-automation/uat-reports/) against the current branch to validate end-to-end behavior before release.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T18:32:10.233Z"
+}

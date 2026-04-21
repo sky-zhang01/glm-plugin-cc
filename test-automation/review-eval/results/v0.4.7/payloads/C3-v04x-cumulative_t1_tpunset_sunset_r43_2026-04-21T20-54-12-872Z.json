@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 43
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.5,
+    "citation_false_file_hits": 0,
+    "latency_ms": 86886,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff adds 6,623 lines across 84 files including critical new infrastructure (retry, error dispatch, job tracking) but leaves gaps I cannot verify safe without inspecting the actual file contents. The most defensible concerns are: (1) process.mjs was entirely deleted, creating a latent import-failure risk if any consumer was missed; (2) v0.4.6 has no corresponding UAT report directory despite shipping new retry/backoff and error-dispatch modules; (3) the blast radius — six point releases in one cumulative diff — means any single regression is hidden in aggregate. I cannot confirm this is safe to ship on the evidence available.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Deleted process.mjs creates latent ERR_MODULE_NOT_FOUND risk",
+        "body": "The diff stat shows scripts/lib/process.mjs was entirely removed (67 lines, 0 added). If any surviving import references './process.mjs' or './lib/process.mjs' — in glm-companion.mjs, a require in session-lifecycle-hook.mjs, or a transitive dependency — the first invocation of that code path will throw an uncatchable module-not-found error at runtime. Refactoring deletions are the single highest-risk class of change in ESM codebases because static analysis gaps (dynamic imports, string-interpolated paths) routinely escape grep. Without confirming every remaining import was migrated to the new retry.mjs or inline, this is an unverified bomb.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.72,
+        "recommendation": "Run `grep -r 'process\\.mjs' scripts/ commands/ tests/` against the working tree. If any hits remain, the import must be updated before merge. If none remain, add a defensive test that imports every module entry point to catch dangling references at CI time."
+      },
+      {
+        "severity": "high",
+        "title": "No UAT evidence for v0.4.6 despite new retry and error-dispatch infrastructure",
+        "body": "The test-automation/uat-reports/ directory contains subdirectories for v0.4.4 and v0.4.5 only. The v0.4.6 release (HEAD, tag d5fa754) introduces scripts/lib/retry.mjs (203 new lines) and scripts/lib/bigmodel-errors.mjs (168 new lines) — the two most runtime-critical additions in the entire diff — yet no corresponding UAT report or scenario directory exists. The unit tests (retry.test.mjs, bigmodel-errors.test.mjs) cover isolated behavior but cannot validate end-to-end retry/backoff behavior against a real BigModel API under the error conditions the new dispatch module classifies. Shipping API-facing resilience logic without integration-level validation is a known source of silent degradation.",
+        "file": "test-automation/uat-reports/v0.4.6",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.92,
+        "recommendation": "Create test-automation/uat-reports/v0.4.6/ with at minimum: (a) a scenario exercising transient 429/500 responses to verify retry.mjs backoff and recovery, (b) a scenario exercising each error class in bigmodel-errors.mjs to verify correct dispatch, (c) a scenario exercising the combined path through glm-client.mjs. Block the v0.4.7 cumulative until this evidence exists."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs and job-control.mjs both modified — potential double-write or race on job state",
+        "body": "Both scripts/lib/tracked-jobs.mjs (78 lines changed) and scripts/lib/job-control.mjs (20 lines changed) were modified in this cumulative diff. Two modules touching the same job-tracking concern raises the possibility of split-brain state: if tracked-jobs.mjs writes job state to one location and job-control.mjs reads or writes to another, a concurrent background review (--background flag added in v0.4.5, commit d573807) could race with a foreground status check. Without seeing the actual implementations I cannot confirm the invariant is maintained, but the structural signal — two modules, same domain, both changed — warrants explicit verification.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.55,
+        "recommendation": "Verify that tracked-jobs.mjs and job-control.mjs share a single source of truth for job state (same file path, same locking mechanism). If they maintain separate state, add a test that spawns a background job and immediately queries status to surface any race."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs expanded by 155 lines — new API surface without visible contract tests",
+        "body": "scripts/lib/glm-client.mjs shows 155 lines changed, making it the most-modified existing module. The tests/ directory includes schema-load, render, state, and other unit tests but no glm-client.test.mjs is visible in the changed files list. If the client gained new methods or changed error handling (likely, given the new bigmodel-errors.mjs and retry.mjs), those paths are only tested indirectly through integration scenarios. A missing dedicated unit test file for the primary API client is a gap that will hide regressions in future changes.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.68,
+        "recommendation": "Add tests/glm-client.test.mjs covering: (a) each new or changed method in isolation, (b) error-path handling when retry.mjs exhausts attempts, (c) behavior when bigmodel-errors.mjs classifies an error as non-retriable. This does not block shipping but should be tracked as a P1 follow-up."
+      }
+    ],
+    "next_steps": [
+      "Run `grep -rn 'process\\.mjs\\|from.*process' scripts/ tests/` against the working tree to confirm the deleted module has no remaining consumers.",
+      "Inspect retry.mjs for: max-attempt cap, jitter on backoff, abort-signal propagation, and idempotency guarantees on retried operations.",
+      "Inspect bigmodel-errors.mjs for completeness of error classification — any unclassified error should default to safe (non-retriable) rather than being silently retried.",
+      "Create v0.4.6 UAT directory with scenarios covering retry exhaustion, error dispatch, and background/foreground job interleaving.",
+      "Verify tracked-jobs.mjs and job-control.mjs share a single state store and locking mechanism to prevent split-brain under concurrent access."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff adds 6,623 lines across 84 files including critical new infrastructure (retry, error dispatch, job tracking) but leaves gaps I cannot verify safe without inspecting the actual file contents. The most defensible concerns are: (1) process.mjs was entirely deleted, creating a latent import-failure risk if any consumer was missed; (2) v0.4.6 has no corresponding UAT report directory despite shipping new retry/backoff and error-dispatch modules; (3) the blast radius — six point releases in one cumulative diff — means any single regression is hidden in aggregate. I cannot confirm this is safe to ship on the evidence available.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Deleted process.mjs creates latent ERR_MODULE_NOT_FOUND risk\",\n      \"body\": \"The diff stat shows scripts/lib/process.mjs was entirely removed (67 lines, 0 added). If any surviving import references './process.mjs' or './lib/process.mjs' — in glm-companion.mjs, a require in session-lifecycle-hook.mjs, or a transitive dependency — the first invocation of that code path will throw an uncatchable module-not-found error at runtime. Refactoring deletions are the single highest-risk class of change in ESM codebases because static analysis gaps (dynamic imports, string-interpolated paths) routinely escape grep. Without confirming every remaining import was migrated to the new retry.mjs or inline, this is an unverified bomb.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Run `grep -r 'process\\\\.mjs' scripts/ commands/ tests/` against the working tree. If any hits remain, the import must be updated before merge. If none remain, add a defensive test that imports every module entry point to catch dangling references at CI time.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"No UAT evidence for v0.4.6 despite new retry and error-dispatch infrastructure\",\n      \"body\": \"The test-automation/uat-reports/ directory contains subdirectories for v0.4.4 and v0.4.5 only. The v0.4.6 release (HEAD, tag d5fa754) introduces scripts/lib/retry.mjs (203 new lines) and scripts/lib/bigmodel-errors.mjs (168 new lines) — the two most runtime-critical additions in the entire diff — yet no corresponding UAT report or scenario directory exists. The unit tests (retry.test.mjs, bigmodel-errors.test.mjs) cover isolated behavior but cannot validate end-to-end retry/backoff behavior against a real BigModel API under the error conditions the new dispatch module classifies. Shipping API-facing resilience logic without integration-level validation is a known source of silent degradation.\",\n      \"file\": \"test-automation/uat-reports/v0.4.6\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.92,\n      \"recommendation\": \"Create test-automation/uat-reports/v0.4.6/ with at minimum: (a) a scenario exercising transient 429/500 responses to verify retry.mjs backoff and recovery, (b) a scenario exercising each error class in bigmodel-errors.mjs to verify correct dispatch, (c) a scenario exercising the combined path through glm-client.mjs. Block the v0.4.7 cumulative until this evidence exists.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"tracked-jobs.mjs and job-control.mjs both modified — potential double-write or race on job state\",\n      \"body\": \"Both scripts/lib/tracked-jobs.mjs (78 lines changed) and scripts/lib/job-control.mjs (20 lines changed) were modified in this cumulative diff. Two modules touching the same job-tracking concern raises the possibility of split-brain state: if tracked-jobs.mjs writes job state to one location and job-control.mjs reads or writes to another, a concurrent background review (--background flag added in v0.4.5, commit d573807) could race with a foreground status check. Without seeing the actual implementations I cannot confirm the invariant is maintained, but the structural signal — two modules, same domain, both changed — warrants explicit verification.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Verify that tracked-jobs.mjs and job-control.mjs share a single source of truth for job state (same file path, same locking mechanism). If they maintain separate state, add a test that spawns a background job and immediately queries status to surface any race.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client.mjs expanded by 155 lines — new API surface without visible contract tests\",\n      \"body\": \"scripts/lib/glm-client.mjs shows 155 lines changed, making it the most-modified existing module. The tests/ directory includes schema-load, render, state, and other unit tests but no glm-client.test.mjs is visible in the changed files list. If the client gained new methods or changed error handling (likely, given the new bigmodel-errors.mjs and retry.mjs), those paths are only tested indirectly through integration scenarios. A missing dedicated unit test file for the primary API client is a gap that will hide regressions in future changes.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Add tests/glm-client.test.mjs covering: (a) each new or changed method in isolation, (b) error-path handling when retry.mjs exhausts attempts, (c) behavior when bigmodel-errors.mjs classifies an error as non-retriable. This does not block shipping but should be tracked as a P1 follow-up.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `grep -rn 'process\\\\.mjs\\\\|from.*process' scripts/ tests/` against the working tree to confirm the deleted module has no remaining consumers.\",\n    \"Inspect retry.mjs for: max-attempt cap, jitter on backoff, abort-signal propagation, and idempotency guarantees on retried operations.\",\n    \"Inspect bigmodel-errors.mjs for completeness of error classification — any unclassified error should default to safe (non-retriable) rather than being silently retried.\",\n    \"Create v0.4.6 UAT directory with scenarios covering retry exhaustion, error dispatch, and background/foreground job interleaving.\",\n    \"Verify tracked-jobs.mjs and job-control.mjs share a single state store and locking mechanism to prevent split-brain under concurrent access.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T20:54:12.895Z"
+}

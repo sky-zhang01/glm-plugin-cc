@@ -1,0 +1,79 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 41
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 118186,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces a complete API-communication-layer rewrite (glm-client + new retry + new error dispatch) while simultaneously deleting the process-management module. The surface area — 371 lines of new retry/error code plus 155 lines of client changes plus a module deletion — constitutes a high-risk change set with no evidence of integration testing beyond happy-path UAT scenarios. The deleted process.mjs and the size of the new retry logic are the strongest ship-blockers.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "scripts/lib/process.mjs deleted without verified import-cleanup guarantee",
+        "body": "The diff stat shows scripts/lib/process.mjs removed entirely (−67 lines). This was a library module almost certainly imported by other runtime files. In ESM, a dangling import causes an immediate ERR_MODULE_NOT_FOUND crash at module-load time — no fallback, no graceful degradation. scripts/check-imports.mjs was modified (+5/−1), suggesting awareness, but import checks are typically static and may miss dynamic `import()` calls or conditional paths. No test file (e.g., tests/process.test.mjs deletion or migration) appears in the diff to confirm the migration was intentional and complete.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.78,
+        "recommendation": "Run `grep -r \"from.*['\\\"].*lib/process\" scripts/ commands/ --include='*.mjs'` against the current tree. If any hit exists, this is a ship-blocking crash. Also verify that `check-imports.mjs` actually validates every .mjs file and not just a whitelist."
+      },
+      {
+        "severity": "high",
+        "title": "New retry.mjs (203 lines) — retry logic on critical path without visible safety guarantees",
+        "body": "A 203-line retry module is introduced at the core of API communication. The commit message cites 'auto retry/backoff,' implying retries fire without explicit caller opt-in. Common failure modes in such modules: (1) missing absolute retry caps leading to near-infinite loops under sustained downstream failure, (2) retrying non-idempotent operations causing duplication, (3) missing jitter allowing thundering-herd on shared backends, (4) exhausted-retry errors that swallow the original cause. The companion tests/retry.test.mjs (352 lines) suggests coverage exists, but test volume alone does not prove safety — the question is whether edge cases like concurrent retry storms, signal interruption, and partial-state retries are covered. No circuit-breaker pattern is visible in the file list.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.65,
+        "recommendation": "Verify: (a) an absolute maximum retry count that cannot be exceeded, (b) jitter on backoff intervals, (c) the original error is always propagated (not swallowed) when retries exhaust, (d) non-idempotent operations are excluded from automatic retry. Add a circuit-breaker or at minimum a hard timeout ceiling."
+      },
+      {
+        "severity": "medium",
+        "title": "Coupled error-classification + retry creates silent misclassification risk",
+        "body": "bigmodel-errors.mjs (168 new lines) classifies errors; retry.mjs consumes that classification; glm-client.mjs (155 lines changed) orchestrates both. A false-positive classification (permanent error marked retryable) wastes resources and may compound side effects on repeated attempts. A false-negative (transient error marked permanent) causes an unnecessary user-visible failure that the retry system was designed to prevent. The error-dispatch module is brand new, meaning every classification rule is untested in production. No integration test file (e.g., tests/bigmodel-errors+retry.test.mjs) appears in the diff — they are tested separately, not in combination.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.58,
+        "recommendation": "Add at least one integration test that exercises the full glm-client → bigmodel-errors → retry path with a mocked API returning specific error codes, verifying both that transient errors are retried the correct number of times and that permanent errors surface immediately with the original cause intact."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs heavily modified alongside its dependency chain — regression risk",
+        "body": "glm-client.mjs shows 155 lines changed (the largest modification to an existing runtime file). It now depends on the new bigmodel-errors.mjs and retry.mjs modules. Any behavioral regression in the client (wrong HTTP method, dropped headers, corrupted request body, mismanaged connection lifecycle) directly affects every user interaction. The change size plus the new dependency chain means existing UAT scenarios (v0.4.4, v0.4.5) likely do not cover the new error/retry paths because those scenarios predate the v0.4.6 changes.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.55,
+        "recommendation": "Create v0.4.6-specific UAT scenarios that exercise: (a) a simulated API timeout, (b) a simulated 429 rate-limit response, (c) a simulated 5xx transient failure, and (d) a simulated permanent 4xx error. Verify correct behavior in each case before release."
+      }
+    ],
+    "next_steps": [
+      "Grep for any remaining imports of scripts/lib/process.mjs across the entire codebase — this is the fastest potential ship-blocker to resolve.",
+      "Audit retry.mjs for: absolute max-retry cap, jitter on backoff, original-error propagation, and exclusion of non-idempotent operations.",
+      "Run the existing test suite (npm test) and verify all tests pass against the current tree — do not assume CI green means safe.",
+      "Add an integration-level test exercising glm-client + bigmodel-errors + retry together with mocked failure responses before cutting v0.4.7."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 cumulative diff introduces a complete API-communication-layer rewrite (glm-client + new retry + new error dispatch) while simultaneously deleting the process-management module. The surface area — 371 lines of new retry/error code plus 155 lines of client changes plus a module deletion — constitutes a high-risk change set with no evidence of integration testing beyond happy-path UAT scenarios. The deleted process.mjs and the size of the new retry logic are the strongest ship-blockers.\",\"findings\":[{\"severity\":\"high\",\"title\":\"scripts/lib/process.mjs deleted without verified import-cleanup guarantee\",\"body\":\"The diff stat shows scripts/lib/process.mjs removed entirely (−67 lines). This was a library module almost certainly imported by other runtime files. In ESM, a dangling import causes an immediate ERR_MODULE_NOT_FOUND crash at module-load time — no fallback, no graceful degradation. scripts/check-imports.mjs was modified (+5/−1), suggesting awareness, but import checks are typically static and may miss dynamic `import()` calls or conditional paths. No test file (e.g., tests/process.test.mjs deletion or migration) appears in the diff to confirm the migration was intentional and complete.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":67,\"confidence\":0.78,\"recommendation\":\"Run `grep -r \\\"from.*['\\\\\\\"].*lib/process\\\" scripts/ commands/ --include='*.mjs'` against the current tree. If any hit exists, this is a ship-blocking crash. Also verify that `check-imports.mjs` actually validates every .mjs file and not just a whitelist.\"},{\"severity\":\"high\",\"title\":\"New retry.mjs (203 lines) — retry logic on critical path without visible safety guarantees\",\"body\":\"A 203-line retry module is introduced at the core of API communication. The commit message cites 'auto retry/backoff,' implying retries fire without explicit caller opt-in. Common failure modes in such modules: (1) missing absolute retry caps leading to near-infinite loops under sustained downstream failure, (2) retrying non-idempotent operations causing duplication, (3) missing jitter allowing thundering-herd on shared backends, (4) exhausted-retry errors that swallow the original cause. The companion tests/retry.test.mjs (352 lines) suggests coverage exists, but test volume alone does not prove safety — the question is whether edge cases like concurrent retry storms, signal interruption, and partial-state retries are covered. No circuit-breaker pattern is visible in the file list.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.65,\"recommendation\":\"Verify: (a) an absolute maximum retry count that cannot be exceeded, (b) jitter on backoff intervals, (c) the original error is always propagated (not swallowed) when retries exhaust, (d) non-idempotent operations are excluded from automatic retry. Add a circuit-breaker or at minimum a hard timeout ceiling.\"},{\"severity\":\"medium\",\"title\":\"Coupled error-classification + retry creates silent misclassification risk\",\"body\":\"bigmodel-errors.mjs (168 new lines) classifies errors; retry.mjs consumes that classification; glm-client.mjs (155 lines changed) orchestrates both. A false-positive classification (permanent error marked retryable) wastes resources and may compound side effects on repeated attempts. A false-negative (transient error marked permanent) causes an unnecessary user-visible failure that the retry system was designed to prevent. The error-dispatch module is brand new, meaning every classification rule is untested in production. No integration test file (e.g., tests/bigmodel-errors+retry.test.mjs) appears in the diff — they are tested separately, not in combination.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.58,\"recommendation\":\"Add at least one integration test that exercises the full glm-client → bigmodel-errors → retry path with a mocked API returning specific error codes, verifying both that transient errors are retried the correct number of times and that permanent errors surface immediately with the original cause intact.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs heavily modified alongside its dependency chain — regression risk\",\"body\":\"glm-client.mjs shows 155 lines changed (the largest modification to an existing runtime file). It now depends on the new bigmodel-errors.mjs and retry.mjs modules. Any behavioral regression in the client (wrong HTTP method, dropped headers, corrupted request body, mismanaged connection lifecycle) directly affects every user interaction. The change size plus the new dependency chain means existing UAT scenarios (v0.4.4, v0.4.5) likely do not cover the new error/retry paths because those scenarios predate the v0.4.6 changes.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.55,\"recommendation\":\"Create v0.4.6-specific UAT scenarios that exercise: (a) a simulated API timeout, (b) a simulated 429 rate-limit response, (c) a simulated 5xx transient failure, and (d) a simulated permanent 4xx error. Verify correct behavior in each case before release.\"}],\"next_steps\":[\"Grep for any remaining imports of scripts/lib/process.mjs across the entire codebase — this is the fastest potential ship-blocker to resolve.\",\"Audit retry.mjs for: absolute max-retry cap, jitter on backoff, original-error propagation, and exclusion of non-idempotent operations.\",\"Run the existing test suite (npm test) and verify all tests pass against the current tree — do not assume CI green means safe.\",\"Add an integration-level test exercising glm-client + bigmodel-errors + retry together with mocked failure responses before cutting v0.4.7.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T17:19:21.866Z"
+}

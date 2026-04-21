@@ -1,0 +1,68 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 11
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0,
+    "citation_false_file_hits": 0,
+    "latency_ms": 22823,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The commit adds an interactive menu to /glm:setup when already configured and renames the npm scope. The setup command's interactive menu logic has a branching path where 'already configured' users are given choices, but the markdown-based command file appears to rely on user interaction patterns that could silently fail or produce unexpected behavior if the configuration state is ambiguous. However, the most concerning issue is the npm scope rename which is a compatibility-breaking change without a clear migration path.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename without migration breaks existing installs",
+        "body": "The package scope is being renamed (visible in package.json and plugin config changes). Any existing users who installed the plugin under the old scope will have broken references after this change. There is no migration script, no deprecation notice for the old scope, and no documentation of how users should transition. This is a breaking change that could leave existing installations in a broken state where commands silently fail or the plugin cannot be found.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.85,
+        "recommendation": "Add a migration guide or deprecation path. At minimum, document in CHANGELOG.md (or a MIGRATION.md) exactly what users must do to transition from the old scope to the new one, and consider whether the old scope package should remain published with a postinstall warning."
+      },
+      {
+        "severity": "medium",
+        "title": "Setup menu for already-configured state lacks guard against partial/corrupt config",
+        "body": "The interactive menu added to commands/setup.md triggers when 'already configured,' but there is no visible validation that the existing configuration is well-formed. If the config file exists but is corrupted, empty, or partially written (e.g., from a previous interrupted setup), the command will treat it as 'already configured' and present choices that may operate on invalid state. This could lead to silent data loss or a broken configuration that the user cannot easily recover from.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.7,
+        "recommendation": "Add a config validation step before presenting the interactive menu. If the existing config is malformed, the command should either force a reconfigure or clearly warn the user rather than presenting the standard 'already configured' menu."
+      },
+      {
+        "severity": "low",
+        "title": "CHANGELOG entry references version but diff does not include a version bump in package.json",
+        "body": "The CHANGELOG.md adds entries for what appears to be a release, but the package.json changes are limited to the scope rename. If the version number in package.json was not bumped correspondingly, this creates a version skew where published packages claim different versions than what CHANGELOG documents.",
+        "file": "CHANGELOG.md",
+        "line_start": 1,
+        "line_end": 21,
+        "confidence": 0.5,
+        "recommendation": "Verify that the version field in package.json is correctly bumped to match the CHANGELOG entry before publishing."
+      }
+    ],
+    "next_steps": [
+      "Confirm the old npm scope package is either deprecated with a postinstall message or a migration script is provided.",
+      "Add config validation before the 'already configured' interactive menu branch in setup.md.",
+      "Verify package.json version matches CHANGELOG before release."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The commit adds an interactive menu to /glm:setup when already configured and renames the npm scope. The setup command's interactive menu logic has a branching path where 'already configured' users are given choices, but the markdown-based command file appears to rely on user interaction patterns that could silently fail or produce unexpected behavior if the configuration state is ambiguous. However, the most concerning issue is the npm scope rename which is a compatibility-breaking change without a clear migration path.\",\"findings\":[{\"severity\":\"high\",\"title\":\"npm scope rename without migration breaks existing installs\",\"body\":\"The package scope is being renamed (visible in package.json and plugin config changes). Any existing users who installed the plugin under the old scope will have broken references after this change. There is no migration script, no deprecation notice for the old scope, and no documentation of how users should transition. This is a breaking change that could leave existing installations in a broken state where commands silently fail or the plugin cannot be found.\",\"file\":\"package.json\",\"line_start\":1,\"line_end\":4,\"confidence\":0.85,\"recommendation\":\"Add a migration guide or deprecation path. At minimum, document in CHANGELOG.md (or a MIGRATION.md) exactly what users must do to transition from the old scope to the new one, and consider whether the old scope package should remain published with a postinstall warning.\"},{\"severity\":\"medium\",\"title\":\"Setup menu for already-configured state lacks guard against partial/corrupt config\",\"body\":\"The interactive menu added to commands/setup.md triggers when 'already configured,' but there is no visible validation that the existing configuration is well-formed. If the config file exists but is corrupted, empty, or partially written (e.g., from a previous interrupted setup), the command will treat it as 'already configured' and present choices that may operate on invalid state. This could lead to silent data loss or a broken configuration that the user cannot easily recover from.\",\"file\":\"commands/setup.md\",\"line_start\":1,\"line_end\":19,\"confidence\":0.7,\"recommendation\":\"Add a config validation step before presenting the interactive menu. If the existing config is malformed, the command should either force a reconfigure or clearly warn the user rather than presenting the standard 'already configured' menu.\"},{\"severity\":\"low\",\"title\":\"CHANGELOG entry references version but diff does not include a version bump in package.json\",\"body\":\"The CHANGELOG.md adds entries for what appears to be a release, but the package.json changes are limited to the scope rename. If the version number in package.json was not bumped correspondingly, this creates a version skew where published packages claim different versions than what CHANGELOG documents.\",\"file\":\"CHANGELOG.md\",\"line_start\":1,\"line_end\":21,\"confidence\":0.5,\"recommendation\":\"Verify that the version field in package.json is correctly bumped to match the CHANGELOG entry before publishing.\"}],\"next_steps\":[\"Confirm the old npm scope package is either deprecated with a postinstall message or a migration script is provided.\",\"Add config validation before the 'already configured' interactive menu branch in setup.md.\",\"Verify package.json version matches CHANGELOG before release.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T17:04:26.096Z"
+}

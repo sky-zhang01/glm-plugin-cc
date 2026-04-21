@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 58
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 73330,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff spans 84 files and ~6,600 lines. I cannot inspect actual file contents from the provided context (no tool access), but the structural signals—deletion of process.mjs, new retry/error-dispatch modules, and mutations to core client+state layers—present concrete integration and regression risks that require verification before a v0.4.7 sweep.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "process.mjs deleted — surviving imports will cause MODULE_NOT_FOUND at runtime",
+        "body": "The diff stat shows scripts/lib/process.mjs removed entirely (67 lines). Multiple companion files were modified in the same diff (glm-companion.mjs, state.mjs, render.mjs). If any file still contains `import … from './process.mjs'` or `'./lib/process.mjs'`, the application crashes immediately on invocation. This is a classic incomplete-refactoring defect. I cannot verify import cleanup without reading the changed files, which makes this a must-check item.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.65,
+        "recommendation": "Grep the entire codebase for any remaining reference to 'process.mjs' (including dynamic imports or string-based require). If any exist, this is a ship-blocker."
+      },
+      {
+        "severity": "high",
+        "title": "New retry.mjs (203 lines) — retry without idempotency guards can duplicate side effects",
+        "body": "A brand-new 203-line retry module was added, and glm-client.mjs (155 lines changed) was modified in the same release. If the client's API calls (job submission, status checks) are retried without idempotency keys or request deduplication, transient failures will produce duplicate jobs or duplicate charges against the BigModel API. Retry amplification is one of the most common sources of production incidents in API clients.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.55,
+        "recommendation": "Verify that every call site wrapped by retry.mjs is either read-only (GET/status) or protected by an idempotency mechanism (idempotency key, dedup by request hash, or check-before-create). Document which call sites are safe to retry and which are not."
+      },
+      {
+        "severity": "medium",
+        "title": "New bigmodel-errors.mjs dispatch — misclassification can silently swallow errors or trigger wrong recovery",
+        "body": "A 168-line error classification/dispatch module was introduced alongside retry logic. If the error classifier incorrectly maps a non-retryable error (e.g., auth failure, quota exceeded, invalid request) as retryable, the system will burn through retry budgets and delay surfacing the real problem to the user. Conversely, classifying a transient error as permanent loses work unnecessarily. Error taxonomy for external APIs is notoriously brittle across API version changes.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.5,
+        "recommendation": "Review the error classification logic against the BigModel API documentation. Ensure every branch logs the raw error before classification so misclassifications are observable in production. Add tests for edge cases: unknown error codes, changed error shapes, and network timeouts."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs mutation amid job-tracking changes — risk of job-state corruption or loss",
+        "body": "scripts/lib/state.mjs (32 lines changed) and scripts/lib/tracked-jobs.mjs (78 lines changed) were both modified. State files are the source of truth for in-progress jobs. If the state serialization format changed without a migration path, existing v0.4.0–v0.4.5 state files will either fail to parse (crash) or deserialize with missing fields (silent data loss). No migration script is visible in the diff.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.45,
+        "recommendation": "Compare the state file schema between v0.4.0 and v0.4.6. If any field names, types, or structure changed, add a migration shim or version field. Test deserialization of a v0.4.0-era state file against the v0.4.6 code."
+      }
+    ],
+    "next_steps": [
+      "Run `grep -r 'process\\.mjs' scripts/` to confirm no surviving imports reference the deleted module.",
+      "Read retry.mjs and identify every call site — confirm each is safe to retry or has idempotency protection.",
+      "Read bigmodel-errors.mjs error taxonomy and cross-reference against BigModel API error documentation for completeness.",
+      "Compare state.mjs schema between v0.4.0 and HEAD — if format changed, write and test a migration path.",
+      "Run the full test suite (`tests/*.test.mjs`) against the current HEAD to establish baseline pass/fail before the sweep."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 diff spans 84 files and ~6,600 lines. I cannot inspect actual file contents from the provided context (no tool access), but the structural signals—deletion of process.mjs, new retry/error-dispatch modules, and mutations to core client+state layers—present concrete integration and regression risks that require verification before a v0.4.7 sweep.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"process.mjs deleted — surviving imports will cause MODULE_NOT_FOUND at runtime\",\n      \"body\": \"The diff stat shows scripts/lib/process.mjs removed entirely (67 lines). Multiple companion files were modified in the same diff (glm-companion.mjs, state.mjs, render.mjs). If any file still contains `import … from './process.mjs'` or `'./lib/process.mjs'`, the application crashes immediately on invocation. This is a classic incomplete-refactoring defect. I cannot verify import cleanup without reading the changed files, which makes this a must-check item.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Grep the entire codebase for any remaining reference to 'process.mjs' (including dynamic imports or string-based require). If any exist, this is a ship-blocker.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"New retry.mjs (203 lines) — retry without idempotency guards can duplicate side effects\",\n      \"body\": \"A brand-new 203-line retry module was added, and glm-client.mjs (155 lines changed) was modified in the same release. If the client's API calls (job submission, status checks) are retried without idempotency keys or request deduplication, transient failures will produce duplicate jobs or duplicate charges against the BigModel API. Retry amplification is one of the most common sources of production incidents in API clients.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Verify that every call site wrapped by retry.mjs is either read-only (GET/status) or protected by an idempotency mechanism (idempotency key, dedup by request hash, or check-before-create). Document which call sites are safe to retry and which are not.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"New bigmodel-errors.mjs dispatch — misclassification can silently swallow errors or trigger wrong recovery\",\n      \"body\": \"A 168-line error classification/dispatch module was introduced alongside retry logic. If the error classifier incorrectly maps a non-retryable error (e.g., auth failure, quota exceeded, invalid request) as retryable, the system will burn through retry budgets and delay surfacing the real problem to the user. Conversely, classifying a transient error as permanent loses work unnecessarily. Error taxonomy for external APIs is notoriously brittle across API version changes.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.5,\n      \"recommendation\": \"Review the error classification logic against the BigModel API documentation. Ensure every branch logs the raw error before classification so misclassifications are observable in production. Add tests for edge cases: unknown error codes, changed error shapes, and network timeouts.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"state.mjs mutation amid job-tracking changes — risk of job-state corruption or loss\",\n      \"body\": \"scripts/lib/state.mjs (32 lines changed) and scripts/lib/tracked-jobs.mjs (78 lines changed) were both modified. State files are the source of truth for in-progress jobs. If the state serialization format changed without a migration path, existing v0.4.0–v0.4.5 state files will either fail to parse (crash) or deserialize with missing fields (silent data loss). No migration script is visible in the diff.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.45,\n      \"recommendation\": \"Compare the state file schema between v0.4.0 and v0.4.6. If any field names, types, or structure changed, add a migration shim or version field. Test deserialization of a v0.4.0-era state file against the v0.4.6 code.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `grep -r 'process\\\\.mjs' scripts/` to confirm no surviving imports reference the deleted module.\",\n    \"Read retry.mjs and identify every call site — confirm each is safe to retry or has idempotency protection.\",\n    \"Read bigmodel-errors.mjs error taxonomy and cross-reference against BigModel API error documentation for completeness.\",\n    \"Compare state.mjs schema between v0.4.0 and HEAD — if format changed, write and test a migration path.\",\n    \"Run the full test suite (`tests/*.test.mjs`) against the current HEAD to establish baseline pass/fail before the sweep.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T19:37:14.709Z"
+}

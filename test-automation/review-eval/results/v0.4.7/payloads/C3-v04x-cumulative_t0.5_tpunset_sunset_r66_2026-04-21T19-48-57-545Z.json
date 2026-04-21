@@ -1,0 +1,79 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 66
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 28914,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces significant new infrastructure (retry logic, BigModel error dispatch, job tracking, state management) but the repository context alone reveals potential issues around idempotency, race conditions in state files, and error-path completeness. Several core modules (retry.mjs, state.mjs, glm-client.mjs, tracked-jobs.mjs) have interdependent state that could silently corrupt or lose job data under concurrent or partially-failed operations. I could not fully confirm severity without reading actual source lines, but the surface area warrants attention before shipping.",
+    "findings": [
+      {
+        "severity": "medium",
+        "title": "retry.mjs and glm-client.mjs interaction may mask persistent failures",
+        "body": "The diff adds a new retry.mjs (203 lines) and bigmodel-errors.mjs (168 lines) alongside changes to glm-client.mjs (155 lines changed). Without visibility into whether retries correctly distinguish transient vs permanent errors, there is a risk that permanent failures (e.g., invalid API key, permission denied) are retried silently, consuming rate limit budget and delaying user-visible error reporting. The BigModel error dispatch module may classify errors incorrectly if upstream API response formats change.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.55,
+        "recommendation": "Verify that retry.mjs has a maximum retry budget, classifies HTTP 401/403/422 as non-retryable, and surfaces the terminal error to the caller. Add a test case for a permanent error that confirms zero retries are attempted."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs and tracked-jobs.mjs concurrent access without locking",
+        "body": "state.mjs (32 lines changed) and tracked-jobs.mjs (78 lines changed) manage persistent state for jobs. If two invocations of the companion script run concurrently (e.g., two terminal sessions), both may read-modify-write the same state file, causing lost updates or corrupted JSON. The diff stat shows no locking mechanism or atomic file operations in fs.mjs (44 lines changed).",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.5,
+        "recommendation": "Use atomic file writes (write to temp file, then rename) in state.mjs. Consider file-locking (e.g., proper-lockfile or flock) if concurrent access is expected. Add a test for concurrent read-modify-write."
+      },
+      {
+        "severity": "low",
+        "title": "process.mjs deleted but may have dependents",
+        "body": "scripts/lib/process.mjs (67 lines) is entirely deleted in this diff. If any other script or test imports from this module, it will cause a runtime crash at import time rather than at call time, making the failure silent until the code path is exercised.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.4,
+        "recommendation": "Grep the entire codebase for imports of process.mjs and verify all references are removed or redirected. The check-imports.mjs script may catch this but only if run."
+      },
+      {
+        "severity": "medium",
+        "title": "Missing unit tests for glm-client.mjs changes",
+        "body": "glm-client.mjs has 155 lines changed and is the primary API interaction module. The test directory contains no glm-client.test.mjs file. The retry.test.mjs (352 lines) tests the retry module in isolation but there is no integration test verifying that glm-client correctly uses retry with real error classifications from bigmodel-errors.mjs. This leaves the critical path from error→classification→retry→client untested as a whole.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.6,
+        "recommendation": "Add an integration or unit test for glm-client.mjs that exercises retry behavior with mocked API responses, covering at least: transient error with eventual success, permanent error with no retry, and retry exhaustion."
+      }
+    ],
+    "next_steps": [
+      "Inspect retry.mjs to confirm permanent errors (401, 403, 422) are not retried and that a retry budget exists",
+      "Verify state.mjs uses atomic writes and check if concurrent job submission is a realistic scenario",
+      "Confirm all imports of deleted process.mjs are removed",
+      "Add integration test covering glm-client + retry + bigmodel-errors interaction"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 diff introduces significant new infrastructure (retry logic, BigModel error dispatch, job tracking, state management) but the repository context alone reveals potential issues around idempotency, race conditions in state files, and error-path completeness. Several core modules (retry.mjs, state.mjs, glm-client.mjs, tracked-jobs.mjs) have interdependent state that could silently corrupt or lose job data under concurrent or partially-failed operations. I could not fully confirm severity without reading actual source lines, but the surface area warrants attention before shipping.\",\"findings\":[{\"severity\":\"medium\",\"title\":\"retry.mjs and glm-client.mjs interaction may mask persistent failures\",\"body\":\"The diff adds a new retry.mjs (203 lines) and bigmodel-errors.mjs (168 lines) alongside changes to glm-client.mjs (155 lines changed). Without visibility into whether retries correctly distinguish transient vs permanent errors, there is a risk that permanent failures (e.g., invalid API key, permission denied) are retried silently, consuming rate limit budget and delaying user-visible error reporting. The BigModel error dispatch module may classify errors incorrectly if upstream API response formats change.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.55,\"recommendation\":\"Verify that retry.mjs has a maximum retry budget, classifies HTTP 401/403/422 as non-retryable, and surfaces the terminal error to the caller. Add a test case for a permanent error that confirms zero retries are attempted.\"},{\"severity\":\"medium\",\"title\":\"state.mjs and tracked-jobs.mjs concurrent access without locking\",\"body\":\"state.mjs (32 lines changed) and tracked-jobs.mjs (78 lines changed) manage persistent state for jobs. If two invocations of the companion script run concurrently (e.g., two terminal sessions), both may read-modify-write the same state file, causing lost updates or corrupted JSON. The diff stat shows no locking mechanism or atomic file operations in fs.mjs (44 lines changed).\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.5,\"recommendation\":\"Use atomic file writes (write to temp file, then rename) in state.mjs. Consider file-locking (e.g., proper-lockfile or flock) if concurrent access is expected. Add a test for concurrent read-modify-write.\"},{\"severity\":\"low\",\"title\":\"process.mjs deleted but may have dependents\",\"body\":\"scripts/lib/process.mjs (67 lines) is entirely deleted in this diff. If any other script or test imports from this module, it will cause a runtime crash at import time rather than at call time, making the failure silent until the code path is exercised.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":67,\"confidence\":0.4,\"recommendation\":\"Grep the entire codebase for imports of process.mjs and verify all references are removed or redirected. The check-imports.mjs script may catch this but only if run.\"},{\"severity\":\"medium\",\"title\":\"Missing unit tests for glm-client.mjs changes\",\"body\":\"glm-client.mjs has 155 lines changed and is the primary API interaction module. The test directory contains no glm-client.test.mjs file. The retry.test.mjs (352 lines) tests the retry module in isolation but there is no integration test verifying that glm-client correctly uses retry with real error classifications from bigmodel-errors.mjs. This leaves the critical path from error→classification→retry→client untested as a whole.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.6,\"recommendation\":\"Add an integration or unit test for glm-client.mjs that exercises retry behavior with mocked API responses, covering at least: transient error with eventual success, permanent error with no retry, and retry exhaustion.\"}],\"next_steps\":[\"Inspect retry.mjs to confirm permanent errors (401, 403, 422) are not retried and that a retry budget exists\",\"Verify state.mjs uses atomic writes and check if concurrent job submission is a realistic scenario\",\"Confirm all imports of deleted process.mjs are removed\",\"Add integration test covering glm-client + retry + bigmodel-errors interaction\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T19:48:57.575Z"
+}

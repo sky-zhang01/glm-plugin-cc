@@ -1,0 +1,28 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 8
+  },
+  "metrics": {
+    "schema_compliance": 0,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 17097,
+    "error_code": "UPSTREAM_NETWORK_ERROR"
+  },
+  "parsed": null,
+  "rawOutputHead": "",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "UPSTREAM_NETWORK_ERROR",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T18:27:22.852Z"
+}

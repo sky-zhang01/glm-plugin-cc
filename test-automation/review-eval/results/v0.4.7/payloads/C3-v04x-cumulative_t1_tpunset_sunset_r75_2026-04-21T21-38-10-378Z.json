@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 75
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 48469,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.4→v0.4.6 cumulative diff introduces retry/backoff, BigModel error dispatch, background job execution, and tracked-jobs state management. Several of these intersect in ways that can cause silent data loss or hung state under concurrent/retried operations. The most concerning: tracked-jobs state mutations lack atomicity guarantees, retry logic could double-execute non-idempotent API calls, and the removed process.mjs suggests a potentially incomplete migration with callers that may still reference dead exports.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry on non-idempotent BigModel API calls can cause duplicate submissions",
+        "body": "scripts/lib/retry.mjs (+203 lines) provides generic retry-with-backoff. scripts/lib/glm-client.mjs (~155 lines changed) integrates retry for BigModel API calls. If the API call is a job submission (e.g., starting a review or analysis), and the server receives the request but the response is lost or returns a retryable error code, the retry will submit a second identical job. The diff shows no idempotency key, request deduplication, or 'check if already submitted' guard before retrying. For a plugin that submits review/analysis jobs, this means a transient network blip causes duplicate work, wasted quota, or conflicting results that silently overwrite each other.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Add idempotency keys to all mutating API calls in glm-client.mjs, or gate retries on a 'query current job status' call first. At minimum, document which operations are safe to retry and which are not, and only apply retry to safe ones."
+      },
+      {
+        "severity": "high",
+        "title": "Tracked-jobs state file can be corrupted by concurrent writes",
+        "body": "scripts/lib/tracked-jobs.mjs (+78 lines) manages job state that appears to be persisted (given state.mjs integration). If two glm-companion.mjs invocations run concurrently (e.g., user triggers review and status in quick succession, or a background job completes while another is being submitted), both could read-modify-write the same state file. The diff stat shows fs.mjs changes (+44 lines) but no file-locking or atomic write primitive. A lost-race on the state file means a tracked job silently disappears, which is data loss of operational state.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.68,
+        "recommendation": "Implement atomic state file writes (write-to-temp + rename). Add a lock or serialize access to the tracked-jobs state. Consider adding a corruption-detection/recovery path so a partially-written file doesn't lose all job tracking state."
+      },
+      {
+        "severity": "medium",
+        "title": "process.mjs deleted but caller migration may be incomplete",
+        "body": "scripts/lib/process.mjs shows -67 lines (complete removal). This module likely exported process management utilities used by glm-companion.mjs, job-control.mjs, or other modules. The diff shows changes to glm-companion.mjs (+139 lines changed) and job-control.mjs (+20 lines changed), but the review.md command, rescue.md command, and session-lifecycle-hook.mjs may also have imported from process.mjs. If any dynamic import or eval-based path still references process.mjs, it will throw at runtime only when that code path is exercised — a silent-then-loud failure.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.55,
+        "recommendation": "Grep the entire codebase (including .md command files that may embed script references) for any remaining import of process.mjs. Add a CI check that validates all imports resolve (the existing check-imports.mjs may cover this, but verify it catches dynamic imports)."
+      },
+      {
+        "severity": "medium",
+        "title": "BigModel error dispatch may swallow unexpected error shapes silently",
+        "body": "scripts/lib/bigmodel-errors.mjs (+168 lines) classifies and dispatches BigModel API errors. The adversarial concern: if the API returns an error with an unexpected shape (new error code, changed response format, or an error that doesn't match any classifier), the dispatch may fall through to a default that either rethrows with insufficient context or silently returns a generic 'unknown error' that the retry layer then retries indefinitely (or not at all). Combined with the retry logic, a new error type could cause either infinite retry loops or silent job drops.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.6,
+        "recommendation": "Ensure the error classifier's default/fallback case logs the full raw error body and propagates enough context for debugging. Add a circuit breaker or max-retry-cap that applies even to 'unknown' error types. Add a test case for a completely unexpected error shape."
+      },
+      {
+        "severity": "medium",
+        "title": "Background execution mode (--background/--wait) lacks crash recovery for in-flight jobs",
+        "body": "The review command now supports --wait/--background execution modes (from d573807). If the process is killed (SIGKILL, OOM, system crash) while a background job is in-flight, the tracked-jobs state may record the job as 'running' with no way to resume or clean up. On next invocation, the stale 'running' job could block new submissions or be silently ignored, depending on how the state is queried. No watchdog or TTL mechanism is visible in the diff stat.",
+        "file": "scripts/lib/job-control.mjs",
+        "line_start": 1,
+        "line_end": 20,
+        "confidence": 0.58,
+        "recommendation": "Add a TTL or heartbeat mechanism to tracked jobs. On startup or status check, identify jobs that have been 'running' beyond a reasonable timeout and either mark them as lost/failed or attempt recovery. Document the stale-job cleanup procedure."
+      }
+    ],
+    "next_steps": [
+      "Inspect retry.mjs and glm-client.mjs in full to confirm whether job-submission endpoints are retried without idempotency guards — this is the highest-risk finding.",
+      "Verify tracked-jobs.mjs state persistence mechanism for atomicity; trace the full read-modify-write path through fs.mjs.",
+      "Search entire repo for any remaining references to the deleted process.mjs (including in .md files and dynamic imports).",
+      "Run the existing test suite (tests/retry.test.mjs, tests/bigmodel-errors.test.mjs) and verify coverage of unknown error shapes and concurrent state mutation.",
+      "Add a stale-job cleanup test: start a background job, simulate process death, verify the next invocation handles the orphaned state correctly."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.4→v0.4.6 cumulative diff introduces retry/backoff, BigModel error dispatch, background job execution, and tracked-jobs state management. Several of these intersect in ways that can cause silent data loss or hung state under concurrent/retried operations. The most concerning: tracked-jobs state mutations lack atomicity guarantees, retry logic could double-execute non-idempotent API calls, and the removed process.mjs suggests a potentially incomplete migration with callers that may still reference dead exports.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Retry on non-idempotent BigModel API calls can cause duplicate submissions\",\n      \"body\": \"scripts/lib/retry.mjs (+203 lines) provides generic retry-with-backoff. scripts/lib/glm-client.mjs (~155 lines changed) integrates retry for BigModel API calls. If the API call is a job submission (e.g., starting a review or analysis), and the server receives the request but the response is lost or returns a retryable error code, the retry will submit a second identical job. The diff shows no idempotency key, request deduplication, or 'check if already submitted' guard before retrying. For a plugin that submits review/analysis jobs, this means a transient network blip causes duplicate work, wasted quota, or conflicting results that silently overwrite each other.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Add idempotency keys to all mutating API calls in glm-client.mjs, or gate retries on a 'query current job status' call first. At minimum, document which operations are safe to retry and which are not, and only apply retry to safe ones.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"Tracked-jobs state file can be corrupted by concurrent writes\",\n      \"body\": \"scripts/lib/tracked-jobs.mjs (+78 lines) manages job state that appears to be persisted (given state.mjs integration). If two glm-companion.mjs invocations run concurrently (e.g., user triggers review and status in quick succession, or a background job completes while another is being submitted), both could read-modify-write the same state file. The diff stat shows fs.mjs changes (+44 lines) but no file-locking or atomic write primitive. A lost-race on the state file means a tracked job silently disappears, which is data loss of operational state.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Implement atomic state file writes (write-to-temp + rename). Add a lock or serialize access to the tracked-jobs state. Consider adding a corruption-detection/recovery path so a partially-written file doesn't lose all job tracking state.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"process.mjs deleted but caller migration may be incomplete\",\n      \"body\": \"scripts/lib/process.mjs shows -67 lines (complete removal). This module likely exported process management utilities used by glm-companion.mjs, job-control.mjs, or other modules. The diff shows changes to glm-companion.mjs (+139 lines changed) and job-control.mjs (+20 lines changed), but the review.md command, rescue.md command, and session-lifecycle-hook.mjs may also have imported from process.mjs. If any dynamic import or eval-based path still references process.mjs, it will throw at runtime only when that code path is exercised — a silent-then-loud failure.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Grep the entire codebase (including .md command files that may embed script references) for any remaining import of process.mjs. Add a CI check that validates all imports resolve (the existing check-imports.mjs may cover this, but verify it catches dynamic imports).\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"BigModel error dispatch may swallow unexpected error shapes silently\",\n      \"body\": \"scripts/lib/bigmodel-errors.mjs (+168 lines) classifies and dispatches BigModel API errors. The adversarial concern: if the API returns an error with an unexpected shape (new error code, changed response format, or an error that doesn't match any classifier), the dispatch may fall through to a default that either rethrows with insufficient context or silently returns a generic 'unknown error' that the retry layer then retries indefinitely (or not at all). Combined with the retry logic, a new error type could cause either infinite retry loops or silent job drops.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Ensure the error classifier's default/fallback case logs the full raw error body and propagates enough context for debugging. Add a circuit breaker or max-retry-cap that applies even to 'unknown' error types. Add a test case for a completely unexpected error shape.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Background execution mode (--background/--wait) lacks crash recovery for in-flight jobs\",\n      \"body\": \"The review command now supports --wait/--background execution modes (from d573807). If the process is killed (SIGKILL, OOM, system crash) while a background job is in-flight, the tracked-jobs state may record the job as 'running' with no way to resume or clean up. On next invocation, the stale 'running' job could block new submissions or be silently ignored, depending on how the state is queried. No watchdog or TTL mechanism is visible in the diff stat.\",\n      \"file\": \"scripts/lib/job-control.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 20,\n      \"confidence\": 0.58,\n      \"recommendation\": \"Add a TTL or heartbeat mechanism to tracked jobs. On startup or status check, identify jobs that have been 'running' beyond a reasonable timeout and either mark them as lost/failed or attempt recovery. Document the stale-job cleanup procedure.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect retry.mjs and glm-client.mjs in full to confirm whether job-submission endpoints are retried without idempotency guards — this is the highest-risk finding.\",\n    \"Verify tracked-jobs.mjs state persistence mechanism for atomicity; trace the full read-modify-write path through fs.mjs.\",\n    \"Search entire repo for any remaining references to the deleted process.mjs (including in .md files and dynamic imports).\",\n    \"Run the existing test suite (tests/retry.test.mjs, tests/bigmodel-errors.test.mjs) and verify coverage of unknown error shapes and concurrent state mutation.\",\n    \"Add a stale-job cleanup test: start a background job, simulate process death, verify the next invocation handles the orphaned state correctly.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T21:38:10.411Z"
+}

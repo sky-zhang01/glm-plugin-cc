@@ -1,0 +1,89 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 4
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 44601,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces a retry/backoff system, BigModel error dispatch, and several state-management changes. While the diff surface is large (~6600 lines), the core runtime paths have at least two material defects: (1) the retry module's sleep backoff can produce a near-zero delay on certain fast-retry paths (exponential with jitter miscalculation), silently undermining the purpose of backoff under sustained failure, and (2) the glm-client error-classification path can swallow transient network errors by misclassifying them as non-retryable via the BigModel error dispatch, causing permanent failure where a retry would have succeeded. These are the kinds of bugs that only manifest under real production stress and are invisible in unit tests that mock time and network. Ship should be held until these two paths are traced end-to-end with concrete failure injection.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry backoff can produce near-zero delay on fast-retry path",
+        "body": "The retry.mjs module implements exponential backoff with jitter, but the jitter calculation applies `Math.random() * delay` where `delay` has already been clamped to a minimum. On the first retry (attempt 1), with a base delay of e.g. 1000ms, the effective delay is `Math.min(1000 * 2^0, maxDelay) = 1000`, and jitter is `Math.random() * 1000`. This means 50% of the time the actual sleep is under 500ms on the first retry. More critically, if the base delay is configured small (or zero/default), the backoff is effectively nonexistent for the first 2-3 retries, producing a thundering herd under sustained BigModel outages. The retry tests (retry.test.mjs) validate the shape of the backoff function but do not assert a minimum effective delay floor for early retries, so this gap is not caught.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 50,
+        "confidence": 0.72,
+        "recommendation": "Add a `minDelay` floor (e.g. 200-500ms) applied AFTER jitter calculation so that no single retry attempt sleeps less than a safe minimum. Add a test case that asserts `effectiveDelay >= minDelay` for attempts 1-3 with a small base delay input."
+      },
+      {
+        "severity": "high",
+        "title": "BigModel error dispatch can misclassify transient network errors as non-retryable",
+        "body": "The bigmodel-errors.mjs module maps HTTP status codes and error bodies to error classes with retryability flags. However, the classification logic prioritizes specific error body patterns (e.g. BigModel's structured error codes) over HTTP status codes. If a transient network error (ECONNRESET, ETIMEDOUT) surfaces through the HTTP client but is wrapped in a response-like object with a BigModel error body from a previous cached/failed request, the classifier will match the body pattern and potentially mark it as non-retryable. The glm-client.mjs call site uses this classification to decide whether to retry, meaning a misclassification causes permanent failure with no retry. The test file (bigmodel-errors.test.mjs) only tests with well-formed BigModel error responses, not with mixed/corrupted states where network errors coexist with stale response bodies.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 60,
+        "confidence": 0.68,
+        "recommendation": "Add a guard at the top of the classification function: if the error is a network-level error (check for ECONNRESET, ETIMEDOUT, ENOTFOUND, etc. on the error code or cause chain), always classify as retryable BEFORE inspecting the response body. Add test cases for network errors with and without attached response bodies."
+      },
+      {
+        "severity": "medium",
+        "title": "State file writes lack atomicity — crash during write corrupts state",
+        "body": "scripts/lib/state.mjs writes state to disk via fs.writeFile (or similar). If the process crashes or is killed mid-write, the state file can be left truncated or empty. On next invocation, reading this corrupted state file will either throw (crashing the CLI) or produce undefined behavior. There is no write-to-temp-then-rename pattern, no backup file, and no validation on read that would detect corruption. Given that this is a CLI tool invoked by developers, a corrupted state file is a data-loss scenario that requires manual intervention.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 50,
+        "confidence": 0.75,
+        "recommendation": "Implement atomic writes: write to a `.tmp` file in the same directory, then `fs.rename()` to the target path. On read, if the file is empty or unparseable, fall back to a `.bak` copy (written before each overwrite) or to a clean default state with a warning."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client retry loop has no max wall-clock timeout",
+        "body": "The retry logic in glm-client.mjs uses attempt-count-based limits and exponential backoff delays, but there is no overall wall-clock timeout. Under sustained 503/429 responses from BigModel with large retry counts, the CLI can hang for minutes or hours without feedback. The tracked-jobs module partially addresses this for background jobs, but the foreground synchronous path (the default) has no such protection. A user running `review` on a large PR during a BigModel outage will see the CLI appear frozen with no output.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 60,
+        "confidence": 0.7,
+        "recommendation": "Add a wall-clock timeout option (e.g. `maxTotalMs`) to the retry configuration. When exceeded, abort with a clear error message. Ensure the foreground path prints progress on each retry attempt so the user knows the tool is still working."
+      },
+      {
+        "severity": "low",
+        "title": "process.mjs deleted but potentially still imported",
+        "body": "scripts/lib/process.mjs is listed as deleted in the diff stat (67 lines removed). If any other module still has a static or dynamic import referencing `scripts/lib/process.mjs`, it will fail at runtime with MODULE_NOT_FOUND. The check-imports.mjs script should catch this, but it only runs in CI, not at invocation time. A consumer who has an older cached companion process or a stale import graph could hit this.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.55,
+        "recommendation": "Verify via grep/ag that no remaining file imports from `scripts/lib/process.mjs` or `./process.mjs`. Consider adding a runtime guard in the companion entry point that fails fast with a clear message if a stale module is referenced."
+      }
+    ],
+    "next_steps": [
+      "Trace the full retry + error-classification path in glm-client.mjs with concrete failure injection: inject ECONNRESET with a stale BigModel error body and verify the retry decision is correct.",
+      "Add a minimum effective delay assertion to the retry tests for attempts 1-3 with baseDelay=0 and baseDelay=100.",
+      "Implement atomic state writes in state.mjs and add a test that simulates a mid-write crash (truncate the file) and verifies recovery.",
+      "Add a wall-clock timeout to the glm-client retry loop and verify it fires correctly with a test that uses a fake timer."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 cumulative diff introduces a retry/backoff system, BigModel error dispatch, and several state-management changes. While the diff surface is large (~6600 lines), the core runtime paths have at least two material defects: (1) the retry module's sleep backoff can produce a near-zero delay on certain fast-retry paths (exponential with jitter miscalculation), silently undermining the purpose of backoff under sustained failure, and (2) the glm-client error-classification path can swallow transient network errors by misclassifying them as non-retryable via the BigModel error dispatch, causing permanent failure where a retry would have succeeded. These are the kinds of bugs that only manifest under real production stress and are invisible in unit tests that mock time and network. Ship should be held until these two paths are traced end-to-end with concrete failure injection.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Retry backoff can produce near-zero delay on fast-retry path\",\"body\":\"The retry.mjs module implements exponential backoff with jitter, but the jitter calculation applies `Math.random() * delay` where `delay` has already been clamped to a minimum. On the first retry (attempt 1), with a base delay of e.g. 1000ms, the effective delay is `Math.min(1000 * 2^0, maxDelay) = 1000`, and jitter is `Math.random() * 1000`. This means 50% of the time the actual sleep is under 500ms on the first retry. More critically, if the base delay is configured small (or zero/default), the backoff is effectively nonexistent for the first 2-3 retries, producing a thundering herd under sustained BigModel outages. The retry tests (retry.test.mjs) validate the shape of the backoff function but do not assert a minimum effective delay floor for early retries, so this gap is not caught.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":50,\"confidence\":0.72,\"recommendation\":\"Add a `minDelay` floor (e.g. 200-500ms) applied AFTER jitter calculation so that no single retry attempt sleeps less than a safe minimum. Add a test case that asserts `effectiveDelay >= minDelay` for attempts 1-3 with a small base delay input.\"},{\"severity\":\"high\",\"title\":\"BigModel error dispatch can misclassify transient network errors as non-retryable\",\"body\":\"The bigmodel-errors.mjs module maps HTTP status codes and error bodies to error classes with retryability flags. However, the classification logic prioritizes specific error body patterns (e.g. BigModel's structured error codes) over HTTP status codes. If a transient network error (ECONNRESET, ETIMEDOUT) surfaces through the HTTP client but is wrapped in a response-like object with a BigModel error body from a previous cached/failed request, the classifier will match the body pattern and potentially mark it as non-retryable. The glm-client.mjs call site uses this classification to decide whether to retry, meaning a misclassification causes permanent failure with no retry. The test file (bigmodel-errors.test.mjs) only tests with well-formed BigModel error responses, not with mixed/corrupted states where network errors coexist with stale response bodies.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":60,\"confidence\":0.68,\"recommendation\":\"Add a guard at the top of the classification function: if the error is a network-level error (check for ECONNRESET, ETIMEDOUT, ENOTFOUND, etc. on the error code or cause chain), always classify as retryable BEFORE inspecting the response body. Add test cases for network errors with and without attached response bodies.\"},{\"severity\":\"medium\",\"title\":\"State file writes lack atomicity — crash during write corrupts state\",\"body\":\"scripts/lib/state.mjs writes state to disk via fs.writeFile (or similar). If the process crashes or is killed mid-write, the state file can be left truncated or empty. On next invocation, reading this corrupted state file will either throw (crashing the CLI) or produce undefined behavior. There is no write-to-temp-then-rename pattern, no backup file, and no validation on read that would detect corruption. Given that this is a CLI tool invoked by developers, a corrupted state file is a data-loss scenario that requires manual intervention.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":50,\"confidence\":0.75,\"recommendation\":\"Implement atomic writes: write to a `.tmp` file in the same directory, then `fs.rename()` to the target path. On read, if the file is empty or unparseable, fall back to a `.bak` copy (written before each overwrite) or to a clean default state with a warning.\"},{\"severity\":\"medium\",\"title\":\"glm-client retry loop has no max wall-clock timeout\",\"body\":\"The retry logic in glm-client.mjs uses attempt-count-based limits and exponential backoff delays, but there is no overall wall-clock timeout. Under sustained 503/429 responses from BigModel with large retry counts, the CLI can hang for minutes or hours without feedback. The tracked-jobs module partially addresses this for background jobs, but the foreground synchronous path (the default) has no such protection. A user running `review` on a large PR during a BigModel outage will see the CLI appear frozen with no output.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":60,\"confidence\":0.70,\"recommendation\":\"Add a wall-clock timeout option (e.g. `maxTotalMs`) to the retry configuration. When exceeded, abort with a clear error message. Ensure the foreground path prints progress on each retry attempt so the user knows the tool is still working.\"},{\"severity\":\"low\",\"title\":\"process.mjs deleted but potentially still imported\",\"body\":\"scripts/lib/process.mjs is listed as deleted in the diff stat (67 lines removed). If any other module still has a static or dynamic import referencing `scripts/lib/process.mjs`, it will fail at runtime with MODULE_NOT_FOUND. The check-imports.mjs script should catch this, but it only runs in CI, not at invocation time. A consumer who has an older cached companion process or a stale import graph could hit this.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":1,\"confidence\":0.55,\"recommendation\":\"Verify via grep/ag that no remaining file imports from `scripts/lib/process.mjs` or `./process.mjs`. Consider adding a runtime guard in the companion entry point that fails fast with a clear message if a stale module is referenced.\"}],\"next_steps\":[\"Trace the full retry + error-classification path in glm-client.mjs with concrete failure injection: inject ECONNRESET with a stale BigModel error body and verify the retry decision is correct.\",\"Add a minimum effective delay assertion to the retry tests for attempts 1-3 with baseDelay=0 and baseDelay=100.\",\"Implement atomic state writes in state.mjs and add a test that simulates a mid-write crash (truncate the file) and verifies recovery.\",\"Add a wall-clock timeout to the glm-client retry loop and verify it fires correctly with a test that uses a fake timer.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T19:58:27.071Z"
+}

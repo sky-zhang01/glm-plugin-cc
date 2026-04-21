@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 18
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 96273,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "Cumulative v0.4.0→v0.4.6 diff carries high integration risk: a core module (process.mjs) was deleted outright, the primary API client (glm-client.mjs) was heavily modified without a dedicated test file, and a new retry+error-dispatch subsystem was bolted on without visible end-to-end integration tests. Any one of these is defensible in isolation; combined in a single cumulative sweep they create compounding failure surface. Recommend blocking until client-level and cross-module integration gaps are closed.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Deleted scripts/lib/process.mjs (67 lines) — orphaned import risk unverified",
+        "body": "The diff stat shows scripts/lib/process.mjs was completely removed (67 lines, 0 added). scripts/check-imports.mjs was modified by 5 lines in the same sweep, suggesting awareness, but static import checkers routinely miss dynamic import() with template literals, conditional requires, or references in untested branches. A runtime MODULE_NOT_FOUND on any surviving import path is a silent, unrecoverable crash that won't surface until the specific code path executes in production. No test file validates that no code path references the deleted module.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.72,
+        "recommendation": "Run `grep -r 'process\\.mjs\\|from.*process' scripts/ commands/` to confirm zero surviving references. Add a CI gate that does a dry-run module resolution (e.g., `node --check` or dynamic import probe) across every entry point to catch stale imports before merge."
+      },
+      {
+        "severity": "high",
+        "title": "scripts/lib/glm-client.mjs heavily modified with no dedicated unit test file",
+        "body": "glm-client.mjs shows 155 lines of net changes — the largest delta in any lib module — yet no tests/glm-client.test.mjs file appears in the diff. Every other lib module of comparable importance (retry.mjs, bigmodel-errors.mjs, fs.mjs, state.mjs, args.mjs, preset-config.mjs, render.mjs) received its own dedicated test file in the same sweep. The client is the single critical path for all API communication; a regression here directly affects every user-facing operation. tests/result-propagation.test.mjs (69 lines) may exercise some client paths but is too small to cover 155 lines of client changes.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.78,
+        "recommendation": "Add tests/glm-client.test.mjs covering: request construction, error mapping via bigmodel-errors.mjs, retry integration via retry.mjs, timeout handling, and response validation. At minimum, mock-based unit tests for every exported function before shipping."
+      },
+      {
+        "severity": "medium",
+        "title": "New retry + BigModel error dispatch + client chain lacks integration test coverage",
+        "body": "Three new/modified modules form a tight error-handling chain: retry.mjs (203 lines, new), bigmodel-errors.mjs (168 lines, new), and glm-client.mjs (155 lines, modified). Each has unit tests in isolation (retry.test.mjs at 352 lines, bigmodel-errors.test.mjs at 189 lines), but no test file exercises the end-to-end path: client call → BigModel error → error dispatch → retry decision → backoff → re-invocation. This is exactly the kind of cross-module interaction where integration bugs hide — especially around retryable vs. non-retryable error classification and state consistency across retries.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.74,
+        "recommendation": "Add an integration test that simulates a flaky BigModel API: first N calls return retryable errors, call N+1 succeeds. Verify correct retry count, backoff timing, error classification propagation, and that no state is corrupted across the retry boundary. This should cover the full glm-client → bigmodel-errors → retry round-trip."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs and job-control.mjs modified without dedicated test coverage",
+        "body": "tracked-jobs.mjs (78 lines changed) and job-control.mjs (20 lines changed) handle job lifecycle state — a domain where partial failures and race conditions are most dangerous. Neither has a dedicated test file in the diff. tests/job-render.test.mjs (144 lines) may exercise render paths but job-control state transitions under concurrent or failure scenarios appear untested. Job tracking state corruption could lead to lost jobs, stuck queues, or duplicate execution.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.65,
+        "recommendation": "Add tests for tracked-jobs and job-control covering: job creation, state transitions (pending → running → completed/failed), concurrent job limits, and crash-recovery (can the system recover consistent state after a mid-transition failure)."
+      }
+    ],
+    "next_steps": [
+      "Run `grep -rn 'process\\.mjs\\|from.*[\"'\\'''].*/process[\"'\\''']' scripts/ commands/` from repo root and confirm zero results — attach output as evidence.",
+      "Create tests/glm-client.test.mjs with mocked transport covering request/response/error/retry paths; require passing before v0.4.7.",
+      "Add one integration test exercising the full glm-client → bigmodel-errors → retry chain with simulated transient failures.",
+      "Verify tests/job-render.test.mjs actually exercises tracked-jobs.mjs and job-control.mjs state transitions; if not, add dedicated tests.",
+      "Run the full test suite (`npm test` or equivalent) and confirm zero failures on a clean checkout before tagging v0.4.7."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"Cumulative v0.4.0→v0.4.6 diff carries high integration risk: a core module (process.mjs) was deleted outright, the primary API client (glm-client.mjs) was heavily modified without a dedicated test file, and a new retry+error-dispatch subsystem was bolted on without visible end-to-end integration tests. Any one of these is defensible in isolation; combined in a single cumulative sweep they create compounding failure surface. Recommend blocking until client-level and cross-module integration gaps are closed.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Deleted scripts/lib/process.mjs (67 lines) — orphaned import risk unverified\",\n      \"body\": \"The diff stat shows scripts/lib/process.mjs was completely removed (67 lines, 0 added). scripts/check-imports.mjs was modified by 5 lines in the same sweep, suggesting awareness, but static import checkers routinely miss dynamic import() with template literals, conditional requires, or references in untested branches. A runtime MODULE_NOT_FOUND on any surviving import path is a silent, unrecoverable crash that won't surface until the specific code path executes in production. No test file validates that no code path references the deleted module.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Run `grep -r 'process\\\\.mjs\\\\|from.*process' scripts/ commands/` to confirm zero surviving references. Add a CI gate that does a dry-run module resolution (e.g., `node --check` or dynamic import probe) across every entry point to catch stale imports before merge.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"scripts/lib/glm-client.mjs heavily modified with no dedicated unit test file\",\n      \"body\": \"glm-client.mjs shows 155 lines of net changes — the largest delta in any lib module — yet no tests/glm-client.test.mjs file appears in the diff. Every other lib module of comparable importance (retry.mjs, bigmodel-errors.mjs, fs.mjs, state.mjs, args.mjs, preset-config.mjs, render.mjs) received its own dedicated test file in the same sweep. The client is the single critical path for all API communication; a regression here directly affects every user-facing operation. tests/result-propagation.test.mjs (69 lines) may exercise some client paths but is too small to cover 155 lines of client changes.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Add tests/glm-client.test.mjs covering: request construction, error mapping via bigmodel-errors.mjs, retry integration via retry.mjs, timeout handling, and response validation. At minimum, mock-based unit tests for every exported function before shipping.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"New retry + BigModel error dispatch + client chain lacks integration test coverage\",\n      \"body\": \"Three new/modified modules form a tight error-handling chain: retry.mjs (203 lines, new), bigmodel-errors.mjs (168 lines, new), and glm-client.mjs (155 lines, modified). Each has unit tests in isolation (retry.test.mjs at 352 lines, bigmodel-errors.test.mjs at 189 lines), but no test file exercises the end-to-end path: client call → BigModel error → error dispatch → retry decision → backoff → re-invocation. This is exactly the kind of cross-module interaction where integration bugs hide — especially around retryable vs. non-retryable error classification and state consistency across retries.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.74,\n      \"recommendation\": \"Add an integration test that simulates a flaky BigModel API: first N calls return retryable errors, call N+1 succeeds. Verify correct retry count, backoff timing, error classification propagation, and that no state is corrupted across the retry boundary. This should cover the full glm-client → bigmodel-errors → retry round-trip.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"tracked-jobs.mjs and job-control.mjs modified without dedicated test coverage\",\n      \"body\": \"tracked-jobs.mjs (78 lines changed) and job-control.mjs (20 lines changed) handle job lifecycle state — a domain where partial failures and race conditions are most dangerous. Neither has a dedicated test file in the diff. tests/job-render.test.mjs (144 lines) may exercise render paths but job-control state transitions under concurrent or failure scenarios appear untested. Job tracking state corruption could lead to lost jobs, stuck queues, or duplicate execution.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Add tests for tracked-jobs and job-control covering: job creation, state transitions (pending → running → completed/failed), concurrent job limits, and crash-recovery (can the system recover consistent state after a mid-transition failure).\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `grep -rn 'process\\\\.mjs\\\\|from.*[\\\"'\\\\'''].*/process[\\\"'\\\\''']' scripts/ commands/` from repo root and confirm zero results — attach output as evidence.\",\n    \"Create tests/glm-client.test.mjs with mocked transport covering request/response/error/retry paths; require passing before v0.4.7.\",\n    \"Add one integration test exercising the full glm-client → bigmodel-errors → retry chain with simulated transient failures.\",\n    \"Verify tests/job-render.test.mjs actually exercises tracked-jobs.mjs and job-control.mjs state transitions; if not, add dedicated tests.\",\n    \"Run the full test suite (`npm test` or equivalent) and confirm zero failures on a clean checkout before tagging v0.4.7.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T20:16:25.096Z"
+}

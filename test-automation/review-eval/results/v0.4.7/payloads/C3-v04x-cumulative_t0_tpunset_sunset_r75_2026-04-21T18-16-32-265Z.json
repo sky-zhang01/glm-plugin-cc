@@ -1,0 +1,91 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 75
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 48126,
+    "error_code": ""
+  },
+  "parsed": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces critical runtime components (retry.mjs, bigmodel-errors.mjs, tracked-jobs.mjs) with several failure-mode gaps: retry logic that can silently swallow errors or exceed reasonable timeouts, BigModel error dispatch that relies on fragile message-matching heuristics, and job-control state that can become stale or inconsistent on crash. The user focus on 'sampling-sweep run 75' suggests a cumulative/stress scenario where these gaps compound. Shipping without addressing the retry termination and error-masking risks could produce silent failures under sustained load.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry loop can mask fatal errors and exhaust callers silently",
+        "body": "scripts/lib/retry.mjs implements exponential backoff with jitter, but the retry predicate (shouldRetry) is based on string-matching against error messages. If an error object lacks a .message property or has an unexpected format (e.g., a network-level ECONNREFUSED wrapped in a system error), shouldRetry returns false and the error is immediately thrown—but the caller in glm-client.mjs may catch it and return an empty/null result rather than propagating. Under sustained sampling-sweep load (run 75+), transient network errors would either: (a) retry forever if classified as retryable, or (b) silently fail without retry if classification misses. There is no circuit-breaker or maximum-wall-clock-time cap visible—only maxAttempts. A long-running sweep could accumulate hours of retry delay without the caller knowing.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.78,
+        "recommendation": "Add a maximum total elapsed time cap (e.g., retryTimeoutMs) that aborts the retry loop regardless of attempt count. Ensure shouldRetry handles errors without .message gracefully (check error?.constructor?.name, error?.code). Add logging/metrics at each retry attempt so silent retries are observable. Verify glm-client.mjs propagates retry exhaustion errors rather than swallowing them into empty results."
+      },
+      {
+        "severity": "high",
+        "title": "BigModel error dispatch uses fragile heuristic matching that can misclassify errors",
+        "body": "scripts/lib/bigmodel-errors.mjs classifies API errors by matching substrings in error messages (e.g., 'rate limit', 'overloaded', 'context_length_exceeded'). This is inherently fragile: (1) upstream API providers can change error message text without notice, (2) non-English locale error messages would not match, (3) some error responses may use error codes rather than messages. A misclassification means either retrying a non-retryable error (wasting quota/time) or failing fast on a transient error (dropping valid requests). Under cumulative sweep conditions, a single misclassified error pattern would affect every subsequent request in the batch.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.82,
+        "recommendation": "Classify errors using structured fields first (HTTP status codes, error.code, error.type) before falling back to message matching. Add a default/unknown error category that logs the full error for later analysis rather than guessing. Add integration tests that verify classification against actual API error response fixtures."
+      },
+      {
+        "severity": "medium",
+        "title": "Tracked-jobs state can become stale/inconsistent after process crash",
+        "body": "scripts/lib/tracked-jobs.mjs manages job state in filesystem-based storage. If the process crashes mid-write (e.g., SIGKILL, OOM) or if two concurrent instances write simultaneously, the state file can be left in a partially-written or inconsistent state. There is no visible write atomicity (write-to-temp-then-rename) or file locking. Under sampling-sweep conditions with multiple rapid job submissions, a race between read-modify-write cycles could lose job records or corrupt the state file, leading to ghost jobs or lost job tracking.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.72,
+        "recommendation": "Use atomic file writes (write to temp file, then fs.rename) for state persistence. Add a file lock or optimistic concurrency check. Include a stale-job cleanup/recovery mechanism that detects jobs stuck in 'running' state beyond a reasonable timeout."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client result propagation may return falsy/empty on error, hiding failures from callers",
+        "body": "scripts/lib/glm-client.mjs was significantly modified (155 lines changed). The combination of retry logic + BigModel error dispatch means that when all retries are exhausted or an unexpected error occurs, the client may return an empty object, null, or a result without an error indicator. Callers that check result truthiness rather than result.success or result.error would treat a failure as a successful empty response. In a cumulative sweep, this would silently undercount or produce incomplete output without any visible error.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.75,
+        "recommendation": "Ensure glm-client always returns a structured result with an explicit success/error field on every code path. Audit all callers to verify they check for errors rather than just truthiness. Add a test for the 'all retries exhausted' path that verifies the returned result is not falsy."
+      },
+      {
+        "severity": "medium",
+        "title": "Missing tests for concurrent/reentrant retry scenarios",
+        "body": "tests/retry.test.mjs has 352 lines of tests, but the diff stat shows no tests for concurrent retry scenarios—multiple callers hitting retry simultaneously, or reentrant calls during backoff waits. Under sampling-sweep cumulative load, multiple parallel requests would all enter retry simultaneously, potentially overwhelming the downstream API when their backoff timers expire at similar times (thundering herd). The jitter helps but may be insufficient under high concurrency.",
+        "file": "tests/retry.test.mjs",
+        "line_start": 1,
+        "line_end": 352,
+        "confidence": 0.65,
+        "recommendation": "Add tests for concurrent retry scenarios verifying that jitter provides sufficient spacing. Consider adding per-client or global concurrency limiting for retry attempts. Document the expected behavior under concurrent load."
+      }
+    ],
+    "next_steps": [
+      "Inspect retry.mjs shouldRetry logic and add a wall-clock timeout cap",
+      "Audit bigmodel-errors.mjs to prioritize structured error codes over message matching",
+      "Verify glm-client.mjs error propagation on all failure paths—ensure no silent empty returns",
+      "Add atomic writes to tracked-jobs.mjs state persistence",
+      "Run the sampling-sweep under controlled conditions with intentional network errors to observe retry and error propagation behavior"
+    ]
+  },
+  "rawOutputHead": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 diff introduces critical runtime components (retry.mjs, bigmodel-errors.mjs, tracked-jobs.mjs) with several failure-mode gaps: retry logic that can silently swallow errors or exceed reasonable timeouts, BigModel error dispatch that relies on fragile message-matching heuristics, and job-control state that can become stale or inconsistent on crash. The user focus on 'sampling-sweep run 75' suggests a cumulative/stress scenario where these gaps compound. Shipping without addressing the retry termination and error-masking risks could produce silent failures under sustained load.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Retry loop can mask fatal errors and exhaust callers silently\",\"body\":\"scripts/lib/retry.mjs implements exponential backoff with jitter, but the retry predicate (shouldRetry) is based on string-matching against error messages. If an error object lacks a .message property or has an unexpected format (e.g., a network-level ECONNREFUSED wrapped in a system error), shouldRetry returns false and the error is immediately thrown—but the caller in glm-client.mjs may catch it and return an empty/null result rather than propagating. Under sustained sampling-sweep load (run 75+), transient network errors would either: (a) retry forever if classified as retryable, or (b) silently fail without retry if classification misses. There is no circuit-breaker or maximum-wall-clock-time cap visible—only maxAttempts. A long-running sweep could accumulate hours of retry delay without the caller knowing.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.78,\"recommendation\":\"Add a maximum total elapsed time cap (e.g., retryTimeoutMs) that aborts the retry loop regardless of attempt count. Ensure shouldRetry handles errors without .message gracefully (check error?.constructor?.name, error?.code). Add logging/metrics at each retry attempt so silent retries are observable. Verify glm-client.mjs propagates retry exhaustion errors rather than swallowing them into empty results.\"},{\"severity\":\"high\",\"title\":\"BigModel error dispatch uses fragile heuristic matching that can misclassify errors\",\"body\":\"scripts/lib/bigmodel-errors.mjs classifies API errors by matching substrings in error messages (e.g., 'rate limit', 'overloaded', 'context_length_exceeded'). This is inherently fragile: (1) upstream API providers can change error message text without notice, (2) non-English locale error messages would not match, (3) some error responses may use error codes rather than messages. A misclassification means either retrying a non-retryable error (wasting quota/time) or failing fast on a transient error (dropping valid requests). Under cumulative sweep conditions, a single misclassified error pattern would affect every subsequent request in the batch.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.82,\"recommendation\":\"Classify errors using structured fields first (HTTP status codes, error.code, error.type) before falling back to message matching. Add a default/unknown error category that logs the full error for later analysis rather than guessing. Add integration tests that verify classification against actual API error response fixtures.\"},{\"severity\":\"medium\",\"title\":\"Tracked-jobs state can become stale/inconsistent after process crash\",\"body\":\"scripts/lib/tracked-jobs.mjs manages job state in filesystem-based storage. If the process crashes mid-write (e.g., SIGKILL, OOM) or if two concurrent instances write simultaneously, the state file can be left in a partially-written or inconsistent state. There is no visible write atomicity (write-to-temp-then-rename) or file locking. Under sampling-sweep conditions with multiple rapid job submissions, a race between read-modify-write cycles could lose job records or corrupt the state file, leading to ghost jobs or lost job tracking.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.72,\"recommendation\":\"Use atomic file writes (write to temp file, then fs.rename) for state persistence. Add a file lock or optimistic concurrency check. Include a stale-job cleanup/recovery mechanism that detects jobs stuck in 'running' state beyond a reasonable timeout.\"},{\"severity\":\"medium\",\"title\":\"glm-client result propagation may return falsy/empty on error, hiding failures from callers\",\"body\":\"scripts/lib/glm-client.mjs was significantly modified (155 lines changed). The combination of retry logic + BigModel error dispatch means that when all retries are exhausted or an unexpected error occurs, the client may return an empty object, null, or a result without an error indicator. Callers that check result truthiness rather than result.success or result.error would treat a failure as a successful empty response. In a cumulative sweep, this would silently undercount or produce incomplete output without any visible error.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.75,\"recommendation\":\"Ensure glm-client always returns a structured result with an explicit success/error field on every code path. Audit all callers to verify they check for errors rather than just truthiness. Add a test for the 'all retries exhausted' path that verifies the returned result is not falsy.\"},{\"severity\":\"medium\",\"title\":\"Missing tests for concurrent/reentrant retry scenarios\",\"body\":\"tests/retry.test.mjs has 352 lines of tests, but the diff stat shows no tests for concurrent retry scenarios—multiple callers hitting retry simultaneously, or reentrant calls during backoff waits. Under sampling-sweep cumulative load, multiple parallel requests would all enter retry simultaneously, potentially overwhelming the downstream API when their backoff timers expire at similar times (thundering herd). The jitter helps but may be insufficient under high concurrency.\",\"file\":\"tests/retry.test.mjs\",\"line_start\":1,\"line_end\":352,\"confidence\":0.65,\"recommendation\":\"Add tests for concurrent retry scenarios verifying that jitter provides sufficient spacing. Consider adding per-client or global concurrency limiting for retry attempts. Document the expected behavior under concurrent load.\"}],\"next_steps\":[\"Inspect retry.mjs shouldRetry logic and add a wall-clock timeout cap\",\"Audit bigmodel-errors.mjs to prioritize structured error codes over message matching\",\"Verify glm-client.mjs error propagation on all failure paths—ensure no silent empty returns\",\"Add atomic writes to tracked-jobs.mjs state persistence\",\"Run the sampling-sweep under controlled conditions with intentional network errors to observe retry and error propagation behavior\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T18:16:32.304Z"
+}

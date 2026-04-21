@@ -1,0 +1,59 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 31
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 2,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 143103,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "Cumulative v0.4.0→v0.4.6 diff adds retry infrastructure, BigModel error dispatch, and significant glm-client changes, but the core API client module (glm-client.mjs, 155 lines changed) ships without a dedicated test file. This is the module most likely to hide auth failures, timeout bugs, error misclassification, and silent retry loops — exactly the class of defects that are expensive to discover in production. The supporting modules (retry.mjs, bigmodel-errors.mjs) have thorough test suites, which makes the gap on the integration point that wires them together more conspicuous.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "No test coverage for glm-client.mjs — the module that wires retry + error dispatch to real API calls",
+        "body": "glm-client.mjs has 155 lines of changes across the cumulative diff and orchestrates the new retry.mjs backoff loop and bigmodel-errors.mjs error classifier against live API requests. There is no glm-client.test.mjs in the test directory. Every other core library module (retry, bigmodel-errors, state, render, fs, args, preset-config) has a corresponding test file. The client is the single integration point where misclassification of an API error as retriable could produce silent infinite retries, or where a non-retriable auth error could be swallowed. The retry.test.mjs (352 lines) and bigmodel-errors.test.mjs (189 lines) validate those units in isolation but cannot catch wiring bugs: passing the wrong error shape into the classifier, mishandling the retry signal from the dispatch layer, or losing request state across retry cycles.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.92,
+        "recommendation": "Add tests/glm-client.test.mjs covering at minimum: (1) a retriable API error triggers the expected retry path with correct backoff, (2) a non-retriable auth/permission error is thrown immediately without retry, (3) max retries exhausted produces a deterministic terminal error, (4) request body/state is preserved correctly across retries — no mutation or data loss. Consider also an integration test with result-propagation.test.mjs that exercises the full chain from client → retry → error dispatch."
+      },
+      {
+        "severity": "medium",
+        "title": "job-control.mjs and tracked-jobs.mjs changes lack dedicated unit tests",
+        "body": "job-control.mjs (20 lines changed) and tracked-jobs.mjs (78 lines changed) manage job lifecycle state, including tracking in-flight jobs and enforcing concurrency/ordering constraints. Neither has a dedicated test file. The existing job-render.test.mjs (144 lines) tests the rendering layer but does not verify job state transitions, concurrent job tracking correctness, or cleanup on failure. A bug in tracked-jobs.mjs that fails to remove a job from the tracked set on error would cause ghost jobs that silently consume concurrency slots, eventually blocking all new work without any visible error.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.78,
+        "recommendation": "Add tests covering: (1) job added then completed is fully removed from tracked set, (2) job added then errored is fully removed from tracked set (no ghost jobs), (3) concurrent job limit enforcement, (4) state file recovery after partial write or crash. If tracked-jobs.mjs delegates to job-control.mjs, ensure the contract between them is tested at the boundary."
+      }
+    ],
+    "next_steps": [
+      "Create tests/glm-client.test.mjs with tests for retriable vs non-retriable error routing, max-retry exhaustion, and request state preservation across retries.",
+      "Add tests for tracked-jobs.mjs covering the full lifecycle: add → complete, add → error → cleanup, with assertions that no ghost entries remain.",
+      "Run the existing test suite to confirm no regressions from the process.mjs deletion — the check-imports.mjs guard should catch dangling imports, but verify it runs in CI.",
+      "Re-run the sampling-sweep after adding the missing tests and include the new coverage data in the v0.4.7 release evidence."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"Cumulative v0.4.0→v0.4.6 diff adds retry infrastructure, BigModel error dispatch, and significant glm-client changes, but the core API client module (glm-client.mjs, 155 lines changed) ships without a dedicated test file. This is the module most likely to hide auth failures, timeout bugs, error misclassification, and silent retry loops — exactly the class of defects that are expensive to discover in production. The supporting modules (retry.mjs, bigmodel-errors.mjs) have thorough test suites, which makes the gap on the integration point that wires them together more conspicuous.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"No test coverage for glm-client.mjs — the module that wires retry + error dispatch to real API calls\",\n      \"body\": \"glm-client.mjs has 155 lines of changes across the cumulative diff and orchestrates the new retry.mjs backoff loop and bigmodel-errors.mjs error classifier against live API requests. There is no glm-client.test.mjs in the test directory. Every other core library module (retry, bigmodel-errors, state, render, fs, args, preset-config) has a corresponding test file. The client is the single integration point where misclassification of an API error as retriable could produce silent infinite retries, or where a non-retriable auth error could be swallowed. The retry.test.mjs (352 lines) and bigmodel-errors.test.mjs (189 lines) validate those units in isolation but cannot catch wiring bugs: passing the wrong error shape into the classifier, mishandling the retry signal from the dispatch layer, or losing request state across retry cycles.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.92,\n      \"recommendation\": \"Add tests/glm-client.test.mjs covering at minimum: (1) a retriable API error triggers the expected retry path with correct backoff, (2) a non-retriable auth/permission error is thrown immediately without retry, (3) max retries exhausted produces a deterministic terminal error, (4) request body/state is preserved correctly across retries — no mutation or data loss. Consider also an integration test with result-propagation.test.mjs that exercises the full chain from client → retry → error dispatch.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"job-control.mjs and tracked-jobs.mjs changes lack dedicated unit tests\",\n      \"body\": \"job-control.mjs (20 lines changed) and tracked-jobs.mjs (78 lines changed) manage job lifecycle state, including tracking in-flight jobs and enforcing concurrency/ordering constraints. Neither has a dedicated test file. The existing job-render.test.mjs (144 lines) tests the rendering layer but does not verify job state transitions, concurrent job tracking correctness, or cleanup on failure. A bug in tracked-jobs.mjs that fails to remove a job from the tracked set on error would cause ghost jobs that silently consume concurrency slots, eventually blocking all new work without any visible error.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Add tests covering: (1) job added then completed is fully removed from tracked set, (2) job added then errored is fully removed from tracked set (no ghost jobs), (3) concurrent job limit enforcement, (4) state file recovery after partial write or crash. If tracked-jobs.mjs delegates to job-control.mjs, ensure the contract between them is tested at the boundary.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Create tests/glm-client.test.mjs with tests for retriable vs non-retriable error routing, max-retry exhaustion, and request state preservation across retries.\",\n    \"Add tests for tracked-jobs.mjs covering the full lifecycle: add → complete, add → error → cleanup, with assertions that no ghost entries remain.\",\n    \"Run the existing test suite to confirm no regressions from the process.mjs deletion — the check-imports.mjs guard should catch dangling imports, but verify it runs in CI.\",\n    \"Re-run the sampling-sweep after adding the missing tests and include the new coverage data in the v0.4.7 release evidence.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T19:00:45.136Z"
+}

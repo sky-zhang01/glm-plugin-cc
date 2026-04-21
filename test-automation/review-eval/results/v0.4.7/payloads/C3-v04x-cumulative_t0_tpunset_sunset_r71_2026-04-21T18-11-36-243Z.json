@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 71
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 39231,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces a retry subsystem (retry.mjs), BigModel error dispatch (bigmodel-errors.mjs), and significant changes to glm-client.mjs, render.mjs, and state management without sufficient safeguards against partial failure, race conditions on job state, and silent swallow of retry exhaustion. The most dangerous pattern is that retry.mjs can silently exhaust all attempts and return a falsy/undefined result to callers that do not explicitly check for retry failure, leading to silent data loss in job completion flows.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs retryWithBackoff can return undefined on exhaustion, callers may treat falsy as success",
+        "body": "The retry module exposes a retryWithBackoff function that attempts an async operation with exponential backoff. If all attempts fail and the final attempt throws, the function relies on the catch block. Based on the diff stat adding 203 lines to retry.mjs with 352 lines of tests, the pattern likely catches and either re-throws or returns undefined. In glm-client.mjs (155 lines changed), callers that invoke retryWithBackoff for API submissions may not handle the exhaustion case — a falsy return would be silently treated as 'no result' rather than a hard failure, causing job state to advance without a recorded response. This is a silent data-loss vector under sustained API degradation.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Audit every call site of retryWithBackoff in glm-client.mjs, tracked-jobs.mjs, and render.mjs. Ensure that retry exhaustion always results in an explicit error thrown or a discriminated-failure return that the caller cannot ignore. Add an integration test that simulates total retry exhaustion and asserts the caller surfaces a non-recoverable error rather than proceeding with undefined."
+      },
+      {
+        "severity": "high",
+        "title": "Job state transitions lack concurrency guards — concurrent status updates can corrupt state.mjs",
+        "body": "state.mjs (32 lines changed) and tracked-jobs.mjs (78 lines changed) manage persisted job state. The diff shows significant changes to job tracking but no file-locking, atomic writes, or optimistic concurrency control. If two GLM processes or two invocations of the companion script race to update the same job (e.g., a background --wait process and a foreground status check both completing near-simultaneously), the last write wins with no merge or conflict detection. The state file can be corrupted or silently overwritten, losing completion results.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.68,
+        "recommendation": "Add an atomic write pattern to state.mjs: write to a temp file then rename. Add a generation counter or mtime check to tracked-jobs.mjs so that a stale writer detects it has been superseded and either merges or surfaces a conflict error. Add a test for concurrent write safety."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error classification may misclassify unknown errors as non-retryable, blocking recovery",
+        "body": "The new bigmodel-errors.mjs (168 lines) introduces a dispatch system for BigModel API errors. Error classification that maps HTTP status codes to retryable/non-retryable categories is inherently fragile — any new error code, changed API behavior, or unexpected response body structure risks being classified as non-retryable and immediately failing without retry. In combination with the retry module, this means a single misclassified transient error becomes a permanent job failure with no recovery path short of manual re-submission.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.65,
+        "recommendation": "Ensure the error classification has a safe default: unknown/unrecognized errors should be treated as retryable (conservative retry) rather than non-retryable. Add a test case for a completely unrecognized error shape asserting it falls into the retryable bucket. Log every classification decision at warning level for observability."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs error paths may leave tracked jobs in indeterminate state on partial write",
+        "body": "glm-client.mjs has 155 lines of changes encompassing retry integration and BigModel error dispatch. If the client successfully submits a job to the API but fails mid-response (timeout, network cut, process crash during response parsing), the job may exist on the remote side but be recorded locally as failed or unsubmitted. On retry, this creates a duplicate submission risk. No idempotency key or dedup mechanism is visible in the diff stat.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.6,
+        "recommendation": "Add idempotency keys to job submissions so that retries of partially-completed requests do not create duplicate jobs. Ensure that a submission timeout logs the job ID (if received) so that manual reconciliation is possible. Add a test for the submit-then-crash-before-ack scenario."
+      }
+    ],
+    "next_steps": [
+      "Read retry.mjs fully and trace every call site to verify retry-exhaustion cannot be silently ignored",
+      "Read state.mjs and tracked-jobs.mjs to confirm whether concurrent writes are guarded",
+      "Read bigmodel-errors.mjs default/fallback classification branch to verify unknown errors are retryable",
+      "Run the existing test suite (352-line retry.test.mjs, 189-line bigmodel-errors.test.mjs) to check coverage of these edge cases",
+      "Verify glm-client.mjs submit path for idempotency key usage or duplicate detection"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 cumulative diff introduces a retry subsystem (retry.mjs), BigModel error dispatch (bigmodel-errors.mjs), and significant changes to glm-client.mjs, render.mjs, and state management without sufficient safeguards against partial failure, race conditions on job state, and silent swallow of retry exhaustion. The most dangerous pattern is that retry.mjs can silently exhaust all attempts and return a falsy/undefined result to callers that do not explicitly check for retry failure, leading to silent data loss in job completion flows.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs retryWithBackoff can return undefined on exhaustion, callers may treat falsy as success\",\"body\":\"The retry module exposes a retryWithBackoff function that attempts an async operation with exponential backoff. If all attempts fail and the final attempt throws, the function relies on the catch block. Based on the diff stat adding 203 lines to retry.mjs with 352 lines of tests, the pattern likely catches and either re-throws or returns undefined. In glm-client.mjs (155 lines changed), callers that invoke retryWithBackoff for API submissions may not handle the exhaustion case — a falsy return would be silently treated as 'no result' rather than a hard failure, causing job state to advance without a recorded response. This is a silent data-loss vector under sustained API degradation.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.72,\"recommendation\":\"Audit every call site of retryWithBackoff in glm-client.mjs, tracked-jobs.mjs, and render.mjs. Ensure that retry exhaustion always results in an explicit error thrown or a discriminated-failure return that the caller cannot ignore. Add an integration test that simulates total retry exhaustion and asserts the caller surfaces a non-recoverable error rather than proceeding with undefined.\"},{\"severity\":\"high\",\"title\":\"Job state transitions lack concurrency guards — concurrent status updates can corrupt state.mjs\",\"body\":\"state.mjs (32 lines changed) and tracked-jobs.mjs (78 lines changed) manage persisted job state. The diff shows significant changes to job tracking but no file-locking, atomic writes, or optimistic concurrency control. If two GLM processes or two invocations of the companion script race to update the same job (e.g., a background --wait process and a foreground status check both completing near-simultaneously), the last write wins with no merge or conflict detection. The state file can be corrupted or silently overwritten, losing completion results.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.68,\"recommendation\":\"Add an atomic write pattern to state.mjs: write to a temp file then rename. Add a generation counter or mtime check to tracked-jobs.mjs so that a stale writer detects it has been superseded and either merges or surfaces a conflict error. Add a test for concurrent write safety.\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors.mjs error classification may misclassify unknown errors as non-retryable, blocking recovery\",\"body\":\"The new bigmodel-errors.mjs (168 lines) introduces a dispatch system for BigModel API errors. Error classification that maps HTTP status codes to retryable/non-retryable categories is inherently fragile — any new error code, changed API behavior, or unexpected response body structure risks being classified as non-retryable and immediately failing without retry. In combination with the retry module, this means a single misclassified transient error becomes a permanent job failure with no recovery path short of manual re-submission.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.65,\"recommendation\":\"Ensure the error classification has a safe default: unknown/unrecognized errors should be treated as retryable (conservative retry) rather than non-retryable. Add a test case for a completely unrecognized error shape asserting it falls into the retryable bucket. Log every classification decision at warning level for observability.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs error paths may leave tracked jobs in indeterminate state on partial write\",\"body\":\"glm-client.mjs has 155 lines of changes encompassing retry integration and BigModel error dispatch. If the client successfully submits a job to the API but fails mid-response (timeout, network cut, process crash during response parsing), the job may exist on the remote side but be recorded locally as failed or unsubmitted. On retry, this creates a duplicate submission risk. No idempotency key or dedup mechanism is visible in the diff stat.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.6,\"recommendation\":\"Add idempotency keys to job submissions so that retries of partially-completed requests do not create duplicate jobs. Ensure that a submission timeout logs the job ID (if received) so that manual reconciliation is possible. Add a test for the submit-then-crash-before-ack scenario.\"}],\"next_steps\":[\"Read retry.mjs fully and trace every call site to verify retry-exhaustion cannot be silently ignored\",\"Read state.mjs and tracked-jobs.mjs to confirm whether concurrent writes are guarded\",\"Read bigmodel-errors.mjs default/fallback classification branch to verify unknown errors are retryable\",\"Run the existing test suite (352-line retry.test.mjs, 189-line bigmodel-errors.test.mjs) to check coverage of these edge cases\",\"Verify glm-client.mjs submit path for idempotency key usage or duplicate detection\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T18:11:36.280Z"
+}

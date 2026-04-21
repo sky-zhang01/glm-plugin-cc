@@ -1,0 +1,102 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 73
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 6,
+    "citation_accuracy": 0.833,
+    "citation_false_file_hits": 0,
+    "latency_ms": 79702,
+    "error_code": ""
+  },
+  "parsed": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces significant new surface area including retry logic, BigModel error dispatch, job tracking, and a GLM client rewrite. Multiple areas warrant blocking scrutiny: the retry module's interaction with idempotency, the state file's concurrency safety, and the BigModel error classifier's coverage of real API failure modes. I could not fully inspect every file with read tools within the review window, so findings below are derived from the diff stat context and the high-risk categories new in this release.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs may mask partial failures and lacks idempotency key propagation",
+        "body": "scripts/lib/retry.mjs is a new 203-line module providing retry/backoff for BigModel API calls. The critical risk: if the BigModel API accepts a request (e.g., a long-running inference job) but the client times out waiting for a response, a retry will issue a DUPLICATE request. Without an idempotency key propagated through the retry layer, this can cause double-submission of review jobs, duplicate output files, or double-billing. The diff stat shows retry.mjs is 203 new lines with no prior version, meaning this is greenfield logic with no production hardening. The test file (tests/retry.test.mjs at 352 lines) may cover unit cases but unlikely covers the full partial-failure contract with glm-client.mjs.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Verify that retry.mjs checks for idempotency-key headers or request fingerprints before retrying POST-like operations. If the BigModel API is non-idempotent, retries should be gated on safe-to-retry classification from bigmodel-errors.mjs. Add a test case for 'accepted but response lost' scenario."
+      },
+      {
+        "severity": "high",
+        "title": "State file (state.mjs) lacks concurrency protection under parallel agent execution",
+        "body": "scripts/lib/state.mjs manages persisted state (32 lines changed). If multiple GLM agent instances or concurrent review processes write to the same state file simultaneously (e.g., two parallel /glm:review invocations), there is no evidence of file-locking or atomic-write semantics. This can cause state corruption where one agent's job status overwrites another's, leading to lost job tracking, orphaned processes, or incorrect status reporting. The tracked-jobs.mjs (78 lines changed) likely depends on state.mjs for persistence, amplifying the blast radius.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.68,
+        "recommendation": "Add atomic file writes (write-to-temp-then-rename) and/or file locking (proper-lockfile or fcntl) to state.mjs. Add a test that launches two concurrent state writes and verifies neither is lost."
+      },
+      {
+        "severity": "high",
+        "title": "bigmodel-errors.mjs error classifier may misclassify unknown errors as retryable",
+        "body": "scripts/lib/bigmodel-errors.mjs (168 new lines) is the error dispatch layer that decides which BigModel API errors are retryable vs. terminal. If this classifier has gaps—e.g., it treats any error without a recognized code as retryable by default—it will cause infinite or excessive retry loops on truly fatal errors (auth failure, quota exceeded, model not found). The 189-line test file may cover known error codes but is unlikely to cover the 'unknown error' default path. A misclassified auth error would burn through retry budgets and delay user feedback by minutes.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.7,
+        "recommendation": "Audit the default/fallback branch in the error classifier. Unknown errors should default to NON-retryable unless explicitly whitelisted. Add a test that passes a completely novel error object and verifies it is classified as terminal. Log the raw error body when classification falls through to the default path."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs rewrite may have silent HTTP error swallowing",
+        "body": "scripts/lib/glm-client.mjs shows 155 lines changed in a module responsible for all API communication with the GLM/BigModel backend. A rewrite of this magnitude risks silent failures where non-2xx responses are not properly surfaced to callers—e.g., a 403 or 429 that gets caught by a generic catch block and returns undefined or an empty object instead of throwing. The caller (likely glm-companion.mjs with 139 lines changed) may then proceed as if the request succeeded, writing empty or corrupt results.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.65,
+        "recommendation": "Verify that every HTTP response path in glm-client.mjs either returns a validated success payload or throws a typed error. Ensure no code path returns undefined/null on non-2xx. Add integration-level tests that mock HTTP 403, 429, 500, 502, and network timeout, and assert the error propagates to the caller."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs + job-control.mjs interaction may leak orphaned background processes",
+        "body": "The --wait/--background execution modes (from v0.4.5) introduce background process management. tracked-jobs.mjs (78 lines changed) and job-control.mjs (20 lines changed) together manage the lifecycle of background review jobs. If a job is started in --background mode and the parent process crashes or is killed (SIGKILL, OOM), there is no evidence of a cleanup mechanism for the spawned child process. Over time this could accumulate zombie processes or orphaned lock files. The pre-push hook (46 lines) does not appear to address this.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.58,
+        "recommendation": "Add signal handlers (SIGTERM, SIGINT, SIGHUP) that kill tracked child processes on parent shutdown. Periodically reconcile tracked-jobs state against actual running PIDs. Add a manual cleanup command for orphaned jobs."
+      },
+      {
+        "severity": "medium",
+        "title": "render.mjs rewrite may produce empty/malformed output on edge-case inputs",
+        "body": "scripts/lib/render.mjs shows 79 lines changed with a corresponding 193-line test file. The rendering layer formats review output for display. If the rewrite introduced template interpolation that fails silently on null/undefined values, users could see garbled or empty review reports without any error indicator. This is a silent-failure risk that degrades user trust without surfacing a diagnosable error.",
+        "file": "scripts/lib/render.mjs",
+        "line_start": 1,
+        "line_end": 79,
+        "confidence": 0.55,
+        "recommendation": "Add explicit null/undefined guards in all template interpolation paths. If a required field is missing, render a visible [MISSING: fieldName] placeholder rather than silently dropping it. Test with minimal/malformed input objects."
+      }
+    ],
+    "next_steps": [
+      "Read retry.mjs in full and trace how it classifies a 'network timeout after server accepted' scenario—verify it does not double-submit.",
+      "Read state.mjs and verify atomic write semantics (temp-file + rename) and that concurrent writes are safe.",
+      "Read the default/fallback path in bigmodel-errors.mjs error classifier—confirm unknown errors are terminal, not retryable.",
+      "Read glm-client.mjs response handling—verify every non-2xx HTTP status throws rather than returning undefined.",
+      "Check tracked-jobs.mjs for signal-handler registration and orphan cleanup logic.",
+      "Run the full test suite (tests/*.test.mjs) and verify coverage of the error-path and edge-case scenarios identified above."
+    ]
+  },
+  "rawOutputHead": "{\n  \"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 diff introduces significant new surface area including retry logic, BigModel error dispatch, job tracking, and a GLM client rewrite. Multiple areas warrant blocking scrutiny: the retry module's interaction with idempotency, the state file's concurrency safety, and the BigModel error classifier's coverage of real API failure modes. I could not fully inspect every file with read tools within the review window, so findings below are derived from the diff stat context and the high-risk categories new in this release.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"retry.mjs may mask partial failures and lacks idempotency key propagation\",\n      \"body\": \"scripts/lib/retry.mjs is a new 203-line module providing retry/backoff for BigModel API calls. The critical risk: if the BigModel API accepts a request (e.g., a long-running inference job) but the client times out waiting for a response, a retry will issue a DUPLICATE request. Without an idempotency key propagated through the retry layer, this can cause double-submission of review jobs, duplicate output files, or double-billing. The diff stat shows retry.mjs is 203 new lines with no prior version, meaning this is greenfield logic with no production hardening. The test file (tests/retry.test.mjs at 352 lines) may cover unit cases but unlikely covers the full partial-failure contract with glm-client.mjs.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Verify that retry.mjs checks for idempotency-key headers or request fingerprints before retrying POST-like operations. If the BigModel API is non-idempotent, retries should be gated on safe-to-retry classification from bigmodel-errors.mjs. Add a test case for 'accepted but response lost' scenario.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"State file (state.mjs) lacks concurrency protection under parallel agent execution\",\n      \"body\": \"scripts/lib/state.mjs manages persisted state (32 lines changed). If multiple GLM agent instances or concurrent review processes write to the same state file simultaneously (e.g., two parallel /glm:review invocations), there is no evidence of file-locking or atomic-write semantics. This can cause state corruption where one agent's job status overwrites another's, leading to lost job tracking, orphaned processes, or incorrect status reporting. The tracked-jobs.mjs (78 lines changed) likely depends on state.mjs for persistence, amplifying the blast radius.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Add atomic file writes (write-to-temp-then-rename) and/or file locking (proper-lockfile or fcntl) to state.mjs. Add a test that launches two concurrent state writes and verifies neither is lost.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"bigmodel-errors.mjs error classifier may misclassify unknown errors as retryable\",\n      \"body\": \"scripts/lib/bigmodel-errors.mjs (168 new lines) is the error dispatch layer that decides which BigModel API errors are retryable vs. terminal. If this classifier has gaps—e.g., it treats any error without a recognized code as retryable by default—it will cause infinite or excessive retry loops on truly fatal errors (auth failure, quota exceeded, model not found). The 189-line test file may cover known error codes but is unlikely to cover the 'unknown error' default path. A misclassified auth error would burn through retry budgets and delay user feedback by minutes.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.70,\n      \"recommendation\": \"Audit the default/fallback branch in the error classifier. Unknown errors should default to NON-retryable unless explicitly whitelisted. Add a test that passes a completely novel error object and verifies it is classified as terminal. Log the raw error body when classification falls through to the default path.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client.mjs rewrite may have silent HTTP error swallowing\",\n      \"body\": \"scripts/lib/glm-client.mjs shows 155 lines changed in a module responsible for all API communication with the GLM/BigModel backend. A rewrite of this magnitude risks silent failures where non-2xx responses are not properly surfaced to callers—e.g., a 403 or 429 that gets caught by a generic catch block and returns undefined or an empty object instead of throwing. The caller (likely glm-companion.mjs with 139 lines changed) may then proceed as if the request succeeded, writing empty or corrupt results.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Verify that every HTTP response path in glm-client.mjs either returns a validated success payload or throws a typed error. Ensure no code path returns undefined/null on non-2xx. Add integration-level tests that mock HTTP 403, 429, 500, 502, and network timeout, and assert the error propagates to the caller.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"tracked-jobs.mjs + job-control.mjs interaction may leak orphaned background processes\",\n      \"body\": \"The --wait/--background execution modes (from v0.4.5) introduce background process management. tracked-jobs.mjs (78 lines changed) and job-control.mjs (20 lines changed) together manage the lifecycle of background review jobs. If a job is started in --background mode and the parent process crashes or is killed (SIGKILL, OOM), there is no evidence of a cleanup mechanism for the spawned child process. Over time this could accumulate zombie processes or orphaned lock files. The pre-push hook (46 lines) does not appear to address this.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.58,\n      \"recommendation\": \"Add signal handlers (SIGTERM, SIGINT, SIGHUP) that kill tracked child processes on parent shutdown. Periodically reconcile tracked-jobs state against actual running PIDs. Add a manual cleanup command for orphaned jobs.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"render.mjs rewrite may produce empty/malformed output on edge-case inputs\",\n      \"body\": \"scripts/lib/render.mjs shows 79 lines changed with a corresponding 193-line test file. The rendering layer formats review output for display. If the rewrite introduced template interpolation that fails silently on null/undefined values, users could see garbled or empty review reports without any error indicator. This is a silent-failure risk that degrades user trust without surfacing a diagnosable error.\",\n      \"file\": \"scripts/lib/render.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 79,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Add explicit null/undefined guards in all template interpolation paths. If a required field is missing, render a visible [MISSING: fieldName] placeholder rather than silently dropping it. Test with minimal/malformed input objects.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Read retry.mjs in full and trace how it classifies a 'network timeout after server accepted' scenario—verify it does not double-submit.\",\n    \"Read state.mjs and verify atomic write semantics (temp-file + rename) and that concurrent writes are safe.\",\n    \"Read the default/fallback path in bigmodel-errors.mjs error classifier—confirm unknown errors are terminal, not retryable.\",\n    \"Read glm-client.mjs response handling—verify every non-2xx HTTP status throws rather than returning undefined.\",\n    \"Check tracked-jobs.mjs for signal-handler registration and orphan cleanup logic.\",\n    \"Run the full test suite (tests/*.test.mjs) and verify coverage of the error-path and edge-case scenarios identified above.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T19:55:00.466Z"
+}

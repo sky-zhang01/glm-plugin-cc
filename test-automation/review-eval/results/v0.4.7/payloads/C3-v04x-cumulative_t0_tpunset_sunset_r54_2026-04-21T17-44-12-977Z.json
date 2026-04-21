@@ -1,0 +1,28 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 54
+  },
+  "metrics": {
+    "schema_compliance": 0,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 25712,
+    "error_code": "PARSE_FAILURE"
+  },
+  "parsed": null,
+  "rawOutputHead": "I need to examine the actual code in the critical files to find substantive issues. Let me inspect the key changed files.",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "PARSE_FAILURE",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T17:44:12.977Z"
+}

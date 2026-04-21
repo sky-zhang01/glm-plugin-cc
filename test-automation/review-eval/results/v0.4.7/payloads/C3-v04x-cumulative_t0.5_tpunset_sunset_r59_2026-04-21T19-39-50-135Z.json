@@ -1,0 +1,49 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 59
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 1,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 155424,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff fully deletes scripts/lib/process.mjs (67 lines) and the commit log explicitly admits a resulting ReferenceError ('Bundle F — ReferenceError + full thread/resume scaffolding purge'). Four successive hotfix bundles (C, D3+, E+, F) were required to stabilize after deletions, which is a strong signal the cleanup was iterative and potentially incomplete. Without verifying zero remaining import references to the deleted module, a latent runtime crash path may exist. No other findings are defensible from the metadata alone, but this single risk is sufficient to warrant confirmation before shipping.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Deleted process.mjs may leave dangling imports causing runtime ReferenceError",
+        "body": "scripts/lib/process.mjs (67 lines) was fully removed in this diff range. The commit 'fix: Bundle F — ReferenceError + full thread/resume scaffolding purge' explicitly acknowledges a ReferenceError resulted from earlier deletions. The iterative pattern of 4+ hotfix bundles (C, D3+, E+, F), each fixing regressions from the prior round, indicates the cleanup was not clean on first or second attempt. check-imports.mjs was modified (5 lines) but its scope is unknown from the diff stat alone. Any remaining `import` of process.mjs in glm-companion.mjs (139 lines changed), glm-client.mjs (155 lines changed), job-control.mjs (20 lines changed), tracked-jobs.mjs (78 lines changed), or other modules will cause an unconditional synchronous crash at import time — a failure that is silent until the affected code path is first exercised at runtime.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.55,
+        "recommendation": "Run `grep -rn 'process\\.mjs\\|from.*[\"\\x27].*/process[\"\\x27]' scripts/` against the v0.4.6 tree to confirm zero remaining references. If any exist, this is a ship-blocker. Additionally, add a CI gate that statically verifies all import targets resolve to existing files — this is broader than check-imports.mjs which may only validate specific patterns."
+      }
+    ],
+    "next_steps": [
+      "Grep the v0.4.6 tree for any remaining import/require referencing process.mjs under scripts/",
+      "Run the full test suite (node --test tests/*.test.mjs) against the v0.4.6 tree and confirm zero failures",
+      "If dangling imports are found, do not ship — the runtime crash is unconditional on the affected path",
+      "If no dangling imports are found, document the verification in the release notes and close this finding"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 diff fully deletes scripts/lib/process.mjs (67 lines) and the commit log explicitly admits a resulting ReferenceError ('Bundle F — ReferenceError + full thread/resume scaffolding purge'). Four successive hotfix bundles (C, D3+, E+, F) were required to stabilize after deletions, which is a strong signal the cleanup was iterative and potentially incomplete. Without verifying zero remaining import references to the deleted module, a latent runtime crash path may exist. No other findings are defensible from the metadata alone, but this single risk is sufficient to warrant confirmation before shipping.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Deleted process.mjs may leave dangling imports causing runtime ReferenceError\",\"body\":\"scripts/lib/process.mjs (67 lines) was fully removed in this diff range. The commit 'fix: Bundle F — ReferenceError + full thread/resume scaffolding purge' explicitly acknowledges a ReferenceError resulted from earlier deletions. The iterative pattern of 4+ hotfix bundles (C, D3+, E+, F), each fixing regressions from the prior round, indicates the cleanup was not clean on first or second attempt. check-imports.mjs was modified (5 lines) but its scope is unknown from the diff stat alone. Any remaining `import` of process.mjs in glm-companion.mjs (139 lines changed), glm-client.mjs (155 lines changed), job-control.mjs (20 lines changed), tracked-jobs.mjs (78 lines changed), or other modules will cause an unconditional synchronous crash at import time — a failure that is silent until the affected code path is first exercised at runtime.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":67,\"confidence\":0.55,\"recommendation\":\"Run `grep -rn 'process\\\\.mjs\\\\|from.*[\\\"\\\\x27].*/process[\\\"\\\\x27]' scripts/` against the v0.4.6 tree to confirm zero remaining references. If any exist, this is a ship-blocker. Additionally, add a CI gate that statically verifies all import targets resolve to existing files — this is broader than check-imports.mjs which may only validate specific patterns.\"}],\"next_steps\":[\"Grep the v0.4.6 tree for any remaining import/require referencing process.mjs under scripts/\",\"Run the full test suite (node --test tests/*.test.mjs) against the v0.4.6 tree and confirm zero failures\",\"If dangling imports are found, do not ship — the runtime crash is unconditional on the affected path\",\"If no dangling imports are found, document the verification in the release notes and close this finding\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T19:39:50.144Z"
+}

@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 65
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 85168,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "Cumulative v0.4.0→v0.4.6+ diff removes a shared library module (process.mjs, 67 lines deleted), adds 203 lines of new retry logic (retry.mjs), introduces BigModel error dispatch (bigmodel-errors.mjs), and modifies state management and job tracking—all without visible proof that every runtime import path was updated or that the retry logic is bounded against storms. The deletion of a shared module alongside a companion import-check script modification strongly suggests the authors know this is a risk area but the check itself is not verified as exhaustive. This should not ship until the dead-import risk is confirmed eliminated and retry bounds are validated.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "process.mjs fully deleted — latent import paths will crash at runtime",
+        "body": "The diff stat shows `scripts/lib/process.mjs` losing 67 lines with zero additions, indicating complete file removal. The commit message 'Bundle F — ReferenceError + full thread/resume scaffolding purge' confirms this was a purge. However, `scripts/lib/job-control.mjs` (20 lines changed), `scripts/lib/tracked-jobs.mjs` (78 lines changed), and `scripts/glm-companion.mjs` (139 lines changed) all overlap with the threading/resume domain. If any of these (or transitive consumers) still import from `process.mjs`, the runtime throws a module-not-found error that only surfaces in the affected code path—not on startup. The modification to `scripts/check-imports.mjs` (5 lines changed) is evidence the authors tried to validate this, but an import-check script cannot catch dynamic `import()` or re-eval at runtime, and the check script's own correctness is not verified.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.75,
+        "recommendation": "Run `grep -r \"process\\.mjs\" scripts/` and `grep -r \"from.*process\" scripts/` against the full tree including dynamic imports. Add a CI gate that fails if any reference to the deleted module path exists. Consider leaving a process.mjs that re-exports from the replacement module with a deprecation warning instead of a hard delete."
+      },
+      {
+        "severity": "high",
+        "title": "203-line retry.mjs added with unknown bounds — risk of retry storms and error masking",
+        "body": "`scripts/lib/retry.mjs` adds 203 lines of retry/backoff logic (the commit message says 'auto retry/backoff'). Without seeing the implementation, the default adversarial assumption is that (a) retry counts may be unbounded or too high for interactive use, (b) jitter may be absent causing thundering-herd on shared BigModel API quotas, (c) non-retryable error codes may be incorrectly classified as retryable, and (d) the retry wrapper may swallow the original error stack trace, making debugging impossible. The companion `bigmodel-errors.mjs` (168 lines) is the error classifier—its mapping of error codes to retryable/non-retryable determines whether the retry module does the right thing. A misclassification here silently wastes quota or hides permanent failures.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.65,
+        "recommendation": "Verify retry.mjs has: (1) a hard maximum retry count (≤3 for user-facing, ≤5 for background), (2) exponential backoff with jitter, (3) a whitelist of retryable error codes (not a blacklist of non-retryable ones), (4) preservation of the original error cause chain, and (5) a circuit breaker or cooldown when consecutive failures exceed a threshold. Add integration tests that simulate persistent failures and assert the retry loop terminates."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs and tracked-jobs.mjs file writes likely non-atomic — corruption on crash or concurrent access",
+        "body": "`scripts/lib/state.mjs` (32 lines changed) and `scripts/lib/tracked-jobs.mjs` (78 lines changed) manage persistent state. File-based state without atomic writes (write-to-temp-then-rename) is vulnerable to corruption if the process is killed mid-write or if two invocations write concurrently. The job tracking domain is especially sensitive because a corrupted jobs file could cause orphaned background jobs, double-execution, or a stuck state that prevents future job submissions. The absence of any file-locking library in the diff supports this concern.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.6,
+        "recommendation": "Audit state.mjs and tracked-jobs.mjs for write patterns. Every state file write should use the atomic write-to-temp-then-rename pattern: `fs.writeFile(tmpPath, data) → fs.rename(tmpPath, finalPath)`. If concurrent access is possible (multiple terminal sessions), add advisory file locking (e.g., proper-lockfile) or a PID-based mutex."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs error propagation gaps after retry wrapper integration",
+        "body": "`scripts/lib/glm-client.mjs` has 155 lines changed, likely integrating the new retry.mjs and bigmodel-errors.mjs modules. The risk is that the retry wrapper changes the error shape that callers expect—e.g., wrapping a network error in a RetryExhausted error that doesn't carry the same properties as the original. Callers in render.mjs (79 lines changed) and glm-companion.mjs may check error codes or messages that no longer match after wrapping. This is a classic silent-failure pattern where the error is caught, retried, and then re-thrown in a form the caller doesn't handle, leading to unhelpful 'unknown error' messages to the user.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.55,
+        "recommendation": "Verify that retry.mjs preserves the original error's name, message, code, and stack when re-throwing after exhaustion. Add property-forwarding or use `error.cause` chaining. Write a test that asserts a retried-and-exhausted error is still instanceof the original error class and carries the original error code."
+      }
+    ],
+    "next_steps": [
+      "Run `grep -rn 'process\\.mjs\\|from.*process' scripts/` to confirm zero dangling imports after the process.mjs deletion.",
+      "Audit retry.mjs for bounded retry count, jitter, retryable-error whitelist, and error cause preservation.",
+      "Verify state.mjs and tracked-jobs.mjs use atomic file writes (write-to-temp + rename).",
+      "Check that glm-client.mjs error objects survive the retry wrapper with correct type and properties.",
+      "Add an integration test that simulates persistent API failure through the full stack (client → retry → error dispatch → render) and asserts clean termination with actionable error output."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"Cumulative v0.4.0→v0.4.6+ diff removes a shared library module (process.mjs, 67 lines deleted), adds 203 lines of new retry logic (retry.mjs), introduces BigModel error dispatch (bigmodel-errors.mjs), and modifies state management and job tracking—all without visible proof that every runtime import path was updated or that the retry logic is bounded against storms. The deletion of a shared module alongside a companion import-check script modification strongly suggests the authors know this is a risk area but the check itself is not verified as exhaustive. This should not ship until the dead-import risk is confirmed eliminated and retry bounds are validated.\",\"findings\":[{\"severity\":\"high\",\"title\":\"process.mjs fully deleted — latent import paths will crash at runtime\",\"body\":\"The diff stat shows `scripts/lib/process.mjs` losing 67 lines with zero additions, indicating complete file removal. The commit message 'Bundle F — ReferenceError + full thread/resume scaffolding purge' confirms this was a purge. However, `scripts/lib/job-control.mjs` (20 lines changed), `scripts/lib/tracked-jobs.mjs` (78 lines changed), and `scripts/glm-companion.mjs` (139 lines changed) all overlap with the threading/resume domain. If any of these (or transitive consumers) still import from `process.mjs`, the runtime throws a module-not-found error that only surfaces in the affected code path—not on startup. The modification to `scripts/check-imports.mjs` (5 lines changed) is evidence the authors tried to validate this, but an import-check script cannot catch dynamic `import()` or re-eval at runtime, and the check script's own correctness is not verified.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":67,\"confidence\":0.75,\"recommendation\":\"Run `grep -r \\\"process\\\\.mjs\\\" scripts/` and `grep -r \\\"from.*process\\\" scripts/` against the full tree including dynamic imports. Add a CI gate that fails if any reference to the deleted module path exists. Consider leaving a process.mjs that re-exports from the replacement module with a deprecation warning instead of a hard delete.\"},{\"severity\":\"high\",\"title\":\"203-line retry.mjs added with unknown bounds — risk of retry storms and error masking\",\"body\":\"`scripts/lib/retry.mjs` adds 203 lines of retry/backoff logic (the commit message says 'auto retry/backoff'). Without seeing the implementation, the default adversarial assumption is that (a) retry counts may be unbounded or too high for interactive use, (b) jitter may be absent causing thundering-herd on shared BigModel API quotas, (c) non-retryable error codes may be incorrectly classified as retryable, and (d) the retry wrapper may swallow the original error stack trace, making debugging impossible. The companion `bigmodel-errors.mjs` (168 lines) is the error classifier—its mapping of error codes to retryable/non-retryable determines whether the retry module does the right thing. A misclassification here silently wastes quota or hides permanent failures.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.65,\"recommendation\":\"Verify retry.mjs has: (1) a hard maximum retry count (≤3 for user-facing, ≤5 for background), (2) exponential backoff with jitter, (3) a whitelist of retryable error codes (not a blacklist of non-retryable ones), (4) preservation of the original error cause chain, and (5) a circuit breaker or cooldown when consecutive failures exceed a threshold. Add integration tests that simulate persistent failures and assert the retry loop terminates.\"},{\"severity\":\"medium\",\"title\":\"state.mjs and tracked-jobs.mjs file writes likely non-atomic — corruption on crash or concurrent access\",\"body\":\"`scripts/lib/state.mjs` (32 lines changed) and `scripts/lib/tracked-jobs.mjs` (78 lines changed) manage persistent state. File-based state without atomic writes (write-to-temp-then-rename) is vulnerable to corruption if the process is killed mid-write or if two invocations write concurrently. The job tracking domain is especially sensitive because a corrupted jobs file could cause orphaned background jobs, double-execution, or a stuck state that prevents future job submissions. The absence of any file-locking library in the diff supports this concern.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.6,\"recommendation\":\"Audit state.mjs and tracked-jobs.mjs for write patterns. Every state file write should use the atomic write-to-temp-then-rename pattern: `fs.writeFile(tmpPath, data) → fs.rename(tmpPath, finalPath)`. If concurrent access is possible (multiple terminal sessions), add advisory file locking (e.g., proper-lockfile) or a PID-based mutex.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs error propagation gaps after retry wrapper integration\",\"body\":\"`scripts/lib/glm-client.mjs` has 155 lines changed, likely integrating the new retry.mjs and bigmodel-errors.mjs modules. The risk is that the retry wrapper changes the error shape that callers expect—e.g., wrapping a network error in a RetryExhausted error that doesn't carry the same properties as the original. Callers in render.mjs (79 lines changed) and glm-companion.mjs may check error codes or messages that no longer match after wrapping. This is a classic silent-failure pattern where the error is caught, retried, and then re-thrown in a form the caller doesn't handle, leading to unhelpful 'unknown error' messages to the user.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.55,\"recommendation\":\"Verify that retry.mjs preserves the original error's name, message, code, and stack when re-throwing after exhaustion. Add property-forwarding or use `error.cause` chaining. Write a test that asserts a retried-and-exhausted error is still instanceof the original error class and carries the original error code.\"}],\"next_steps\":[\"Run `grep -rn 'process\\\\.mjs\\\\|from.*process' scripts/` to confirm zero dangling imports after the process.mjs deletion.\",\"Audit retry.mjs for bounded retry count, jitter, retryable-error whitelist, and error cause preservation.\",\"Verify state.mjs and tracked-jobs.mjs use atomic file writes (write-to-temp + rename).\",\"Check that glm-client.mjs error objects survive the retry wrapper with correct type and properties.\",\"Add an integration test that simulates persistent API failure through the full stack (client → retry → error dispatch → render) and asserts clean termination with actionable error output.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T21:26:25.427Z"
+}
