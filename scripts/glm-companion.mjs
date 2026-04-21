@@ -64,8 +64,8 @@ function printUsage() {
     [
       "Usage:",
       "  node scripts/glm-companion.mjs setup [--preset ...] [--api-key <key>] [--ping] [--enable-review-gate|--disable-review-gate] [--json]",
-      "  node scripts/glm-companion.mjs review [--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--json] [focus text]",
-      "  node scripts/glm-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--json] [focus text]",
+      "  node scripts/glm-companion.mjs review [--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--temperature <0-2>] [--top-p <0-1>] [--seed <int>] [--json] [focus text]",
+      "  node scripts/glm-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--temperature <0-2>] [--top-p <0-1>] [--seed <int>] [--json] [focus text]",
       "  node scripts/glm-companion.mjs task [--system <text>] [--model <model>] [--thinking on|off] [--json] [prompt]",
       "  node scripts/glm-companion.mjs rescue [--system <text>] [--model <model>] [--thinking on|off] [--json] [prompt]",
       "  node scripts/glm-companion.mjs status [job-id] [--all] [--json]",
@@ -85,6 +85,27 @@ function parseThinkingFlag(value, defaultValue = false) {
     return false;
   }
   throw new Error(`--thinking expects on|off (got: ${value}).`);
+}
+
+/**
+ * Parse a CLI-supplied sampling parameter as a finite float, else
+ * return undefined. glm-client's assignOptionalSamplingParam also
+ * validates range, so this helper is intentionally lenient — any
+ * parse failure degrades to "use server default" rather than
+ * throwing. Throwing would force the user to retry an entire review
+ * command over a typo, which is worse UX than silently ignoring the
+ * malformed flag.
+ */
+function parseFloatOrUndefined(value) {
+  if (value === undefined || value === null || value === "") return undefined;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function parseIntOrUndefined(value) {
+  if (value === undefined || value === null || value === "") return undefined;
+  const n = Number(value);
+  return Number.isFinite(n) && Number.isInteger(n) ? n : undefined;
 }
 
 function outputResult(value, asJson) {
@@ -306,7 +327,15 @@ function buildReviewSystemPrompt({ adversarial, schema }) {
 
 async function runReview(argv, { adversarial }) {
   const { options, positionals } = parseCommandInput(argv, {
-    valueOptions: ["base", "scope", "model", "thinking"],
+    valueOptions: [
+      "base", "scope", "model", "thinking",
+      // Sampling-param knobs (v0.4.7). Values forwarded to glm-client as
+      // options.temperature / options.topP / options.seed etc. Unset =
+      // server-side default (current v0.4.6 behavior preserved). Ranges
+      // are validated in glm-client's assignOptionalSamplingParam —
+      // out-of-range values are silently dropped, not rejected.
+      "temperature", "top-p", "seed", "frequency-penalty", "presence-penalty"
+    ],
     // `wait` / `background` are no-ops here — declared so parseArgs consumes
     // them instead of leaking into positionals as focus text. Real detach
     // lives in Claude Code's `Bash(run_in_background: true)`. See
@@ -365,6 +394,14 @@ async function runReview(argv, { adversarial }) {
     systemPrompt,
     model: options.model,
     thinking,
+    // Sampling-param pass-through. Values stay `undefined` when the
+    // corresponding CLI flag is absent → glm-client's validator skips
+    // them and the server default applies.
+    temperature: parseFloatOrUndefined(options.temperature),
+    topP: parseFloatOrUndefined(options["top-p"]),
+    seed: parseIntOrUndefined(options.seed),
+    frequencyPenalty: parseFloatOrUndefined(options["frequency-penalty"]),
+    presencePenalty: parseFloatOrUndefined(options["presence-penalty"]),
     expectJson: true,
     onProgress: reporter
   });

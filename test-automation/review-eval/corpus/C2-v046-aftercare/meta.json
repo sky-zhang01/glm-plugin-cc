@@ -1,0 +1,27 @@
+{
+  "fixture_id": "C2-v046-aftercare",
+  "description": "The v0.4.5 → v0.4.6 diff for glm-plugin-cc itself. Captures the full set of changes that landed in v0.4.6: BigModel error-code dispatch, retry/backoff layer, verify-release.yml retirement. Chosen as the medium-size fixture because we know this code intimately (we wrote it) which makes ground-truth curation possible.",
+  "captured_at": "2026-04-21",
+  "source_repo": "SkyLab/glm-plugin-cc (Gitea)",
+  "base_ref": "8fc1b98",
+  "head_ref": "d5fa754",
+  "line_count": 1550,
+  "byte_count": 63455,
+  "touched_files": [
+    ".claude-plugin/marketplace.json",
+    ".claude-plugin/plugin.json",
+    ".github/workflows/verify-release.yml (deleted)",
+    "CHANGELOG.md",
+    "package.json",
+    "release_card.md (excluded from fixture — meta-doc, not review target)",
+    "scripts/ci/check-release-ready.sh (new)",
+    "scripts/hooks/pre-push",
+    "scripts/lib/bigmodel-errors.mjs (new)",
+    "scripts/lib/glm-client.mjs",
+    "scripts/lib/retry.mjs (new)",
+    "tests/bigmodel-errors.test.mjs (new)",
+    "tests/retry.test.mjs (new)"
+  ],
+  "review_scope": "branch (base=8fc1b98)",
+  "notes": "release_card.md is excluded from the pinned diff because it's a meta-document describing the release, not code under review. Reviewing it would create circular self-reference."
+}

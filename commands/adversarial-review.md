@@ -1,6 +1,6 @@
 ---
 description: Run a GLM review that challenges the implementation approach and design choices
-argument-hint: '[--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [focus ...]'
+argument-hint: '[--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--temperature <0-2>] [--top-p <0-1>] [--seed <int>] [focus ...]'
 disable-model-invocation: true
 allowed-tools: Read, Glob, Grep, Bash(node:*), Bash(git:*), AskUserQuestion
 ---
@@ -88,5 +88,11 @@ Bash({
   Mirrors codex CLI default `model_reasoning_effort = "medium"` on
   `gpt-5.4`). Use `--thinking off` only if the latency / token cost is
   prohibitive. BigModel API only exposes binary enabled/disabled.
+- `--temperature <0-2>` / `--top-p <0-1>` / `--seed <int>` — sampling
+  parameters. Same semantics as `/glm:review`. For adversarial review
+  specifically, lower temperature can reduce fabricated citations
+  (a known GLM-5.1 failure mode on large diffs — see Gitea issue #7).
+  Plugin currently ships no opinionated default; `/glm:adversarial-review`
+  uses BigModel's server-side default unless overridden.
 - `--wait` / `--background` — execution mode bypass. See "Execution mode rules" above.
 - Trailing tokens after flags are treated as free-form focus text.

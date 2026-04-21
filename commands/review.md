@@ -1,6 +1,6 @@
 ---
 description: Run a GLM code review against local git state
-argument-hint: '[--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [focus text]'
+argument-hint: '[--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--temperature <0-2>] [--top-p <0-1>] [--seed <int>] [focus text]'
 disable-model-invocation: true
 allowed-tools: Read, Glob, Grep, Bash(node:*), Bash(git:*), AskUserQuestion
 ---
@@ -91,5 +91,14 @@ Bash({
   latency / token cost outweighs the reasoning benefit. BigModel API
   only exposes binary enabled/disabled; no multi-level effort control
   is available.
+- `--temperature <0-2>` / `--top-p <0-1>` / `--seed <int>` — sampling
+  parameters forwarded to the BigModel API. Unset = BigModel
+  server-side default (generally tuned for chat, not review). Lowering
+  temperature (e.g. `0.2`) and top-p (e.g. `0.85`) makes review more
+  deterministic and is worth trying if you observe fabricated
+  citations or schema-echo failures. `--seed 42` plus low temperature
+  makes runs approximately reproducible. The plugin does NOT ship
+  opinionated defaults yet — see Gitea issue #7 for the in-flight
+  empirical investigation.
 - `--wait` / `--background` — execution mode bypass. See "Execution mode rules" above.
 - Trailing tokens after flags are treated as free-form focus text.
