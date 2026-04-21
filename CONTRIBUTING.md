@@ -79,7 +79,7 @@ entry in the same PR.
 
 1. Land changes on `develop` via PR (with CI + maintainer approval).
 2. When a release is ready: open a PR `develop` → `main`.
-3. After the merge, tag `main` with `vX.Y.Z`. The `release-pipeline.yml`
+3. After the merge, tag `main` with `vX.Y.Z`. The `verify-release.yml`
    workflow verifies `package.json` / `plugin.json` /
    `marketplace.json` version parity, the CHANGELOG entry, and
    `release_card.md Status: READY`.
