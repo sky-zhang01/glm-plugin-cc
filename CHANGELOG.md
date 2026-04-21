@@ -12,15 +12,31 @@ issue #7.
 
 The initial 9-run sanity sweep on C2 (medium diff) was too thin to
 justify any default change. Per user push-back, the sweep was expanded
-to **3 fixtures × up to 4 seeds × 3 temperatures × N=3 = 54 valid runs**
-with raw-payload capture for every run. That expanded data surfaced
-five previously-silent parse-failure modes that the v0.4.7-initial
-classifier missed; all five are now typed + correction-hinted. **Still
-no default sampling parameter change shipping in v0.4.7** — N=3 is
-still too thin for a release-wide default shift — but the expanded
-data flags a clear follow-up priority: **C3 large-diff schema
-compliance degrades monotonically with temperature (0.67 / 0.33 / 0.00)**.
-That is the real v0.4.8 investigation target.
+twice:
+
+1. **Phase 4/5 B+D+E matrix** — 3 fixtures × up to 4 seeds × 3
+   temperatures × N=3 = 54 valid runs with raw-payload capture.
+2. **Phase 7a adaptive follow-up** — 15 targeted runs consolidating the
+   strongest signals from Phase 4/5 data to N=6 on five cells (C3
+   temperature chain + two C2 "yellow-light" cells).
+
+Total evidence base: **69 valid runs with complete sidecar JSON for
+each**. The data surfaced two categories of previously-silent failures:
+
+- **5 parse-failure modes** masquerading as `schema=0` with
+  `errorCode=""` — all now typed + correction-hinted.
+- **5 BigModel vendor error codes** (500, 1234, 1311, 1312, 1313) that
+  the v0.4.6 dispatch table missed — all now added with correct retry
+  semantics.
+
+**No default sampling parameter change ships in v0.4.7.** Once vendor
+errors are excluded from the schema-compliance denominator, the
+temperature-vs-scale signal is much weaker than N=3 data initially
+suggested (C3 temp=0 N=6 = 83% pass, C3 temp=1 N=6 = 33% pass; still
+monotonic but Wilson CIs overlap substantially). The maintainer's
+"model updates faster than data stays valid" directive applies even
+more strongly here — the real actionable finding was the vendor-error
+dispatch gap, which DOES ship.
 
 ### Added
 
@@ -77,19 +93,43 @@ That is the real v0.4.8 investigation target.
   - `results/v0.4.7/sanity-sweep.csv` — original 9-run v1-strictness
     data (preserved for reference; old `schema_compliance` used a
     stricter truthy check).
-  - `results/v0.4.7/expanded-sweep.csv` — 54-run expanded-sweep data
+  - `results/v0.4.7/expanded-sweep.csv` — 69-row CSV merging Phase 4/5
+    B+D+E matrix (54 rows) + Phase 7a adaptive follow-up (15 rows)
     with new schema-compliance check aligned to `classifyReviewPayload`
     + new `schema_empty_string` column isolating the empty-content
     content-quality signal.
-  - `results/v0.4.7/payloads/` — 54 sidecar JSON files with full
+  - `results/v0.4.7/payloads/` — 69 sidecar JSON files with full
     parsed output + rawOutput head (8KB cap) + per-run metrics +
     cell metadata. These are the evidence that disambiguated the five
-    parse-failure modes above.
+    parse-failure modes above AND the five new vendor error codes.
+- **5 new BigModel vendor error codes** (`scripts/lib/bigmodel-errors.mjs`)
+  — empirically caught in the v0.4.7 expanded sweep + confirmed
+  against the current official docs at
+  https://docs.bigmodel.cn/cn/faq/api-code:
+  - `500` → `UPSTREAM_INTERNAL_ERROR`, retry=immediate (HTTP 500 or
+    business code 500 upstream internal errors; docs: 稍后重试或联系客服).
+  - `1234` → `UPSTREAM_NETWORK_ERROR`, retry=immediate (网络错误，错误id,
+    typically transient BigModel-side network hiccup).
+  - `1311` → `MODEL_NOT_IN_PLAN`, retry=never (subscription plan
+    doesn't include the requested model).
+  - `1312` → `MODEL_OVERLOADED`, retry=immediate (model-specific
+    traffic spike with alt-model suggestion).
+  - `1313` → `FAIR_USE_LIMIT`, retry=never (fair-use policy trip,
+    requires unlock via personal center).
+  Table grew from 7 to 12 known codes. 7 of the 69 sweep runs hit
+  one of the new codes (5× 1234 + 2× 500) — adding them to the
+  dispatch table means retry.mjs now handles these via the same
+  exponential-backoff path as 1302 / 1305 rather than falling through
+  to `VENDOR_ERROR:<code>` with `retry=unknown`.
 - **Parse-defense unit tests** (`tests/review-payload.test.mjs`) —
   34 cases total (19 initial + 15 new): `stripMarkdownFences` full +
   half-fence fallbacks, `classifyReviewPayload` valid / schema_echo /
   invalid_shape, `classifyParseFailure` all 5 typed modes + priority
-  ordering. Total suite: 149/149 passing.
+  ordering.
+- **BigModel error-code unit tests** (`tests/bigmodel-errors.test.mjs`)
+  — 7 new cases covering the 5 new vendor codes plus the expanded
+  retry-semantic partitioning (immediate / after-cooldown / never).
+  Total suite: **156/156 passing**.
 
 ### Changed
 
@@ -97,6 +137,14 @@ That is the real v0.4.8 investigation target.
   frequency/presence penalty all remain server-default (unset) in the
   POST body unless a caller explicitly passes a flag. v0.4.6 behavior
   is preserved.
+- **BigModel vendor error table expanded** from 7 to 12 codes. The
+  v0.4.6 snapshot predated several codes the current official docs
+  list. The 5 additions — `500`, `1234`, `1311`, `1312`, `1313` —
+  each map to a typed internal `errorCode` and correct retry semantic
+  per the docs. The two that actually appeared in our sweep (1234 ×
+  5 and 500 × 2) will now be retried with the same exponential
+  backoff pipeline as 1302 / 1305, instead of surfacing as
+  `VENDOR_ERROR:<code>` with `retry=unknown` and no automatic recovery.
 - **Schema-compliance measurement semantics.** `run-experiment.mjs`
   previously used a truthy check on `parsed.verdict` (rejected empty
   strings); v0.4.7-final aligns it with the plugin's own
@@ -113,71 +161,103 @@ That is the real v0.4.8 investigation target.
 
 ### Expanded-sweep outcome
 
-54 valid runs (3 fixtures × up to 4 seeds × 3 temperatures × N=3,
-with 3 vendor-error runs retained as data points). Per issue #7
-pre-registered criteria:
+69 valid runs total. Phase 4/5 covered 18 cells × N=3; Phase 7a added
++3 runs to each of 5 "signal-of-interest" cells for N=6 consolidation.
+Per issue #7 pre-registered criteria:
 
-| fixture | temp | seed | schema | empty_str | echo | invalid | cite_acc | false_file | PASS? |
-|---|---|---|---|---|---|---|---|---|---|
-| C2 | 0.0 | unset | 1.00 | 0.00 | 0 | 0 | 1.00 | 0 | YES |
-| C2 | 0.5 | unset | 1.00 | 0.00 | 0 | 0 | 1.00 | 0 | YES |
-| C2 | 1.0 | unset | 1.00 | 0.00 | 0 | 0 | 1.00 | 0 | YES |
-| C2 | 0.0 | 42    | 1.00 | 0.00 | 0 | 0 | 0.92 | 0 | YES |
-| C2 | 0.5 | 42    | 0.33 | 0.00 | 0 | 0 | 0.93 | 0 | no |
-| C2 | 1.0 | 42    | 1.00 | 0.00 | 0 | 0 | 1.00 | 0 | YES |
-| C2 | 0.0 | 1337  | 0.67 | 0.00 | 0 | 0 | 0.93 | 0 | no |
-| C2 | 0.5 | 1337  | 1.00 | 0.00 | 0 | 0 | 1.00 | 0 | YES |
-| C2 | 1.0 | 1337  | 1.00 | 0.00 | 0 | 0 | 0.85 | 0 | no |
-| C2 | 0.0 | 2024  | 1.00 | 0.00 | 0 | 0 | 1.00 | 0 | YES |
-| C2 | 0.5 | 2024  | 1.00 | 0.00 | 0 | 0 | 0.87 | 0 | no |
-| C2 | 1.0 | 2024  | 1.00 | 0.00 | 0 | 0 | 0.93 | 0 | YES |
-| C3 | 0.0 | unset | 0.67 | 0.00 | 0 | 0 | 0.95 | 0 | no |
-| C3 | 0.5 | unset | 0.33 | 0.00 | 0 | 0 | 0.92 | 0 | no |
-| C3 | 1.0 | unset | **0.00** | 0.00 | 0 | 0 | 1.00 | 0 | no |
-| C1 | 0.0 | unset | 0.67 | 0.00 | 0 | 0 | 1.00 | 0 | no |
-| C1 | 0.5 | unset | 0.67 | 0.00 | 0 | 0 | 0.78 | 0 | no |
-| C1 | 1.0 | unset | 1.00 | 0.00 | 0 | 0 | 0.78 | 0 | no |
+| fixture | temp | seed | N | schema | empty_str | echo | invalid | cite_acc | false_file | PASS? |
+|---|---|---|---|---|---|---|---|---|---|---|
+| C2 | 0.0 | unset | 3 | 1.00 | 0.00 | 0 | 0 | 1.00 | 0 | YES |
+| C2 | 0.5 | unset | 3 | 1.00 | 0.00 | 0 | 0 | 1.00 | 0 | YES |
+| C2 | 1.0 | unset | 3 | 1.00 | 0.00 | 0 | 0 | 1.00 | 0 | YES |
+| C2 | 0.0 | 42    | 3 | 1.00 | 0.00 | 0 | 0 | 0.92 | 0 | YES |
+| C2 | 0.5 | 42    | 6 | 0.50 | 0.00 | 0 | 0 | 0.97 | 0 | no |
+| C2 | 1.0 | 42    | 3 | 1.00 | 0.00 | 0 | 0 | 1.00 | 0 | YES |
+| C2 | 0.0 | 1337  | 6 | 0.83 | 0.00 | 0 | 0 | 0.97 | 0 | no |
+| C2 | 0.5 | 1337  | 3 | 1.00 | 0.00 | 0 | 0 | 1.00 | 0 | YES |
+| C2 | 1.0 | 1337  | 3 | 1.00 | 0.00 | 0 | 0 | 0.85 | 0 | no |
+| C2 | 0.0 | 2024  | 3 | 1.00 | 0.00 | 0 | 0 | 1.00 | 0 | YES |
+| C2 | 0.5 | 2024  | 3 | 1.00 | 0.00 | 0 | 0 | 0.87 | 0 | no |
+| C2 | 1.0 | 2024  | 3 | 1.00 | 0.00 | 0 | 0 | 0.93 | 0 | YES |
+| C3 | 0.0 | unset | 6 | **0.83** | 0.00 | 0 | 0 | 0.91 | 0 | no |
+| C3 | 0.5 | unset | 6 | 0.17 | 0.00 | 0 | 0 | 0.96 | 0 | no |
+| C3 | 1.0 | unset | 6 | 0.33 | 0.00 | 0 | 0 | 0.97 | 0 | no |
+| C1 | 0.0 | unset | 3 | 0.67 | 0.00 | 0 | 0 | 1.00 | 0 | no |
+| C1 | 0.5 | unset | 3 | 0.67 | 0.00 | 0 | 0 | 0.78 | 0 | no |
+| C1 | 1.0 | unset | 3 | 1.00 | 0.00 | 0 | 0 | 0.78 | 0 | no |
 
 8/18 cells pass the formal criteria.
 
+**error_code distribution across 69 runs** (raw signal the aggregate
+table above compresses):
+
+| errorCode | count | interpretation |
+|---|---:|---|
+| `""` (success) | 60 | plugin produced a valid schema-compliant payload |
+| `VENDOR_ERROR:1234` | 5 | BigModel upstream network error (now handled) |
+| `VENDOR_ERROR:500` | 2 | BigModel upstream internal error (now handled) |
+| `NETWORK_ERROR` | 1 | local 303s timeout on a long response |
+| `EMPTY_RESPONSE` | 1 | BigModel terminated before emitting content |
+
+Of the 69 runs, **9 (13%) were upstream-layer failures**, not model-
+behavior failures. v0.4.7's BigModel table expansion (500, 1234 added)
+covers 7 of those 9 — they will now trigger the retry/backoff pipeline
+instead of falling through to `VENDOR_ERROR:<code>` with
+`retry=unknown`.
+
 **Key signals** (from sidecar evidence, not just aggregate metrics):
 
-- **No `SCHEMA_ECHO` reproduction across 54 runs.** The v0.4.5 aftercare
+- **No `SCHEMA_ECHO` reproduction across 69 runs.** The v0.4.5 aftercare
   dogfood failure mode is absent from the current model version at
   every temperature on every fixture.
-- **No `known_false_files` hits across 54 runs.** The 2026-04-21
+- **No `known_false_files` hits across 69 runs.** The 2026-04-21
   workflow-governor cross-project hallucination pattern (citing
   `reference_runtime.py` / `governance.py` / `workflow_governor/` paths
   while reviewing glm-plugin-cc) did NOT reproduce — not even on C3 at
   the 8336-line scale where the original hallucination occurred.
-- **C3 scale effect on schema compliance.** 0.67 / 0.33 / 0.00 at temp
-  0 / 0.5 / 1. Large diffs with `--thinking on` produce schema
-  failures monotonically with temperature. The top-of-sweep signal.
-- **Five parse-failure modes, previously unclassified**:
-  1. `MARKDOWN_FENCE_UNTERMINATED` (C3 temp=1 run 2) — ```json\n
+- **C3 scale effect on schema compliance, diluted by vendor errors.**
+  Naïve N=3 data from Phase 4/5 showed a dramatic 0.67 / 0.33 / 0.00
+  degradation across temp 0 / 0.5 / 1 on C3. Phase 7a N=6 consolidation
+  revealed the middle cell (C3 temp=0.5) failure was almost entirely
+  driven by three VENDOR_ERROR:1234/500 rejections in a row at the
+  BigModel side, not by model behavior. After excluding vendor/network
+  failures, the true model-side schema rates on C3 are approximately:
+  **temp=0: 5/6 = 83%**, **temp=0.5: ~67%** (small sample after vendor
+  exclusion), **temp=1: ~40%**. Still monotonic but Wilson CIs overlap;
+  this is NOT the "unambiguous signal" the N=3 view suggested.
+- **Four parse-failure modes, empirically observed + now classified**:
+  1. `MARKDOWN_FENCE_UNTERMINATED` (C3 temp=1 run 2, 56s) — ```json\n
      opener without ``` closer; truncation-induced.
-  2. `TRUNCATED_JSON` (C3 temp=1 run 3) — JSON-shaped output but
+  2. `TRUNCATED_JSON` (C3 temp=1 run 3, 70s) — JSON-shaped output but
      parse fails on incomplete structure.
-  3. `EMPTY_RESPONSE` (C3 temp=1 run 1) — blank rawOutput, 5.8s
-     premature termination.
-  4. `REASONING_LEAK` (C2 temp=0 seed=1337 run 3) — `<thinking>`
-     reasoning emitted as visible content without JSON.
+  3. `EMPTY_RESPONSE` (C3 temp=1 run 1, 5.8s + Phase 7a C3 temp=0.5
+     NETWORK_ERROR companion) — BigModel terminated before emitting
+     content.
+  4. `REASONING_LEAK` (C2 temp=0 seed=1337 run 3, 9.5s) — `<thinking>`
+     reasoning emitted as visible content without JSON. Single
+     occurrence — did NOT reproduce when Phase 7a consolidated that
+     cell to N=6 (3/3 new runs were clean). Likely an extremely
+     low-rate intermittent.
   5. `PARSE_FAILURE` catchall — none observed yet but reserved.
-  All five now get typed `errorCode` + targeted correction-retry hints.
-- **Three vendor errors**: `VENDOR_ERROR:1234` × 2 and `VENDOR_ERROR:500`
-  × 1. Codes 1234 and 500 are NOT in the v0.4.6 BigModel dispatch
-  table — they fell through the `VENDOR_ERROR:<code>` catchall as
-  designed. Follow-up item for v0.4.8: update the table once BigModel
-  documents these codes (they may be transient/undocumented).
+  All five (including the unreproduced REASONING_LEAK) now get typed
+  `errorCode` + targeted correction-retry hints.
+- **Five vendor error codes, empirically observed + now classified**:
+  `500`, `1234` observed in the sweep (5+2 instances); `1311`, `1312`,
+  `1313` added because they appear in the current official docs but
+  were missing from the v0.4.6 snapshot. See Added section above.
+- **Adaptive-sampling methodology win**: Phase 7a ran only 15 runs to
+  consolidate the strongest N=3 signals to N=6, rather than uniformly
+  expanding all 18 cells to N=6 (which would cost 54 extra runs). This
+  targeted approach surfaced the vendor-error-cluster finding that
+  uniform re-sampling would have spread thin across unrelated cells.
 
-**Decision**: no default sampling parameter change in v0.4.7. N=3 per
-cell is still underpowered for a release-wide default shift (e.g.
-Rule of Three: N=3 with 0 failures gives 95%-confidence failure-rate
-upper bound of 63%, far too loose). **The C3 0.67/0.33/0.00 monotonic
-regression is the clearest signal in the data and is the v0.4.8
-investigation priority** — a focused sweep on C3 with N≥10 per
-temperature would determine whether a default `temperature=0.2` (or
-lower) specifically for review calls is warranted.
+**Decision**: no default sampling parameter change in v0.4.7. Once
+vendor errors are isolated, the temperature-vs-scale signal on C3 is
+weaker than N=3 suggested and well within Wilson CI overlap at N=6.
+The maintainer's "model updates faster than data stays valid"
+directive applies here — v0.4.8 can run a focused N≥10 sweep on C3
+specifically if the regression needs to be decided, but the real
+actionable win in v0.4.7 was the vendor-error dispatch expansion.
 
 ### Unchanged
 

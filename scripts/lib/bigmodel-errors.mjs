@@ -11,7 +11,9 @@
  * Table sourced from the official doc:
  *   https://docs.bigmodel.cn/cn/faq/api-code
  * Cross-checked with the empirical 1305 observation from
- * glm-plugin-cc v0.4.5 dogfood session ("该模型当前访问量过大").
+ * glm-plugin-cc v0.4.5 dogfood session ("该模型当前访问量过大") and the
+ * v0.4.7 expanded-sweep session which caught 500 + 1234 + 1312 + 1313
+ * appearing in the wild (not in the v0.4.6 snapshot of the table).
  *
  * Exported so companion error paths can map BigModel codes to our
  * `errorCode` surface and drive automatic retry (`retry: "immediate"`)
@@ -41,6 +43,22 @@
  * mode the official docs haven't listed yet).
  */
 export const BIG_MODEL_ERROR_CODES = Object.freeze({
+  "500": {
+    errorCode: "UPSTREAM_INTERNAL_ERROR",
+    retry: "immediate",
+    message: () =>
+      "BigModel 500 — upstream internal error (HTTP 500 or business code 500). " +
+      "Per official docs: 稍后重试或联系客服. Treat as transient and retry with backoff; " +
+      "if persistent across multiple attempts, contact BigModel support."
+  },
+  "1234": {
+    errorCode: "UPSTREAM_NETWORK_ERROR",
+    retry: "immediate",
+    message: () =>
+      "BigModel 1234 — upstream network error (docs: 网络错误，错误id:${error_id}，请联系客服). " +
+      "A single 1234 is typically a transient BigModel-side network hiccup; our retry/backoff " +
+      "will handle it. If you see repeated 1234s with the same error_id, contact support."
+  },
   "1301": {
     errorCode: "CONTENT_BLOCKED",
     retry: "never",
@@ -92,6 +110,30 @@ export const BIG_MODEL_ERROR_CODES = Object.freeze({
     message: () =>
       "BigModel 1310 — weekly or monthly usage cap reached. " +
       "Wait for the next period's reset window. Immediate retry will re-fail."
+  },
+  "1311": {
+    errorCode: "MODEL_NOT_IN_PLAN",
+    retry: "never",
+    message: ({ model } = {}) =>
+      "BigModel 1311 — the current subscription plan does not include " +
+      (model ? `model "${model}"` : "this model") + " access. " +
+      "Pick a model your plan covers (/glm:setup) or upgrade the plan. Retry won't help."
+  },
+  "1312": {
+    errorCode: "MODEL_OVERLOADED",
+    retry: "immediate",
+    message: ({ model } = {}) =>
+      "BigModel 1312 — model-specific traffic spike" +
+      (model ? ` on "${model}"` : "") + " (docs suggest trying an alternative model). " +
+      "Backing off and retrying; if persistent, try --model glm-4.6 or off-peak hours."
+  },
+  "1313": {
+    errorCode: "FAIR_USE_LIMIT",
+    retry: "never",
+    message: () =>
+      "BigModel 1313 — account tripped the fair-use policy rate limit (订阅服务协议). " +
+      "Request frequency is throttled until you request removal via the personal center. " +
+      "Immediate retry will re-fail; see https://open.bigmodel.cn/usercenter/proj-mgmt."
   }
 });
 

@@ -1,0 +1,89 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": 42,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 86963,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 aftercare branch introduces retry logic and BigModel error classification that have several material defects: the retry module silently swallows AbortSignal interactions on the happy path and can exceed configured max attempts under concurrent cancellation, the GLM client's retry integration has a code-path that can produce double-reporting of errors, and the CI check-release-ready.sh script has an untested exit-code trap that could silently pass a broken release. These are not theoretical — they are reachable on real failure scenarios involving API rate-limits or network timeouts.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry loop can execute one more attempt than `maxAttempts` under AbortSignal cancellation",
+        "body": "In `retry.mjs`, the retry loop uses a `while(true)` with an `attempts` counter incremented after the attempt. If the caller-provided `fn` throws on attempt N and the AbortSignal fires between the throw and the `handleResult` call, the `cancelled` branch breaks without checking `attempts <= maxAttempts`. On the next iteration (after signal cleanup), the loop re-evaluates and may execute attempt N+1 if the signal was transient. More critically, the `attempts` count reported to `onRetry` and the final error can be off-by-one relative to `maxAttempts`, meaning the caller sees `attempts > maxAttempts` in the error info. This violates the stated contract and makes debugging intermittent failures harder. Under rate-limiting from BigModel, this means one extra API call that could push deeper into throttle territory.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Add a guard `if (attempts >= maxAttempts) break;` immediately after incrementing `attempts` and before any `onRetry` callback. Also ensure the `cancelled` check still respects `maxAttempts` by breaking unconditionally when the attempt budget is exhausted regardless of signal state."
+      },
+      {
+        "severity": "high",
+        "title": "GLM client retries may double-fire error events on final exhausted attempt",
+        "body": "In `glm-client.mjs`, the integration with retry wraps API calls and maps BigModel error codes. When `retry()` exhausts all attempts, it throws a `RetryError` containing the last error. The caller in glm-client catches this and emits/logs an error. However, if the last attempt also triggers a BigModel error classification that itself logs or emits (e.g., via `classifyError` returning a fatal code), the same logical failure gets reported twice — once from the error classifier and once from the RetryError catch. Under production load with rate-limiting, this inflates error metrics and can trigger false alerting thresholds.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 99,
+        "confidence": 0.68,
+        "recommendation": "Ensure that BigModel error classification in the retry `onRetry`/`handleResult` path only fires diagnostic events for retries that will actually be retried, not for the final fatal attempt. Alternatively, suppress the RetryError's nested error from re-classification if it has already been classified."
+      },
+      {
+        "severity": "medium",
+        "title": "check-release-ready.sh uses `set -e` but piped commands silently swallow downstream failures",
+        "body": "The CI script `check-release-ready.sh` uses `set -e` for safety, but contains piped commands (e.g., version extraction or JSON validation via grep/jq pipes). Under `set -e`, only the last command in a pipeline fails the script by default (unless `set -o pipefail` is also set). If the first command in a pipe fails silently (e.g., a missing file), the script continues with stale or empty data and may report 'release ready' for a broken state. This is a classic CI blind spot — the release gate passes but the release is invalid.",
+        "file": "scripts/ci/check-release-ready.sh",
+        "line_start": 1,
+        "line_end": 84,
+        "confidence": 0.78,
+        "recommendation": "Add `set -o pipefail` alongside `set -e` at the top of the script, or refactor piped commands to use temporary variables with explicit error checking."
+      },
+      {
+        "severity": "medium",
+        "title": "AbortSignal timeout cleanup race — `clearTimeout` called after async work may fire uselessly",
+        "body": "In `retry.mjs`, when a per-attempt timeout is configured via AbortSignal, the timeout cleanup (`clearTimeout`) happens after the async `fn` call resolves. If `fn` resolves just after the AbortSignal fires but before the cleanup runs, the `Aborted` state is already set, causing a spurious retry-or-cancel on what was actually a successful attempt. The result of the function is discarded in favor of the abort path. This is a real race under high-latency API calls where the timeout boundary is close to actual response time.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.65,
+        "recommendation": "Check `signal.aborted` only if `fn` threw (i.e., in the catch path). If `fn` resolved successfully, ignore the abort signal and return the result immediately, clearing the timeout after returning."
+      },
+      {
+        "severity": "low",
+        "title": "Pre-push hook silently skips all checks if `scripts/ci/check-release-ready.sh` is not executable",
+        "body": "The pre-push hook at `scripts/hooks/pre-push` invokes `check-release-ready.sh`. If the script file lacks the executable bit (e.g., after a Windows clone or a tar extraction), the hook fails with a permission error that may be interpreted as a push rejection or, depending on shell configuration, silently skipped. There is no guard checking executability or providing a clear diagnostic.",
+        "file": "scripts/hooks/pre-push",
+        "line_start": 1,
+        "line_end": 22,
+        "confidence": 0.55,
+        "recommendation": "Add a guard at the top of the pre-push hook: `if [ ! -x scripts/ci/check-release-ready.sh ]; then echo 'ERROR: check-release-ready.sh is not executable. Run: chmod +x scripts/ci/check-release-ready.sh'; exit 1; fi`."
+      }
+    ],
+    "next_steps": [
+      "Run `git diff 8fc1b98..HEAD -- scripts/lib/retry.mjs` to verify the exact loop structure and confirm the off-by-one on maxAttempts under abort.",
+      "Trace a full rate-limit retry scenario end-to-end: BigModel returns 429 → classifyError → retry → exhaust → RetryError → glm-client catch, and verify single error emission.",
+      "Add `set -o pipefail` to check-release-ready.sh and test with a deliberately broken package.json to confirm the gate fails.",
+      "Run the existing retry tests with AbortSignal and verify attempts count never exceeds maxAttempts in the test assertions."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.6 aftercare branch introduces retry logic and BigModel error classification that have several material defects: the retry module silently swallows AbortSignal interactions on the happy path and can exceed configured max attempts under concurrent cancellation, the GLM client's retry integration has a code-path that can produce double-reporting of errors, and the CI check-release-ready.sh script has an untested exit-code trap that could silently pass a broken release. These are not theoretical — they are reachable on real failure scenarios involving API rate-limits or network timeouts.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Retry loop can execute one more attempt than `maxAttempts` under AbortSignal cancellation\",\"body\":\"In `retry.mjs`, the retry loop uses a `while(true)` with an `attempts` counter incremented after the attempt. If the caller-provided `fn` throws on attempt N and the AbortSignal fires between the throw and the `handleResult` call, the `cancelled` branch breaks without checking `attempts <= maxAttempts`. On the next iteration (after signal cleanup), the loop re-evaluates and may execute attempt N+1 if the signal was transient. More critically, the `attempts` count reported to `onRetry` and the final error can be off-by-one relative to `maxAttempts`, meaning the caller sees `attempts > maxAttempts` in the error info. This violates the stated contract and makes debugging intermittent failures harder. Under rate-limiting from BigModel, this means one extra API call that could push deeper into throttle territory.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.72,\"recommendation\":\"Add a guard `if (attempts >= maxAttempts) break;` immediately after incrementing `attempts` and before any `onRetry` callback. Also ensure the `cancelled` check still respects `maxAttempts` by breaking unconditionally when the attempt budget is exhausted regardless of signal state.\"},{\"severity\":\"high\",\"title\":\"GLM client retries may double-fire error events on final exhausted attempt\",\"body\":\"In `glm-client.mjs`, the integration with retry wraps API calls and maps BigModel error codes. When `retry()` exhausts all attempts, it throws a `RetryError` containing the last error. The caller in glm-client catches this and emits/logs an error. However, if the last attempt also triggers a BigModel error classification that itself logs or emits (e.g., via `classifyError` returning a fatal code), the same logical failure gets reported twice — once from the error classifier and once from the RetryError catch. Under production load with rate-limiting, this inflates error metrics and can trigger false alerting thresholds.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":99,\"confidence\":0.68,\"recommendation\":\"Ensure that BigModel error classification in the retry `onRetry`/`handleResult` path only fires diagnostic events for retries that will actually be retried, not for the final fatal attempt. Alternatively, suppress the RetryError's nested error from re-classification if it has already been classified.\"},{\"severity\":\"medium\",\"title\":\"check-release-ready.sh uses `set -e` but piped commands silently swallow downstream failures\",\"body\":\"The CI script `check-release-ready.sh` uses `set -e` for safety, but contains piped commands (e.g., version extraction or JSON validation via grep/jq pipes). Under `set -e`, only the last command in a pipeline fails the script by default (unless `set -o pipefail` is also set). If the first command in a pipe fails silently (e.g., a missing file), the script continues with stale or empty data and may report 'release ready' for a broken state. This is a classic CI blind spot — the release gate passes but the release is invalid.\",\"file\":\"scripts/ci/check-release-ready.sh\",\"line_start\":1,\"line_end\":84,\"confidence\":0.78,\"recommendation\":\"Add `set -o pipefail` alongside `set -e` at the top of the script, or refactor piped commands to use temporary variables with explicit error checking.\"},{\"severity\":\"medium\",\"title\":\"AbortSignal timeout cleanup race — `clearTimeout` called after async work may fire uselessly\",\"body\":\"In `retry.mjs`, when a per-attempt timeout is configured via AbortSignal, the timeout cleanup (`clearTimeout`) happens after the async `fn` call resolves. If `fn` resolves just after the AbortSignal fires but before the cleanup runs, the `Aborted` state is already set, causing a spurious retry-or-cancel on what was actually a successful attempt. The result of the function is discarded in favor of the abort path. This is a real race under high-latency API calls where the timeout boundary is close to actual response time.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.65,\"recommendation\":\"Check `signal.aborted` only if `fn` threw (i.e., in the catch path). If `fn` resolved successfully, ignore the abort signal and return the result immediately, clearing the timeout after returning.\"},{\"severity\":\"low\",\"title\":\"Pre-push hook silently skips all checks if `scripts/ci/check-release-ready.sh` is not executable\",\"body\":\"The pre-push hook at `scripts/hooks/pre-push` invokes `check-release-ready.sh`. If the script file lacks the executable bit (e.g., after a Windows clone or a tar extraction), the hook fails with a permission error that may be interpreted as a push rejection or, depending on shell configuration, silently skipped. There is no guard checking executability or providing a clear diagnostic.\",\"file\":\"scripts/hooks/pre-push\",\"line_start\":1,\"line_end\":22,\"confidence\":0.55,\"recommendation\":\"Add a guard at the top of the pre-push hook: `if [ ! -x scripts/ci/check-release-ready.sh ]; then echo 'ERROR: check-release-ready.sh is not executable. Run: chmod +x scripts/ci/check-release-ready.sh'; exit 1; fi`.\"}],\"next_steps\":[\"Run `git diff 8fc1b98..HEAD -- scripts/lib/retry.mjs` to verify the exact loop structure and confirm the off-by-one on maxAttempts under abort.\",\"Trace a full rate-limit retry scenario end-to-end: BigModel returns 429 → classifyError → retry → exhaust → RetryError → glm-client catch, and verify single error emission.\",\"Add `set -o pipefail` to check-release-ready.sh and test with a deliberately broken package.json to confirm the gate fails.\",\"Run the existing retry tests with AbortSignal and verify attempts count never exceeds maxAttempts in the test assertions.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T13:20:48.549Z"
+}

@@ -65,7 +65,8 @@ workflow-governor cross-review hallucination session:
      `TRUNCATED_JSON`, `PARSE_FAILURE`.
    - `stripMarkdownFences` also extended with open-only and close-only
      half-fence fallbacks.
-   - 15 new unit tests, total suite 149/149 passing.
+   - 15 new unit tests, total suite 149/149 passing (then expanded
+     to 156/156 in post-phase-7a with 7 new bigmodel-errors tests).
 
 ## Out of Scope
 
@@ -78,11 +79,13 @@ workflow-governor cross-review hallucination session:
   the v0.4.8 investigation priority — a focused C3 sweep with N ≥ 10
   per temperature would determine whether `temperature=0.2` should
   become the review-specific default.
-- **No BigModel error-code table update** despite seeing
-  `VENDOR_ERROR:1234` × 2 and `VENDOR_ERROR:500` × 1 in the expanded
-  sweep. These fell through the v0.4.6 catchall as designed. Deferred
-  to v0.4.8 pending BigModel documenting codes 1234 and 500 (or
-  confirming they are transient/undocumented).
+- **~~No BigModel error-code table update~~** — CANCELED. Phase 7a
+  consolidated the vendor-error observation to 5×1234 + 2×500 across
+  69 runs. Cross-checking https://docs.bigmodel.cn/cn/faq/api-code
+  confirmed both codes are documented (1234 = upstream network error,
+  500 = upstream internal error), plus 3 more codes the v0.4.6
+  snapshot missed (1311, 1312, 1313). Table expansion now ships in
+  v0.4.7 — see "Added" in CHANGELOG.
 - **No C1 (small) / C3 (large) fixtures.** v0.4.7 ships only the C2
   medium fixture. Adding smaller or larger fixtures is deferred until
   a regression actually motivates them.
@@ -122,28 +125,42 @@ workflow-governor cross-review hallucination session:
     `stripMarkdownFences` half-fence fallbacks + 15 new unit tests ✓
 18. **(Added)** CHANGELOG v0.4.7 rewrite with expanded-sweep outcome
     table + C3 scale-effect flag for v0.4.8 ✓
-19. `Skill(simplify)` on changed files — pending
-20. `npm run ci:local` — pending
-21. Adversarial review (Codex primary if quota allows, else GLM
+19. **(Added post-phase-7a)** Adaptive sampling — 15 targeted runs
+    consolidating 5 signal-of-interest cells to N=6 rather than
+    uniform re-sampling. Revealed vendor-error clustering (3/3 at C3
+    t=0.5 were VENDOR_ERROR:1234/500), which explained the N=3
+    "temperature signal" illusion. ✓
+20. **(Added post-phase-7a)** BigModel error-code table expansion:
+    500, 1234, 1311, 1312, 1313 added per official docs recheck.
+    Table grew from 7 to 12 known codes. ✓
+21. **(Added post-phase-7a)** 7 new unit tests for the 5 new vendor
+    codes + retry-semantic partitioning. Total suite: 156/156. ✓
+22. **(Added post-phase-7a)** CHANGELOG update: vendor-error
+    expansion added to Added section, Changed section notes the
+    table growth, outcome table expanded to include N=6 cells +
+    error_code distribution histogram. ✓
+23. `Skill(simplify)` on changed files — pending
+24. `npm run ci:local` — **DONE** (156/156 green)
+25. Adversarial review (Codex primary if quota allows, else GLM
     fallback) — pending
-22. Push to Gitea only. Open PR → `develop`. Paste adversarial verdict
+26. Push to Gitea only. Open PR → `develop`. Paste adversarial verdict
     in PR body. — pending
-23. Gitea CI green → auto-merge PR to develop — pending
-24. Open Gitea PR: develop → main. Merge. — pending
-25. Tag v0.4.7 annotated on main merge commit. Pre-push hook runs
+27. Gitea CI green → auto-merge PR to develop — pending
+28. Open Gitea PR: develop → main. Merge. — pending
+29. Tag v0.4.7 annotated on main merge commit. Pre-push hook runs
     `check-release-ready.sh v0.4.7`. — pending
-26. Publish Gitea release v0.4.7 (Latest auto-set) — pending
-27. Sync main + develop + tag to GitHub. Confirm PR Check + AI Quality
+30. Publish Gitea release v0.4.7 (Latest auto-set) — pending
+31. Sync main + develop + tag to GitHub. Confirm PR Check + AI Quality
     Gate green — pending
-28. Publish GitHub release v0.4.7, mark Latest — pending
-29. Fast-forward develop → main on both remotes (GitFlow cleanup) —
+32. Publish GitHub release v0.4.7, mark Latest — pending
+33. Fast-forward develop → main on both remotes (GitFlow cleanup) —
     pending
-30. Upgrade local plugin cache to v0.4.7 — pending
-31. Close Gitea issue #7 with link to CHANGELOG entry + final CSV,
+34. Upgrade local plugin cache to v0.4.7 — pending
+35. Close Gitea issue #7 with link to CHANGELOG entry + final CSV,
     and open v0.4.8 follow-up issue for focused C3 sweep — pending
 
-## Scope Completion: will reach COMPLETE at step 31
-## Outstanding In-Scope Work: steps 19-31 pending
+## Scope Completion: will reach COMPLETE at step 35
+## Outstanding In-Scope Work: steps 23, 25-35 pending (24 DONE)
 
 ## Major Upgrade Review: N/A
 
@@ -189,8 +206,10 @@ the POST body when the caller explicitly passes a flag).
     with raw-payload sidecar capture + `--base` flag + schema-check
     alignment to classifyReviewPayload
   - `results/v0.4.7/sanity-sweep.csv` (initial 9 runs, v1 strictness)
-  - `results/v0.4.7/expanded-sweep.csv` (54 runs, new strictness)
-  - `results/v0.4.7/payloads/` (54 sidecar JSON files)
+  - `results/v0.4.7/expanded-sweep.csv` (69 runs: 54 Phase 4/5 +
+    15 Phase 7a, new strictness)
+  - `results/v0.4.7/payloads/` (69 sidecar JSON files: 54 Phase 4/5
+    + 15 Phase 7a)
 - Modified: `scripts/ci/check-no-local-paths.sh` (exclude
   review-eval corpus + results paths from path-leak scanner).
 - Version bump in 3 manifest files + CHANGELOG v0.4.7 rewrite with
@@ -203,7 +222,7 @@ the POST body when the caller explicitly passes a flag).
 | Layer | Tool | Pass criterion |
 |---|---|---|
 | Static | `npm run check` | All modules parse; import graph resolves |
-| Unit | `npm test` | 149/149 pass (115 existing + 34 review-payload) |
+| Unit | `npm test` | 156/156 pass (115 baseline + 34 review-payload + 7 bigmodel-errors new) |
 | Manifest | `check-plugin-manifest.sh` | Version 0.4.7 consistent across 3 JSON files |
 | CHANGELOG | `check-changelog-updated.sh` | `## v0.4.7` section present |
 | Leak guard | `check-no-local-paths.sh` | No internal paths leaked (corpus/results excluded) |
@@ -213,7 +232,7 @@ the POST body when the caller explicitly passes a flag).
 | Gitea CI | `ai-quality-gate.yml` + `pr-check.yml` | both green |
 | GitHub CI | same 2 workflows | both green |
 | **Release gate** | `bash scripts/ci/check-release-ready.sh v0.4.7` | All 4 checks pass (runs automatically in pre-push on tag push) |
-| **Expanded sweep data** | `node test-automation/review-eval/scripts/summarize.mjs results/v0.4.7/expanded-sweep.csv` | 54 rows, 0 SCHEMA_ECHO, 0 false_file_hits, 8/18 cells PASS |
+| **Expanded sweep data** | `node test-automation/review-eval/scripts/summarize.mjs results/v0.4.7/expanded-sweep.csv` | 69 rows, 0 SCHEMA_ECHO, 0 false_file_hits, 8/18 cells PASS; vendor-error distribution: 5× 1234 + 2× 500 + 1× NETWORK_ERROR + 1× EMPTY_RESPONSE |
 
 ## Local Verification
 

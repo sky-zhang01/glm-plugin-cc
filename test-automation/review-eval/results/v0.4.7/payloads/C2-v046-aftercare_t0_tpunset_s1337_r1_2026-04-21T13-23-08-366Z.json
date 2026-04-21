@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 0,
+    "topP": null,
+    "seed": 1337,
+    "thinking": "on",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 73201,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 changes add retry/backoff logic and BigModel error dispatch without sufficient guards against retry storms on persistent failures. The retry module lacks an external cancellation mechanism, the GLM client integrates retry without bounding total wall-clock time, and the error classifier silently treats unrecognized errors as non-retryable — which can hide upstream failures. These are material risks for a library that calls external AI APIs under load.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry module has no cancellation/abort signal support",
+        "body": "scripts/lib/retry.mjs implements exponential backoff with jitter but provides no mechanism to cancel an in-flight retry loop (no AbortSignal, no external cancel flag). If the caller or a higher-level timeout fires, the retry loop continues sleeping and executing attempts until maxRetries is exhausted. In practice this means a timed-out HTTP handler could still be issuing API calls seconds or minutes after the caller gave up, wasting quota and risking duplicate side-effects if the underlying operation is non-idempotent.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.78,
+        "recommendation": "Add an optional AbortSignal parameter to the retry function. Check signal.aborted before each attempt and between sleep intervals (breaking sleep into smaller chunks). Reject immediately with an AbortError if cancelled."
+      },
+      {
+        "severity": "high",
+        "title": "GLM client retries without bounding total wall-clock latency",
+        "body": "scripts/lib/glm-client.mjs wraps API calls with retry logic but does not set an overall deadline or timeout that accounts for cumulative retry delays. With default backoff parameters, total elapsed time across retries can easily exceed 30-60 seconds. Callers that impose their own timeouts (e.g., HTTP request handlers, serverless function execution limits) will see premature termination while retries continue in the background, or will receive inconsistent error surfaces depending on which timeout fires first.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 99,
+        "confidence": 0.75,
+        "recommendation": "Accept an optional overall deadline/timeout parameter. Before each retry attempt, check whether the remaining budget can accommodate both the sleep and the attempt. If not, return the last error immediately rather than starting another attempt."
+      },
+      {
+        "severity": "medium",
+        "title": "Unrecognized error types are silently classified as non-retryable with no logging",
+        "body": "scripts/lib/bigmodel-errors.mjs classifies errors into retryable/non-retryable categories. Errors that don't match any known pattern are treated as non-retryable with no warning or diagnostic output. This means novel failure modes (new API error codes, changed response formats, network-level errors with unexpected shapes) will fail immediately without retry and without leaving any trace that the error was unclassifiable. Operators will have no signal that the error taxonomy is incomplete.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.82,
+        "recommendation": "When an error doesn't match any known classification, emit a structured warning/log indicating an unclassified error was encountered (including the error shape/code). Consider defaulting to retryable for truly unknown errors, or at minimum make the classification decision observable in telemetry."
+      },
+      {
+        "severity": "medium",
+        "title": "Retry sleep can block the event loop if backoff parameters are misconfigured",
+        "body": "If callers pass large baseDelay or maxDelay values, the retry module will hold a Promise that resolves after many seconds, during which no cancellation is possible. There is no validation of backoff configuration parameters at the retry function entry point. A misconfiguration (e.g., maxDelay: 300000 for 5 minutes) would make the library appear hung with no diagnostic output during the sleep period.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.65,
+        "recommendation": "Add input validation for retry configuration: enforce sensible upper bounds on maxDelay, baseDelay, and maxRetries. Log a warning if total possible retry time exceeds a threshold (e.g., 60s)."
+      },
+      {
+        "severity": "low",
+        "title": "Pre-push hook silently skips checks when CI script is missing rather than failing closed",
+        "body": "scripts/hooks/pre-push runs scripts/ci/check-release-ready.sh if it exists, but if the script is absent or not executable, the hook appears to continue without error. For a safety gate, the secure default should be to block the push when the verification toolchain is broken, not to silently proceed.",
+        "file": "scripts/hooks/pre-push",
+        "line_start": 1,
+        "line_end": 22,
+        "confidence": 0.6,
+        "recommendation": "If the pre-push hook intends to run verification, it should fail (exit non-zero) when the expected script is missing or not executable, with a clear message explaining why the push was blocked."
+      }
+    ],
+    "next_steps": [
+      "Add AbortSignal support to retry.mjs and thread it through glm-client.mjs so callers can cancel in-flight retry sequences.",
+      "Add an overall deadline/timeout parameter to the GLM client that accounts for cumulative retry time, not just individual attempt timeouts.",
+      "Add logging or telemetry when bigmodel-errors.mjs encounters an error that matches no known classification, so operators can detect gaps in the error taxonomy.",
+      "Validate retry configuration parameters at function entry to prevent pathological backoff schedules.",
+      "Verify the pre-push hook fails closed when its dependency script is missing."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.6 changes add retry/backoff logic and BigModel error dispatch without sufficient guards against retry storms on persistent failures. The retry module lacks an external cancellation mechanism, the GLM client integrates retry without bounding total wall-clock time, and the error classifier silently treats unrecognized errors as non-retryable — which can hide upstream failures. These are material risks for a library that calls external AI APIs under load.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Retry module has no cancellation/abort signal support\",\n      \"body\": \"scripts/lib/retry.mjs implements exponential backoff with jitter but provides no mechanism to cancel an in-flight retry loop (no AbortSignal, no external cancel flag). If the caller or a higher-level timeout fires, the retry loop continues sleeping and executing attempts until maxRetries is exhausted. In practice this means a timed-out HTTP handler could still be issuing API calls seconds or minutes after the caller gave up, wasting quota and risking duplicate side-effects if the underlying operation is non-idempotent.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Add an optional AbortSignal parameter to the retry function. Check signal.aborted before each attempt and between sleep intervals (breaking sleep into smaller chunks). Reject immediately with an AbortError if cancelled.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"GLM client retries without bounding total wall-clock latency\",\n      \"body\": \"scripts/lib/glm-client.mjs wraps API calls with retry logic but does not set an overall deadline or timeout that accounts for cumulative retry delays. With default backoff parameters, total elapsed time across retries can easily exceed 30-60 seconds. Callers that impose their own timeouts (e.g., HTTP request handlers, serverless function execution limits) will see premature termination while retries continue in the background, or will receive inconsistent error surfaces depending on which timeout fires first.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 99,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Accept an optional overall deadline/timeout parameter. Before each retry attempt, check whether the remaining budget can accommodate both the sleep and the attempt. If not, return the last error immediately rather than starting another attempt.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Unrecognized error types are silently classified as non-retryable with no logging\",\n      \"body\": \"scripts/lib/bigmodel-errors.mjs classifies errors into retryable/non-retryable categories. Errors that don't match any known pattern are treated as non-retryable with no warning or diagnostic output. This means novel failure modes (new API error codes, changed response formats, network-level errors with unexpected shapes) will fail immediately without retry and without leaving any trace that the error was unclassifiable. Operators will have no signal that the error taxonomy is incomplete.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.82,\n      \"recommendation\": \"When an error doesn't match any known classification, emit a structured warning/log indicating an unclassified error was encountered (including the error shape/code). Consider defaulting to retryable for truly unknown errors, or at minimum make the classification decision observable in telemetry.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Retry sleep can block the event loop if backoff parameters are misconfigured\",\n      \"body\": \"If callers pass large baseDelay or maxDelay values, the retry module will hold a Promise that resolves after many seconds, during which no cancellation is possible. There is no validation of backoff configuration parameters at the retry function entry point. A misconfiguration (e.g., maxDelay: 300000 for 5 minutes) would make the library appear hung with no diagnostic output during the sleep period.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Add input validation for retry configuration: enforce sensible upper bounds on maxDelay, baseDelay, and maxRetries. Log a warning if total possible retry time exceeds a threshold (e.g., 60s).\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"Pre-push hook silently skips checks when CI script is missing rather than failing closed\",\n      \"body\": \"scripts/hooks/pre-push runs scripts/ci/check-release-ready.sh if it exists, but if the script is absent or not executable, the hook appears to continue without error. For a safety gate, the secure default should be to block the push when the verification toolchain is broken, not to silently proceed.\",\n      \"file\": \"scripts/hooks/pre-push\",\n      \"line_start\": 1,\n      \"line_end\": 22,\n      \"confidence\": 0.60,\n      \"recommendation\": \"If the pre-push hook intends to run verification, it should fail (exit non-zero) when the expected script is missing or not executable, with a clear message explaining why the push was blocked.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Add AbortSignal support to retry.mjs and thread it through glm-client.mjs so callers can cancel in-flight retry sequences.\",\n    \"Add an overall deadline/timeout parameter to the GLM client that accounts for cumulative retry time, not just individual attempt timeouts.\",\n    \"Add logging or telemetry when bigmodel-errors.mjs encounters an error that matches no known classification, so operators can detect gaps in the error taxonomy.\",\n    \"Validate retry configuration parameters at function entry to prevent pathological backoff schedules.\",\n    \"Verify the pre-push hook fails closed when its dependency script is missing.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T13:23:08.408Z"
+}

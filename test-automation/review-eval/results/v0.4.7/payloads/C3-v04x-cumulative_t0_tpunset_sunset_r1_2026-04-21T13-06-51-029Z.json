@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 132985,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces ~6600 lines across 84 files including a new retry subsystem (retry.mjs), a BigModel error classifier (bigmodel-errors.mjs), significant GLM client changes, and deletion of process.mjs. The surface area is large and multiple high-risk modules (state, job tracking, API client) were modified without visible evidence of concurrency guards or idempotency contracts. I could not inspect actual file contents to confirm specific bugs, but the structural signals — deleted module, new retry logic, file-based state mutations — warrant blocking until a line-level review confirms safety.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "process.mjs deleted without clear migration path",
+        "body": "scripts/lib/process.mjs (67 lines) was entirely removed in this diff range. Other modules that previously imported from it (glm-companion.mjs, render.mjs, tracked-jobs.mjs) show significant changes. If any caller still references process.mjs exports at runtime — or if functionality was inlined incompletely — this will produce ReferenceError or silent logic gaps. The commit log mentions a 'full thread/resume scaffolding purge' (225401a), suggesting intentional removal, but purge-style deletions in utility libraries commonly leave dangling imports or lost edge-case handling.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.72,
+        "recommendation": "Verify that no remaining file imports from scripts/lib/process.mjs (grep -r 'from.*process' or 'require.*process' across scripts/). Confirm that all previously-exported functions are either no longer needed or have been migrated to other modules with equivalent behavior, including edge cases (signal handling, timeout propagation)."
+      },
+      {
+        "severity": "high",
+        "title": "New retry.mjs (203 lines) lacks visible idempotency contract for callers",
+        "body": "scripts/lib/retry.mjs is a 203-line addition — the largest new module. Retry logic is dangerous when the underlying operations are not idempotent: GLM API calls that create resources, state-file writes that append, or job submissions could be duplicated on retry. The companion glm-client.mjs was also heavily modified (155 lines changed), suggesting the retry module wraps API calls. Without a documented or enforced idempotency guarantee, partial-failure retries risk duplicate job submissions, double-billing, or corrupted state.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.68,
+        "recommendation": "Inspect every call site where retry.mjs is invoked. For each, confirm the operation is idempotent or that a deduplication key / idempotency token is passed. Add inline documentation or assertions enforcing this contract. If any call site mutates file-based state (state.mjs, tracked-jobs.mjs), verify atomicity (write-to-temp + rename) to prevent partial-state corruption on retry."
+      },
+      {
+        "severity": "medium",
+        "title": "File-based state mutations across state.mjs and tracked-jobs.mjs vulnerable to concurrent writes",
+        "body": "Both scripts/lib/state.mjs (32 lines changed) and scripts/lib/tracked-jobs.mjs (78 lines changed) appear to use file-based persistence. If the glm-companion.mjs or the new retry logic can trigger concurrent writes (e.g., two review jobs finishing simultaneously, or a retry racing with an original response), the lack of file-locking or atomic writes can corrupt the state file, losing job tracking data or producing invalid JSON that crashes subsequent reads.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.55,
+        "recommendation": "Audit state.mjs and tracked-jobs.mjs for atomic write patterns. If using fs.writeFile directly, replace with write-to-temporary-file + fs.rename (atomic on POSIX). Consider adding a file lock (e.g., proper-lockfile) or serialize writes through a queue. Add a test that performs concurrent writes and verifies no corruption."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error classification drives retry decisions — misclassification risk",
+        "body": "scripts/lib/bigmodel-errors.mjs (168 lines) is a new error-dispatch module that presumably classifies BigModel API errors to determine retry eligibility. If an error that should NOT be retried (e.g., authentication failure, invalid request, quota exceeded) is misclassified as retryable, the system will burn through rate limits or produce confusing repeated-failure logs. Conversely, a transient error classified as non-retryable causes silent data loss. The module is new and has 189 lines of tests, but error classification is notoriously fragile against undocumented API changes.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.58,
+        "recommendation": "Review the error classification logic against actual BigModel API error documentation. Ensure HTTP status codes and error body patterns cover all documented error types. Add a fallback 'unknown error' classification that logs the full error for investigation rather than defaulting to retry or fail. Add a test case for unrecognized error formats."
+      }
+    ],
+    "next_steps": [
+      "Read scripts/lib/process.mjs from the v0.4.0 tag and compare its exports against current imports across scripts/ to confirm complete migration or intentional removal.",
+      "Read scripts/lib/retry.mjs in full and trace every call site — confirm each retried operation is idempotent or guarded by an idempotency key.",
+      "Read scripts/lib/state.mjs and scripts/lib/tracked-jobs.mjs — verify atomic write patterns (temp+rename) and check for any read-modify-write sequences vulnerable to TOCTOU races.",
+      "Read scripts/lib/bigmodel-errors.mjs — verify error classification covers all documented BigModel error responses and has a safe fallback for unrecognized patterns.",
+      "Run the existing test suite (npm test or equivalent) against the current HEAD to confirm all 352 lines of retry tests and 189 lines of bigmodel-errors tests pass."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff introduces ~6600 lines across 84 files including a new retry subsystem (retry.mjs), a BigModel error classifier (bigmodel-errors.mjs), significant GLM client changes, and deletion of process.mjs. The surface area is large and multiple high-risk modules (state, job tracking, API client) were modified without visible evidence of concurrency guards or idempotency contracts. I could not inspect actual file contents to confirm specific bugs, but the structural signals — deleted module, new retry logic, file-based state mutations — warrant blocking until a line-level review confirms safety.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"process.mjs deleted without clear migration path\",\n      \"body\": \"scripts/lib/process.mjs (67 lines) was entirely removed in this diff range. Other modules that previously imported from it (glm-companion.mjs, render.mjs, tracked-jobs.mjs) show significant changes. If any caller still references process.mjs exports at runtime — or if functionality was inlined incompletely — this will produce ReferenceError or silent logic gaps. The commit log mentions a 'full thread/resume scaffolding purge' (225401a), suggesting intentional removal, but purge-style deletions in utility libraries commonly leave dangling imports or lost edge-case handling.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Verify that no remaining file imports from scripts/lib/process.mjs (grep -r 'from.*process' or 'require.*process' across scripts/). Confirm that all previously-exported functions are either no longer needed or have been migrated to other modules with equivalent behavior, including edge cases (signal handling, timeout propagation).\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"New retry.mjs (203 lines) lacks visible idempotency contract for callers\",\n      \"body\": \"scripts/lib/retry.mjs is a 203-line addition — the largest new module. Retry logic is dangerous when the underlying operations are not idempotent: GLM API calls that create resources, state-file writes that append, or job submissions could be duplicated on retry. The companion glm-client.mjs was also heavily modified (155 lines changed), suggesting the retry module wraps API calls. Without a documented or enforced idempotency guarantee, partial-failure retries risk duplicate job submissions, double-billing, or corrupted state.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Inspect every call site where retry.mjs is invoked. For each, confirm the operation is idempotent or that a deduplication key / idempotency token is passed. Add inline documentation or assertions enforcing this contract. If any call site mutates file-based state (state.mjs, tracked-jobs.mjs), verify atomicity (write-to-temp + rename) to prevent partial-state corruption on retry.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"File-based state mutations across state.mjs and tracked-jobs.mjs vulnerable to concurrent writes\",\n      \"body\": \"Both scripts/lib/state.mjs (32 lines changed) and scripts/lib/tracked-jobs.mjs (78 lines changed) appear to use file-based persistence. If the glm-companion.mjs or the new retry logic can trigger concurrent writes (e.g., two review jobs finishing simultaneously, or a retry racing with an original response), the lack of file-locking or atomic writes can corrupt the state file, losing job tracking data or producing invalid JSON that crashes subsequent reads.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Audit state.mjs and tracked-jobs.mjs for atomic write patterns. If using fs.writeFile directly, replace with write-to-temporary-file + fs.rename (atomic on POSIX). Consider adding a file lock (e.g., proper-lockfile) or serialize writes through a queue. Add a test that performs concurrent writes and verifies no corruption.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"bigmodel-errors.mjs error classification drives retry decisions — misclassification risk\",\n      \"body\": \"scripts/lib/bigmodel-errors.mjs (168 lines) is a new error-dispatch module that presumably classifies BigModel API errors to determine retry eligibility. If an error that should NOT be retried (e.g., authentication failure, invalid request, quota exceeded) is misclassified as retryable, the system will burn through rate limits or produce confusing repeated-failure logs. Conversely, a transient error classified as non-retryable causes silent data loss. The module is new and has 189 lines of tests, but error classification is notoriously fragile against undocumented API changes.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.58,\n      \"recommendation\": \"Review the error classification logic against actual BigModel API error documentation. Ensure HTTP status codes and error body patterns cover all documented error types. Add a fallback 'unknown error' classification that logs the full error for investigation rather than defaulting to retry or fail. Add a test case for unrecognized error formats.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Read scripts/lib/process.mjs from the v0.4.0 tag and compare its exports against current imports across scripts/ to confirm complete migration or intentional removal.\",\n    \"Read scripts/lib/retry.mjs in full and trace every call site — confirm each retried operation is idempotent or guarded by an idempotency key.\",\n    \"Read scripts/lib/state.mjs and scripts/lib/tracked-jobs.mjs — verify atomic write patterns (temp+rename) and check for any read-modify-write sequences vulnerable to TOCTOU races.\",\n    \"Read scripts/lib/bigmodel-errors.mjs — verify error classification covers all documented BigModel error responses and has a safe fallback for unrecognized patterns.\",\n    \"Run the existing test suite (npm test or equivalent) against the current HEAD to confirm all 352 lines of retry tests and 189 lines of bigmodel-errors tests pass.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T13:06:51.062Z"
+}
