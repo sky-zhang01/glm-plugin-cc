@@ -1,0 +1,21 @@
+{
+  "fixture_id": "C3-v04x-cumulative",
+  "size_class": "large",
+  "description": "Cumulative v0.4.0 → v0.4.6 diff for glm-plugin-cc. 8336 diff lines / 84 files / 6623 insertions / 480 deletions. Captures five release cycles of work: v0.4.1 setup hardening, v0.4.2/3 preset system, v0.4.4 setup interactive menu + npm scope rename, v0.4.5 schema/echo defenses, v0.4.6 BigModel error-code dispatch + retry/backoff + verify-release.yml retirement. Chosen as the C3 large-diff fixture because it approaches the 9200-line scale where the 2026-04-21 workflow-governor cross-review session produced fabricated citations — intentionally stresses GLM with a realistic large diff from a project it knows.",
+  "captured_at": "2026-04-21",
+  "source_repo": "SkyLab/glm-plugin-cc (Gitea)",
+  "base_ref": "v0.4.0 (137234b)",
+  "head_ref": "v0.4.6 (d5fa754)",
+  "line_count": 8336,
+  "byte_count": 347226,
+  "file_count": 84,
+  "added_files": 59,
+  "modified_files": 25,
+  "deleted_files": 0,
+  "review_scope": "branch (base=v0.4.0)",
+  "notes": [
+    "C2 is a strict subset of C3 (8fc1b98...d5fa754 ⊂ v0.4.0...d5fa754), so findings that appear in both give a direct diff-scale comparison.",
+    "Head ref is v0.4.6 (d5fa754) not HEAD, because reviewing current HEAD would include the review-eval harness itself — a diff containing this very fixture's diff.patch would create recursive meta-noise that biases the experiment.",
+    "The fixture is intentionally 'messy': mixed CI/docs/test/code additions across 5 releases. This matches real-world large-diff review requests (release-train aftermath, project-wide refactor) where GLM's attention is spread across many domains."
+  ]
+}
