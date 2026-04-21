@@ -66,6 +66,28 @@ If a change touches `scripts/`, `commands/`, `schemas/`, `prompts/`,
 or `.claude-plugin/`, the CI will require a matching `CHANGELOG.md`
 entry in the same PR.
 
+## Branch model (GitFlow-lite)
+
+- **`develop`** is the default branch. All day-to-day PRs target
+  `develop`.
+- **`main`** is the release line. It only receives merges from
+  `develop` (plus a version tag to trigger the release gate).
+- Feature branches (`feat/*`, `fix/*`, `chore/*`, `ci/*`) are
+  short-lived, opened off `develop`, and PRed back into `develop`.
+
+### Release flow
+
+1. Land changes on `develop` via PR (with CI + maintainer approval).
+2. When a release is ready: open a PR `develop` → `main`.
+3. After the merge, tag `main` with `vX.Y.Z`. The `release-gate.yml`
+   workflow verifies `package.json` / `plugin.json` /
+   `marketplace.json` version parity, the CHANGELOG entry, and
+   `release_card.md Status: READY`.
+4. Publish the GitHub release from the CHANGELOG section.
+
+Admin (repo owner) may bypass branch protection in emergencies on
+both gitea and GitHub.
+
 ## Pull requests
 
 Every substantive change goes through a PR, even for the repo owner.

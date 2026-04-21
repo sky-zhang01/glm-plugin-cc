@@ -28,13 +28,19 @@ Out of Scope
   remains a manual operation.
 
 Planned Actions
-1. Tag `v0.4.3` on gitea primary.
-2. Push the tag; `.github/workflows/release-gate.yml` runs the release gate
-   (version parity across `package.json` / `plugin.json` /
-   `marketplace.json` / tag; CHANGELOG entry present;
+1. (For future releases under GitFlow) Land all changes on `develop`
+   via PR + CI + maintainer approval. Merge `develop` → `main` via a
+   release PR.
+2. Tag the `main` commit `vX.Y.Z`; `.github/workflows/release-gate.yml`
+   runs the release gate (version parity across `package.json` /
+   `plugin.json` / `marketplace.json` / tag; CHANGELOG entry present;
    `release_card.md Status: READY`).
-3. Mirror `main` and the `v0.4.3` tag to the GitHub public mirror.
-4. Create a GitHub Release from the `## v0.4.3` CHANGELOG section.
+3. Push the tag to the GitHub public mirror.
+4. Publish the GitHub release from the matching CHANGELOG section and
+   mark it as **latest**.
+
+Note: v0.4.3 itself was tagged before the GitFlow split and lives on
+`main` directly. Subsequent releases follow the flow above.
 
 Scope Completion: COMPLETE
 Outstanding In-Scope Work: none
