@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.4.4 — 2026-04-21
+
+UX polish + metadata cleanup. No public API changes. No config
+migration. Explicit-flag `/glm:setup` invocations keep their v0.4.3
+behavior.
+
+### Fixed
+
+- `commands/setup.md` — bare `/glm:setup` on a healthy configuration
+  (both `preset_id` and `has_api_key` set, `$ARGUMENTS` empty) now
+  surfaces an `AskUserQuestion` menu: *Keep current configuration*,
+  *Rotate API key*, *Switch preset*, *Ping test*, *Toggle review
+  gate*, *Cancel*. Previously the skill dumped the JSON report and
+  exited silently, forcing users to memorize flags for rotation.
+  Companion script unchanged — every menu entry maps to a flag
+  combination already supported in v0.4.3.
+- `package.json` `name` field — renamed from `@skylab/glm-plugin-cc`
+  to `glm-plugin-cc` (unscoped), closing out the v0.4.3 marketplace
+  cleanup. Zero functional impact: `"private": true`, no import or
+  require referenced the scoped name.
+
 ## v0.4.3 — 2026-04-20
 
 Bug-fix and hardening release. Multiple rounds of static + AI-assisted
