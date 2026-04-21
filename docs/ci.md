@@ -2,6 +2,20 @@
 
 > Source of truth for what runs on every PR and tag, and why.
 
+## Branch model
+
+| Branch | Role | Protected? |
+|---|---|---|
+| `develop` | default branch; all day-to-day PRs target it | yes — PR required, 1 CODEOWNERS approval, status checks, dismiss stale reviews |
+| `main` | release line; only receives merge from `develop` + a version tag | yes — same as develop + required linear history; admin may bypass in emergencies |
+| feature branches (`feat/*`, `fix/*`, `chore/*`) | short-lived work branches | unprotected; opened off `develop`, PR back into `develop` |
+
+Release flow:
+1. Land all changes on `develop` via PR.
+2. Open a PR `develop` → `main` when a release is ready.
+3. After merge, tag the `main` commit with `vX.Y.Z` to trigger the
+   release-gate workflow.
+
 ## Runtime
 
 Two hosts share the same workflow files under `.github/workflows/`.
@@ -19,7 +33,7 @@ release gates stay in parity across both hosts.
 
 ### `pr-check.yml`
 
-Runs on `pull_request` and `push` to `main`. The full pre-merge gate.
+Runs on `pull_request` and `push` to `develop` and `main`. The full pre-merge gate.
 Mirrors `scripts/ci/check-all.sh`:
 
 1. `npm run check` — JS syntax + static import graph
@@ -41,7 +55,7 @@ Mirrors `scripts/ci/check-all.sh`:
    independent comment from the counterpart AI is present, the job
    prints an `ADVISORY` line. Advisory only — does not block merge.
 
-### `release-gate.yml`
+### `verify-release.yml`
 
 Triggered when a tag `v*.*.*` is pushed. Does not publish; gates
 publication. Verifies:
@@ -69,21 +83,29 @@ time when you are certain of what you are pushing.
 
 ## Branch protection (enforced server-side)
 
-`main` is protected on both gitea and GitHub:
+Both `develop` and `main` are protected on gitea and GitHub:
 
-- Require PR — direct push to `main` rejected
-- Require `pr-check` + `ai-quality-gate/static-invariants` to pass
-- Require approval from the maintainer (see CODEOWNERS)
-- Dismiss stale approvals on new commits
+- Require PR — direct push rejected for non-admin identities
+- Require `pr-check` + `static-invariants` status checks to pass
+- Require 1 maintainer approval (CODEOWNERS), dismiss stale
+  approvals on new commits
+- `main` additionally requires **linear history** (no merge commits;
+  fast-forward only from `develop`)
+- Admin (`sky`) may bypass protection in emergencies — this is the
+  tradeoff for solo-maintainer agility
 
-Configure / re-apply with:
+Configure / re-apply gitea with:
 
 ```bash
+GITEA_HOST=https://your-gitea-host \
+GITEA_OWNER=your-org \
+GITEA_APPROVER=your-username \
 bash scripts/setup/configure-gitea-protection.sh
 ```
 
-(GitHub protection uses the same file; see the script header for the
-GitHub variant.)
+(GitHub protection was applied via `gh api ... /branches/<name>/protection`.
+The script is gitea-specific; add a GitHub-equivalent helper if that
+re-configuration becomes recurrent.)
 
 ## Scripts index
 

@@ -12,9 +12,9 @@ name: AI Quality Gate
 
 on:
   pull_request:
-    branches: [main]
+    branches: [develop, main]
   push:
-    branches: [main]
+    branches: [develop, main]
 
 permissions:
   contents: read

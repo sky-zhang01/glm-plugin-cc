@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.4.4 — 2026-04-21
+
+UX polish + metadata cleanup. No public API changes. No config
+migration. Explicit-flag `/glm:setup` invocations keep their v0.4.3
+behavior.
+
+### Fixed
+
+- `commands/setup.md` — bare `/glm:setup` on a healthy configuration
+  (both `preset_id` and `has_api_key` set, `$ARGUMENTS` empty) now
+  surfaces an `AskUserQuestion` menu: *Keep current configuration*,
+  *Rotate API key*, *Switch preset*, *Ping test*, *Toggle review
+  gate*, *Cancel*. Previously the skill dumped the JSON report and
+  exited silently, forcing users to memorize flags for rotation.
+  Companion script unchanged — every menu entry maps to a flag
+  combination already supported in v0.4.3.
+- `package.json` `name` field — renamed from `@skylab/glm-plugin-cc`
+  to `glm-plugin-cc` (unscoped), closing out the v0.4.3 marketplace
+  cleanup. Zero functional impact: `"private": true`, no import or
+  require referenced the scoped name.
+
 ## v0.4.3 — 2026-04-20
 
 Bug-fix and hardening release. Multiple rounds of static + AI-assisted
@@ -181,7 +202,7 @@ regression patterns found during this release's review passes.
   invariant; a `cross-ai-review-advisory` job probes the PR
   comment thread when an AI identity authors a PR and prints an
   advisory if no counterpart AI has reviewed.
-- `.github/workflows/release-gate.yml` — tag-triggered; verifies
+- `.github/workflows/verify-release.yml` — tag-triggered; verifies
   `package.json` / `plugin.json` / `marketplace.json` version
   parity with the tag, CHANGELOG entry present, release card
   `Status: READY`. Does NOT publish.
@@ -470,7 +491,7 @@ All findings treated this as a pre-install bar, not polish.
 
 ```
 /plugin marketplace add https://github.com/sky-zhang01/glm-plugin-cc
-/plugin install glm@sky-zhang01/glm-plugin-cc
+/plugin install glm@glm-plugin-cc
 ```
 
 ## v0.3.3 — 2026-04-20

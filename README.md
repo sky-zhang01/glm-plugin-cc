@@ -35,7 +35,7 @@ Add to your Claude Code plugin marketplace:
 
 ```
 /plugin marketplace add https://github.com/sky-zhang01/glm-plugin-cc
-/plugin install glm@sky-zhang01/glm-plugin-cc
+/plugin install glm@glm-plugin-cc
 ```
 
 ## Auth — no CLI install, no OAuth
