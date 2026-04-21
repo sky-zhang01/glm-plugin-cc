@@ -2,7 +2,7 @@
 
 > **Purpose**: empirical characterization of GLM-5.1 behavior on `/glm:review` + `/glm:adversarial-review` under different sampling parameters. Tracks whether changing defaults (temperature / top_p / seed / thinking) materially improves schema compliance, citation accuracy, and self-consistency.
 >
-> Tracking issue: [Gitea #7](https://gitea.tokyo.skyzhang.net/SkyLab/glm-plugin-cc/issues/7).
+> Tracking: Gitea issue #7 (private instance — not linked from public repo).
 
 ## Principle
 

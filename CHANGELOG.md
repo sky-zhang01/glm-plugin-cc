@@ -1,5 +1,124 @@
 # Changelog
 
+## v0.4.7 — 2026-04-21
+
+Review reliability pass. Addresses the v0.4.5 SCHEMA_ECHO dogfood
+observation + workflow-governor cross-review hallucination pattern via
+parse-layer defenses that run unconditionally on review output, and
+exposes BigModel sampling-parameter flags on the CLI for empirical
+investigation. Adds an evaluation harness (`test-automation/review-eval/`)
+with a pinned fixture, automated citation scoring, and a CSV results
+format stable across releases. Tracking: Gitea issue #7.
+
+**Sanity sweep did not produce signal strong enough to change default
+sampling parameters.** Parse-layer defenses and CLI flags ship;
+defaults remain server-default (unset). The harness lands so future
+releases can diff cleanly against this baseline without re-instrumenting
+each time.
+
+### Added
+
+- **Parse-layer review-output defenses** (`scripts/lib/glm-client.mjs`):
+  - `stripMarkdownFences` — idempotent `` ```json ... ``` `` fence
+    removal. GLM-5.1 has been observed wrapping structured-output JSON
+    in markdown fences despite explicit "do not wrap" instructions;
+    stripping is cheap and idempotent so applied unconditionally.
+  - `classifyReviewPayload` — typed classification of parsed JSON into
+    `valid` / `schema_echo` (GLM returned the JSON schema definition
+    instead of findings — reproduced from the v0.4.5 aftercare
+    dogfood payload) / `invalid_shape` (missing `verdict` / `summary`
+    / `findings`). Returns `{ kind, errorCode, message }`.
+  - `runChatRequestWithCorrectionRetry` — single-shot targeted
+    correction retry for shape failures. On `SCHEMA_ECHO` or
+    `INVALID_SHAPE`, prepends a specific hint explaining the prior
+    mistake and retries once. Independent of the v0.4.6 transient-error
+    backoff layer (different failure class).
+  - `buildCorrectionHint` — per-errorCode hint text. Exported for
+    tests.
+- **Sampling-parameter CLI flags** (`scripts/glm-companion.mjs`,
+  `commands/review.md`, `commands/adversarial-review.md`):
+  `--temperature <0-2>`, `--top-p <0-1>`, `--seed <int>`,
+  `--frequency-penalty <-2-2>`, `--presence-penalty <-2-2>`. Each
+  forwards to the BigModel POST body only when provided; unset =
+  server default (no change from v0.4.6 behavior). Out-of-range values
+  are silently skipped rather than hard-failing, so sampling-sweep
+  automation never crashes mid-run on a bad cell.
+- **Review-reliability evaluation harness** (`test-automation/review-eval/`):
+  - Fixture `C2-v046-aftercare` — pinned v0.4.5→v0.4.6 diff
+    (1362 insertions / 315 deletions, 17 files), plus `ground-truth.json`
+    listing allowed citation targets, known-false files (workflow-governor
+    paths that would be unambiguous cross-project hallucination), and
+    candidate expected bugs.
+  - `scripts/run-experiment.mjs` — runs N copies of one (fixture,
+    sampling-cell) combo against `/glm:adversarial-review`, scores
+    citations via grep (file exists + distinctive tokens match within
+    `line_start-line_end` ± 20), appends one row per run to CSV.
+    Accepts `--base <ref>` for reviewing arbitrary ranges against the
+    fixture baseline.
+  - `scripts/summarize.mjs` — aggregates CSVs by cell, prints a
+    markdown-compatible table, applies the issue #7 success criteria
+    (`schema_compliance ≥ 0.95`, `schema_echo = 0`,
+    `citation_accuracy ≥ 0.90`, `false_file_hits = 0`).
+- **v0.4.7 sanity-sweep results**
+  (`test-automation/review-eval/results/v0.4.7/sanity-sweep.csv`) — 9
+  runs: temperature ∈ {0.0, 0.5, 1.0} × N=3, `C2-v046-aftercare` fixture,
+  `--thinking on`, `--model glm-5.1`, base `8fc1b98`. See "Sanity sweep
+  outcome" below for interpretation.
+- **Parse-defense unit tests** (`tests/review-payload.test.mjs`) — 19
+  cases covering `stripMarkdownFences` (json-tagged, bare,
+  whitespace, non-string input, non-recursive) and `classifyReviewPayload`
+  (valid, schema_echo reproducing v0.4.5 dogfood payload,
+  invalid_shape per missing field, null/array/primitive).
+
+### Changed
+
+- No default sampling parameter change. Temperature, top_p, seed,
+  frequency/presence penalty all remain server-default (unset) in the
+  POST body unless a caller explicitly passes a flag. v0.4.6 behavior
+  is preserved.
+
+### Sanity sweep outcome
+
+Per pre-registered success criteria in Gitea issue #7:
+
+| cell | N | schema_compliance | schema_echo | invalid_shape | citation_accuracy | false_file_hits | formal PASS? |
+|---|---|---|---|---|---|---|---|
+| temp=0.0 thinking=on | 3 | 0.67 | 0 | 0 | 0.94 (±0.10) | 0 | no |
+| temp=0.5 thinking=on | 3 | 1.00 | 0 | 0 | 1.00 (±0.00) | 0 | YES |
+| temp=1.0 thinking=on | 3 | 1.00 | 0 | 0 | 1.00 (±0.00) | 0 | YES |
+
+Notes on interpretation:
+
+- **No `SCHEMA_ECHO` reproduction** in any of 9 runs. The specific
+  v0.4.5 aftercare dogfood failure mode that motivated this work did
+  not surface at any sampled temperature on C2.
+- **No `known_false_files` hits** (i.e., no cross-project workflow-governor
+  hallucination). The 2026-04 workflow-governor pattern was not
+  reproduced.
+- **The one `schema_compliance=0` result at temp=0.0** is a
+  harness-strictness artifact: the run returned a valid-shape payload
+  whose `verdict` field was the empty string. `classifyReviewPayload`
+  (the plugin's own validity check) accepted it; `run-experiment.mjs`
+  is deliberately stricter (truthy check) and flagged it as
+  non-compliant. The plugin did NOT fail on this payload in-session.
+- **N=3 per cell is underpowered** to distinguish temperature-driven
+  signal from run-to-run noise. Per the maintainer's directive in
+  issue #7 ("model updates faster than data stays valid"), the sweep
+  was intentionally scoped to 9 calls rather than a full 96-cell grid
+  at N=10.
+
+**Decision**: no default sampling parameter change in v0.4.7. The
+harness is stable so a future regression can be characterized without
+re-instrumenting, but changing defaults on this sample size is premature.
+
+### Unchanged
+
+- Default model `glm-5.1`, default `--thinking on`, default server-
+  provided sampling parameters.
+- Review prompt body and companion JSON output shape.
+- v0.4.6 retry/backoff layer, BigModel error-code dispatch, pre-tag
+  release-ready gate.
+
 ## v0.4.6 — 2026-04-21
 
 Post-v0.4.5 aftercare release. Adds programmatic BigModel vendor

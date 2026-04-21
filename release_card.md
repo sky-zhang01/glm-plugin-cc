@@ -1,181 +1,198 @@
-# Release Card — glm-plugin-cc v0.4.6
+# Release Card — glm-plugin-cc v0.4.7
 
 Status: READY
 
 Approval Mode: maintainer direct-approval (solo-maintainer repo; same
-pattern as v0.4.4 and v0.4.5). Gitea CI green → maintainer auto-merge
-per standing one-off-per-release shortcut. Not promoted into
-CONTRIBUTING.md.
+pattern as v0.4.4 / v0.4.5 / v0.4.6). Gitea CI green → maintainer
+auto-merge per standing one-off-per-release shortcut. Not promoted
+into CONTRIBUTING.md.
 
 Intended Ref
-- Feature branch: `fix/v046-hardening-aftercare` off `develop`
-- PR #5: `fix/v046-hardening-aftercare` → `develop` (Gitea)
-- PR #6: `develop` → `main` (Gitea)
-- Tag: `v0.4.6` annotated, on the `develop → main` merge commit
+- Feature branch: `fix/v047-review-reliability-mvp` off `develop`
+- PR: `fix/v047-review-reliability-mvp` → `develop` (Gitea)
+- PR: `develop` → `main` (Gitea)
+- Tag: `v0.4.7` annotated, on the `develop → main` merge commit
 - Mirrored: GitHub public repo (main + tag + release, marked Latest)
 
 ---
 
 ## Requested Scope
 
-Three aligned aftercare changes identified post-v0.4.5 release, driven
-by v0.4.5 dogfood observations + user pushback on the initial v0.4.6
-scope ("classifier alone is not enough — we need actual recovery"):
+Tracked under Gitea issue #7. Three aligned additions motivated by the
+v0.4.5 SCHEMA_ECHO dogfood observation + the 2026-04-21
+workflow-governor cross-review hallucination session:
 
-1. **BigModel error-code handling, corrected against official docs**
-   (https://docs.bigmodel.cn/cn/faq/api-code). Initial v0.4.6 draft
-   had memory-derived mappings with wrong entries (1303 doesn't exist
-   officially; 1304 is daily-call-count, not balance). Rewrote the
-   table with 1301/1302/1304/1305/1308/1309/1310 per the authoritative
-   source. Each code now maps to a distinct internal `errorCode` +
-   retry semantic + user recovery hint.
+1. **Parse-layer defenses** that run unconditionally on every review
+   response, independent of model version or sampling parameters. These
+   are pure JSON-processing code — cheap, idempotent, and they do not
+   change the GLM request shape.
 
-2. **Programmatic retry/backoff for transient codes** — classifier
-   alone doesn't solve the user's observed pain ("I just want the
-   plugin to retry past a 1305, not tell me what 1305 means and make
-   me retry by hand"). `scripts/lib/retry.mjs` wraps every BigModel
-   HTTP call with bounded exponential backoff + jitter. For
-   `retry: immediate` codes (1302, 1305) and network failures
-   (TIMEOUT, NETWORK_ERROR): auto-retry up to 3 attempts with
-   2s → 5s → 12.5s (cap 15s) + ±20 % jitter, total budget 30s. For
-   `retry: after-cooldown` or `never`: return on first call (no wasted
-   retries). Opt-out via `retry: false`. Matches ZhipuAI SDK's own
-   `max_retries=3` industry norm.
+   - `stripMarkdownFences` removes `` ```json ... ``` `` wrappers that
+     GLM-5.1 occasionally emits around structured output despite the
+     prompt instruction.
+   - `classifyReviewPayload` reproduces the two observed semantic
+     failures (SCHEMA_ECHO = returned schema definition instead of
+     findings; INVALID_SHAPE = missing required fields) with typed
+     `errorCode` values the companion + caller can branch on.
+   - `runChatRequestWithCorrectionRetry` adds a single-shot targeted
+     re-prompt when the above are detected. Separate mechanism from
+     the v0.4.6 transient-error backoff layer (different failure
+     class; no attempt-budget overlap).
 
-3. **Retire chronically-broken `verify-release.yml`**. Workflow never
-   successfully ran since creation — GitHub Actions parser never
-   registered the YAML. Every push produced a 0-second failure
-   polluting the run list. User directive: fix or delete before next
-   release. Delete is equivalent: all 4 checks (package.json parity,
-   manifest parity, CHANGELOG section, release_card READY) are
-   re-implemented in `scripts/ci/check-release-ready.sh` invoked by
-   pre-push hook on tag pushes — catching issues BEFORE `git push`
-   reaches GitHub rather than after.
+2. **Sampling-parameter CLI flags** (`--temperature`, `--top-p`,
+   `--seed`, `--frequency-penalty`, `--presence-penalty`) on `/glm:review`
+   and `/glm:adversarial-review`, forwarded to the BigModel POST body
+   only when provided. Unset = server default = no behavior change.
+   Out-of-range values are silently skipped so sweep automation never
+   crashes mid-run.
+
+3. **Evaluation harness** (`test-automation/review-eval/`) — pinned
+   fixture (C2, the v0.4.5→v0.4.6 diff), automated citation scoring
+   via file-existence + distinctive-token grep, CSV results format
+   stable across releases. Ships with the v0.4.7 9-call sanity-sweep
+   results so the next release can diff rather than re-instrument.
 
 ## Out of Scope
 
-- **Hallucination guard for GLM-5.1 on large diffs**. Observed in both
-  v0.4.5 dogfood + workflow-governor session (same day). Mitigations
-  (scope-narrowing heuristic, schema-echo detector, citation sanity-
-  check) are documented in
-  `~/Project/knowledge/agent-hallucination-patterns.md` Appendix
-  2026-04-21 and deferred to a later release. Underlying cause is
-  model-class (not plugin bug); mitigation is not the same as fix.
-- No changes to GLM HTTP call shape, model catalog, schema, prompts,
-  `/glm:review`, `/glm:adversarial-review`, `/glm:setup`,
+- **No default sampling parameter change.** The 9-call sanity sweep
+  (issue #7 comment 2026-04-21, maintainer-approved β scope) did not
+  surface signal strong enough to justify changing server-default
+  temperature / top_p / seed. Per the maintainer directive ("model
+  updates faster than experimental data stays valid"), scope was
+  intentionally capped at 9 calls rather than the originally-proposed
+  96-cell grid.
+- **No C1 (small) / C3 (large) fixtures.** v0.4.7 ships only the C2
+  medium fixture. Adding smaller or larger fixtures is deferred until
+  a regression actually motivates them.
+- **No RAG / fine-tuning / context-packing variant.** Out-of-scope per
+  user pushback — those are not review-workflow solutions, they're
+  different product surfaces.
+- **No changes to** GLM HTTP call shape (except conditional POST body
+  sampling fields), model catalog, schema, prompts, `/glm:setup`,
   `/glm:status`, `/glm:result`, `/glm:cancel`, `/glm:task`.
 
 ## Planned Actions
 
-1. `git checkout -b fix/v046-hardening-aftercare` off `develop` ✓
-2. Create `scripts/lib/bigmodel-errors.mjs` with frozen dispatch table
-   + `classifyBigModelError` + `extractBigModelErrorCode` ✓
-3. Wire into `scripts/lib/glm-client.mjs runChatRequest` — vendor code
-   classification runs before HTTP-status fallbacks ✓
-4. Add `tests/bigmodel-errors.test.mjs` (17 tests covering extract /
-   classify / table integrity) ✓
-5. Create `scripts/ci/check-release-ready.sh` (local replacement for
-   verify-release.yml) ✓
-6. Extend `scripts/hooks/pre-push` to invoke check-release-ready.sh
-   when a `refs/tags/v*.*.*` ref is being pushed ✓
-7. Delete `.github/workflows/verify-release.yml` + disable orphaned
-   GitHub registration via API ✓
-8. Bump 0.4.5 → 0.4.6 (package.json + plugin.json + marketplace.json) ✓
-9. CHANGELOG v0.4.6 section ✓
-10. `Skill(simplify)` on changed files
-11. `npm run ci:local`
-12. Adversarial review (Codex primary if quota allows, else GLM fallback
-    with explicit waiver acknowledging limitations)
-13. Push to Gitea only. Open PR #5 → `develop`. Paste adversarial
-    verdict in PR body.
-14. Gitea CI green → auto-merge PR #5 to develop
-15. Open Gitea PR #6: develop → main. Merge.
-16. Tag v0.4.6 annotated on main merge commit (pre-push will run
-    check-release-ready.sh automatically). Push tag.
-17. Publish Gitea release v0.4.6 (Latest auto-set)
-18. Sync main + develop + tag to GitHub. Confirm PR Check + AI Quality
-    Gate green (verify-release.yml should NO LONGER be in the run list)
-19. Publish GitHub release v0.4.6, mark Latest
-20. Fast-forward develop → main on both remotes (GitFlow cleanup)
-21. Upgrade local plugin cache to v0.4.6
+1. Branch `fix/v047-review-reliability-mvp` off `develop` ✓
+2. Add `stripMarkdownFences` / `classifyReviewPayload` /
+   `buildCorrectionHint` / `runChatRequestWithCorrectionRetry` /
+   `assignOptionalSamplingParam` to `scripts/lib/glm-client.mjs` ✓
+3. Wire sampling flags through `scripts/glm-companion.mjs runReview` ✓
+4. Extend `commands/review.md` + `commands/adversarial-review.md`
+   argument hints + scope flags section ✓
+5. Add `tests/review-payload.test.mjs` (19 tests) ✓
+6. Build `test-automation/review-eval/` harness (fixture, ground truth,
+   run-experiment.mjs, summarize.mjs) ✓
+7. Open Gitea issue #7 with full investigation scope + hypotheses ✓
+8. Commit infra checkpoint (60c7a1a) pre-sweep ✓
+9. Run 9-call sanity sweep: temp ∈ {0.0, 0.5, 1.0} × N=3 on C2 ✓
+10. Record result CSV in `test-automation/review-eval/results/v0.4.7/` ✓
+11. Add `--base` flag to run-experiment.mjs so future fixtures can
+    pin arbitrary base refs ✓
+12. Bump 0.4.6 → 0.4.7 (package.json + plugin.json + marketplace.json) ✓
+13. CHANGELOG v0.4.7 section with sweep outcome table ✓
+14. `Skill(simplify)` on changed files — pending
+15. `npm run ci:local` — pending
+16. Adversarial review (Codex primary if quota allows, else GLM
+    fallback) — pending
+17. Push to Gitea only. Open PR → `develop`. Paste adversarial verdict
+    in PR body. — pending
+18. Gitea CI green → auto-merge PR to develop — pending
+19. Open Gitea PR: develop → main. Merge. — pending
+20. Tag v0.4.7 annotated on main merge commit. Pre-push hook runs
+    `check-release-ready.sh v0.4.7`. — pending
+21. Publish Gitea release v0.4.7 (Latest auto-set) — pending
+22. Sync main + develop + tag to GitHub. Confirm PR Check + AI Quality
+    Gate green — pending
+23. Publish GitHub release v0.4.7, mark Latest — pending
+24. Fast-forward develop → main on both remotes (GitFlow cleanup) —
+    pending
+25. Upgrade local plugin cache to v0.4.7 — pending
+26. Close Gitea issue #7 with link to CHANGELOG entry + final CSV —
+    pending
 
-## Scope Completion: will reach COMPLETE at step 21
-## Outstanding In-Scope Work: steps 10-21 pending
+## Scope Completion: will reach COMPLETE at step 26
+## Outstanding In-Scope Work: steps 14-26 pending
 
 ## Major Upgrade Review: N/A
 
-No dependency bumps, Action SHA changes, or Node version bumps. Pure
-additive error-classification module + CI replacement.
+No dependency bumps, Action SHA changes, Node version bumps, or
+runtime/platform changes. Pure additive parse-layer code + CLI-flag
+forwarding + evaluation harness. No change to the GLM endpoint, model,
+prompt, or request shape (except conditional sampling-param fields in
+the POST body when the caller explicitly passes a flag).
 
 ## Breaking Changes: none
 
-- All existing companion error paths still work. The new vendor-code
-  classifier runs before (not instead of) the HTTP status fallbacks,
-  so unknown / non-BigModel errors still get the existing HTTP_ERROR /
-  RATE_LIMITED / AUTH_FAILED / BAD_REQUEST / NOT_FOUND surfaces.
-- Consumers that read `errorCode` get richer values when BigModel
-  returns a recognized vendor code, but the field remains a string
-  and none of the existing values are removed.
-- New `retry` field on failure shapes (`immediate` / `after-cooldown` /
-  `never` / `unknown`) is additive. Existing consumers ignoring it
-  still work.
-- `verify-release.yml` removal: since the workflow never successfully
-  ran, zero behavior change for users. Tag-time validation coverage
-  shifts from GitHub (never worked) to local pre-push (actually works).
+- `classifyReviewPayload` runs after successful JSON parse and only
+  affects requests with `expectJson: true` (review calls). Non-review
+  calls (`/glm:task`) are untouched.
+- `runChatRequestWithCorrectionRetry` intercepts `retry: "correction"`
+  failures between `withRetry` iterations; it does not consume the
+  transient-backoff attempt budget, does not change v0.4.6 behavior on
+  HTTP/network errors, and opts out automatically for non-review calls.
+- Markdown fence stripping is idempotent on already-clean JSON (no
+  change if no fence present).
+- Sampling CLI flags are optional. Unset = server default = v0.4.6
+  behavior.
+- New CSV under `test-automation/review-eval/results/v0.4.7/` is
+  data-only; no CI or runtime consumes it.
 
 ## Repo Usage Audit
 
-- New module: `scripts/lib/bigmodel-errors.mjs` (119 lines, no external
-  imports beyond standard library).
-- Modified: `scripts/lib/glm-client.mjs` (imports new module + adds
-  vendor-classification branch in runChatRequest + adds `retry` field
-  to each existing failureShape call).
-- New test file: `tests/bigmodel-errors.test.mjs` (140 lines, 17 tests).
-- New CI script: `scripts/ci/check-release-ready.sh` (exec +x, 60
-  lines).
-- Modified: `scripts/hooks/pre-push` (adds tag-detection loop invoking
-  check-release-ready.sh).
-- Deleted: `.github/workflows/verify-release.yml`.
-- Version bump in 3 manifest files + CHANGELOG v0.4.6 section.
-- `~/Project/knowledge/agent-hallucination-patterns.md` appendix
-  updated (tracked in personal knowledge dir, not repo).
+- Modified: `scripts/lib/glm-client.mjs` (+223 lines: parse helpers,
+  classifier, correction-retry wrapper, sampling-param dispatcher;
+  existing functions unchanged in signature).
+- Modified: `scripts/glm-companion.mjs` (+43 lines: CLI flag parsing,
+  forwarding into `runGlmReview` options, updated printUsage).
+- Modified: `commands/review.md`, `commands/adversarial-review.md`
+  (argument-hint extension + scope-flags doc pointer to issue #7).
+- New: `tests/review-payload.test.mjs` (184 lines, 19 tests).
+- New: `test-automation/review-eval/` directory
+  (README + corpus/C2-v046-aftercare/{meta,ground-truth,diff.patch} +
+  scripts/{run-experiment,summarize}.mjs + results/v0.4.7/sanity-sweep.csv).
+- Version bump in 3 manifest files + CHANGELOG v0.4.7 section.
+- Gitea issue #7 opened + commented with scope reduction (β).
 
 ## Verification Plan
 
 | Layer | Tool | Pass criterion |
 |---|---|---|
 | Static | `npm run check` | All modules parse; import graph resolves |
-| Unit | `npm test` | 111/111 pass (65 existing + 20 bigmodel-errors + 26 retry) |
-| Manifest | `check-plugin-manifest.sh` | Version 0.4.6 consistent across 3 JSON files |
-| CHANGELOG | `check-changelog-updated.sh` | `## v0.4.6` section present |
+| Unit | `npm test` | 134/134 pass (115 existing + 19 review-payload) |
+| Manifest | `check-plugin-manifest.sh` | Version 0.4.7 consistent across 3 JSON files |
+| CHANGELOG | `check-changelog-updated.sh` | `## v0.4.7` section present |
 | Leak guard | `check-no-local-paths.sh` | No internal paths leaked |
 | Cross-AI | `check-cross-ai-review.mjs` | adversarial review referenced |
-| Companion UAT | `test-automation/uat-reports/v0.4.5/run-uat.sh` | All scenarios (A-J) still PASS — v0.4.6 additive-only so v0.4.5 UAT still valid |
-| Adversarial | `/codex:adversarial-review` preferred, else `/glm:adversarial-review` with waiver | No unresolved CRITICAL/HIGH |
-| Gitea CI | `.github/workflows/ai-quality-gate.yml` + `pr-check.yml` | both green (verify-release.yml no longer exists) |
-| GitHub CI | same 2 workflows | both green (verify-release.yml disabled on GitHub) |
-| **Release gate** | `bash scripts/ci/check-release-ready.sh v0.4.6` | All 4 checks pass (runs automatically in pre-push on tag push) |
-| **Post-release live** | Simulated 1305 error path | classifier surfaces SERVICE_OVERLOADED with correct message referencing model name |
+| Companion UAT | reuse v0.4.5 scenarios | Still PASS — v0.4.7 additive only |
+| Adversarial | `/codex:adversarial-review` preferred, else `/glm:adversarial-review` | No unresolved CRITICAL/HIGH |
+| Gitea CI | `ai-quality-gate.yml` + `pr-check.yml` | both green |
+| GitHub CI | same 2 workflows | both green |
+| **Release gate** | `bash scripts/ci/check-release-ready.sh v0.4.7` | All 4 checks pass (runs automatically in pre-push on tag push) |
+| **Sanity sweep data** | `node test-automation/review-eval/scripts/summarize.mjs results/v0.4.7/sanity-sweep.csv` | 9 rows, no SCHEMA_ECHO, no false_file_hits |
 
 ## Local Verification
 
-To be populated after `ci:local` + adversarial review complete.
+To be populated after `ci:local` + adversarial review complete. Sanity
+sweep already executed (9 calls on 2026-04-21, all from detached
+worktree at d5fa754 to match fixture baseline; CSV committed).
 
 ## CI Evidence
 
-To be populated after Gitea PR #5 + PR #6 CI runs complete.
+To be populated after Gitea feature PR + main PR CI runs complete.
 
 ## Rollback
 
 Extremely low risk.
 
-- **Immediate**: `git revert` the feature PR merge commit on main.
-  Companion falls back to v0.4.5 error handling (generic
-  RATE_LIMITED). Workflows stay where they are (verify-release.yml
-  still deleted + disabled; no regression there).
-- **Full**: revert to v0.4.5 tag, delete tag v0.4.6, unmark GitHub
-  release Latest, re-mark v0.4.5 Latest. Re-add verify-release.yml
-  from v0.4.5 tree IF anyone actually wants the broken workflow back
-  (they don't).
+- **Immediate**: `git revert` the feature PR merge commit on main. The
+  parse-layer defenses + sampling CLI flags stop running; v0.4.6
+  behavior restored. Evaluation harness files remain (they're
+  self-contained under `test-automation/` and do not execute at
+  runtime).
+- **Full**: revert to v0.4.6 tag, delete tag v0.4.7, unmark GitHub
+  release Latest, re-mark v0.4.6 Latest.
 - Zero config-file mutations by this release; users never need to
   re-run `/glm:setup`.
+- Sanity-sweep CSV is informational only; deleting it would have no
+  functional effect.

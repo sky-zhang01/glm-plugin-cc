@@ -151,11 +151,11 @@ function csvEscape(value) {
   return s;
 }
 
-function runOne({ fixtureId, temperature, topP, seed, thinking, runIndex, groundTruth }) {
+function runOne({ fixtureId, base, temperature, topP, seed, thinking, runIndex, groundTruth }) {
   const companionArgs = [
     COMPANION,
     "adversarial-review",
-    "--base", "main",
+    "--base", base,
     "--scope", "branch",
     "--json",
     "--thinking", thinking,
@@ -230,6 +230,7 @@ function runOne({ fixtureId, temperature, topP, seed, thinking, runIndex, ground
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const fixtureId = args.fixture || "C2-v046-aftercare";
+  const base = args.base || "main";
   const temperature = args.temperature !== undefined ? Number(args.temperature) : undefined;
   const topP = args["top-p"] !== undefined ? Number(args["top-p"]) : undefined;
   const seed = args.seed !== undefined ? Number(args.seed) : undefined;
@@ -240,12 +241,12 @@ async function main() {
   const groundTruth = loadGroundTruth(fixtureId);
   ensureCsv(outPath);
 
-  console.log(`[run-experiment] fixture=${fixtureId}, temp=${temperature ?? "unset"}, top_p=${topP ?? "unset"}, seed=${seed ?? "unset"}, thinking=${thinking}, runs=${runs}`);
+  console.log(`[run-experiment] fixture=${fixtureId}, base=${base}, temp=${temperature ?? "unset"}, top_p=${topP ?? "unset"}, seed=${seed ?? "unset"}, thinking=${thinking}, runs=${runs}`);
   console.log(`[run-experiment] output: ${outPath}`);
 
   for (let i = 1; i <= runs; i++) {
     process.stdout.write(`  run ${i}/${runs} ... `);
-    const metrics = runOne({ fixtureId, temperature, topP, seed, thinking, runIndex: i, groundTruth });
+    const metrics = runOne({ fixtureId, base, temperature, topP, seed, thinking, runIndex: i, groundTruth });
     const row = [
       new Date().toISOString(),
       fixtureId,
