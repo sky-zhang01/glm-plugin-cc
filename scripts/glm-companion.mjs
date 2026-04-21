@@ -64,8 +64,8 @@ function printUsage() {
     [
       "Usage:",
       "  node scripts/glm-companion.mjs setup [--preset ...] [--api-key <key>] [--ping] [--enable-review-gate|--disable-review-gate] [--json]",
-      "  node scripts/glm-companion.mjs review [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--json] [focus text]",
-      "  node scripts/glm-companion.mjs adversarial-review [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--json] [focus text]",
+      "  node scripts/glm-companion.mjs review [--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--json] [focus text]",
+      "  node scripts/glm-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--json] [focus text]",
       "  node scripts/glm-companion.mjs task [--system <text>] [--model <model>] [--thinking on|off] [--json] [prompt]",
       "  node scripts/glm-companion.mjs rescue [--system <text>] [--model <model>] [--thinking on|off] [--json] [prompt]",
       "  node scripts/glm-companion.mjs status [job-id] [--all] [--json]",
@@ -307,7 +307,11 @@ function buildReviewSystemPrompt({ adversarial, schema }) {
 async function runReview(argv, { adversarial }) {
   const { options, positionals } = parseCommandInput(argv, {
     valueOptions: ["base", "scope", "model", "thinking"],
-    booleanOptions: ["json"]
+    // `wait` / `background` are no-ops here — declared so parseArgs consumes
+    // them instead of leaking into positionals as focus text. Real detach
+    // lives in Claude Code's `Bash(run_in_background: true)`. See
+    // commands/review.md.
+    booleanOptions: ["json", "wait", "background"]
   });
   const cwd = resolveCommandCwd(options);
   const workspaceRoot = resolveCommandWorkspace(options);

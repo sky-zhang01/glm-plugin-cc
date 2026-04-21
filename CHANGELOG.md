@@ -1,5 +1,49 @@
 # Changelog
 
+## v0.4.5 — 2026-04-21
+
+Add `--wait` / `--background` execution-mode flags to `/glm:review` and
+`/glm:adversarial-review`. HTTP call shape, model catalog, config file,
+and prompt templates unchanged.
+
+### Added
+
+- `/glm:review` and `/glm:adversarial-review` — the skill prompt now
+  estimates review size (`git status --short --untracked-files=all` +
+  `git diff --shortstat`) and asks once via `AskUserQuestion` whether
+  to wait in the foreground or detach to a Claude Code background
+  task. The recommended option is auto-selected: "Wait" for clearly
+  tiny reviews (~1-2 files), "Run in background" otherwise. Background
+  uses `Bash(..., run_in_background: true)`; user polls via
+  `/glm:status` and `/glm:result <id>`.
+- `--wait` / `--background` flags on both review commands bypass the
+  `AskUserQuestion` prompt for scripted invocations. Both flags are
+  no-ops at the companion layer — `scripts/glm-companion.mjs runReview`
+  declares them in `booleanOptions` so `parseArgs` consumes them
+  rather than leaking into focus text. Actual detach is owned by
+  Claude Code's Bash invocation.
+
+### Hardened (post-adversarial-review)
+
+- Mutual-exclusion rule for `--wait` + `--background`: if both are
+  passed to `/glm:review` or `/glm:adversarial-review`, `--wait` takes
+  precedence (foreground). Previously the outcome depended on LLM
+  bullet-read order.
+- `git diff` failure fallback: if the size-estimation probes error
+  (shallow clone, non-existent `--base`, detached HEAD), the skill now
+  treats the size as unclear, recommends background, and surfaces the
+  error to the user instead of silently classifying as empty or tiny.
+- `/glm:setup` slash-command pivot guard on the "Key missing" and
+  "Rotate API key" prompts: if the user's reply begins with `/`
+  (e.g., `/glm:review`), the skill refuses and does not write it to
+  `config.json`, preventing accidental `slash-command-as-API-key`
+  corruption.
+- UAT harness extended from 9 to 11 scenarios: Scenario I covers
+  multi-word focus text + `--scope` + `--wait` flag combination;
+  Scenario J is a source-level grep that fails UAT if any future
+  change reads `options.wait` / `options.background` in the companion
+  (locking in the no-op contract).
+
 ## v0.4.4 — 2026-04-21
 
 UX polish + metadata cleanup. No public API changes. No config
