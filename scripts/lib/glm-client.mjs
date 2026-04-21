@@ -20,9 +20,11 @@
  * request field `{"type": "enabled" | "disabled"}`.
  */
 
+import { classifyBigModelError, extractBigModelErrorCode } from "./bigmodel-errors.mjs";
 import { formatUserFacingError, readJsonFile } from "./fs.mjs";
 import { assertNonVisionModel, DEFAULT_MODEL } from "./model-catalog.mjs";
 import { resolveApiKeyFromConfig, resolveEffectiveConfig } from "./preset-config.mjs";
+import { withRetry } from "./retry.mjs";
 
 const FALLBACK_BASE_URL = "https://open.bigmodel.cn/api/paas/v4";
 const DEFAULT_MAX_TOKENS = 8192;
@@ -248,17 +250,69 @@ export function buildTaskTitle(prompt) {
  * Send a review request. `prompt` is the full review prompt (the harness or
  * the command renderer composes it — we do not synthesize prompts here).
  *
- * Returns: { rawOutput, parsed, parseError, failureMessage, errorCode, reasoningSummary }
+ * Wrapped in `withRetry` so transient BigModel conditions (1302 account
+ * rate limit, 1305 shared-pool overload, plus network TIMEOUT /
+ * NETWORK_ERROR) are retried automatically with exponential backoff +
+ * jitter. Terminal conditions (1301/1304/1308/1309/1310, auth, bad
+ * request) return on first call without retrying.
+ *
+ * Returns: { rawOutput, parsed, parseError, failureMessage, errorCode,
+ *            reasoningSummary, retry, attempts, attemptHistory,
+ *            retryExhausted }
  */
 export async function runGlmReview(cwd, options = {}) {
-  return runChatRequest(cwd, { ...options, expectJson: true });
+  return runWithRetryIfEnabled(cwd, { ...options, expectJson: true });
 }
 
 /**
  * Send a free-form task request. Returns the raw output without JSON parsing.
+ * Same retry policy as runGlmReview.
  */
 export async function runGlmTask(cwd, options = {}) {
-  return runChatRequest(cwd, { ...options, expectJson: false });
+  return runWithRetryIfEnabled(cwd, { ...options, expectJson: false });
+}
+
+/**
+ * Shared entry point: wrap runChatRequest in withRetry unless the caller
+ * opts out via `options.retry: false`. Pass `options.retryPolicy` /
+ * `options.onAttempt` through.
+ */
+async function runWithRetryIfEnabled(cwd, options = {}) {
+  if (options.retry === false) {
+    return runChatRequest(cwd, options);
+  }
+  return withRetry(
+    ({ attempt }) => runChatRequest(cwd, { ...options, _attempt: attempt }),
+    {
+      policy: options.retryPolicy,
+      onAttempt: ({ attempt, maxAttempts, result, willRetry, delayMs, elapsedMs, budgetMs }) => {
+        if (typeof options.onProgress !== "function") return;
+        if (willRetry) {
+          options.onProgress({
+            phase: "retrying",
+            attempt,
+            maxAttempts,
+            errorCode: result?.errorCode || null,
+            delayMs,
+            elapsedMs,
+            budgetMs,
+            message:
+              `attempt ${attempt}/${maxAttempts} hit ${result?.errorCode || "transient failure"}; ` +
+              `backing off ${delayMs} ms before retry (elapsed ${elapsedMs}/${budgetMs} ms)`
+          });
+        } else if (result?.failureMessage && attempt > 1) {
+          options.onProgress({
+            phase: "retry-exhausted",
+            attempt,
+            maxAttempts,
+            errorCode: result?.errorCode || null,
+            elapsedMs,
+            message: `gave up after ${attempt}/${maxAttempts} attempts: ${result.errorCode || "unknown failure"}`
+          });
+        }
+      }
+    }
+  );
 }
 
 async function runChatRequest(cwd, options = {}) {
@@ -331,39 +385,68 @@ async function runChatRequest(cwd, options = {}) {
 
     const responseText = await safeReadText(response);
 
+    // BigModel wraps application-level errors inside the response body's
+    // `error.code` field (as a string). A single HTTP 429 can correspond
+    // to concurrent-limit (1302), daily-quota (1303), insufficient-balance
+    // (1304), or server-side traffic spike (1305) — each with a different
+    // recovery path. Classify the vendor code before falling back to
+    // generic HTTP-status handling.
+    const vendorCode = extractBigModelErrorCode(responseText);
+    if (vendorCode) {
+      const vendor = classifyBigModelError(vendorCode, responseText, { endpoint, model });
+      return failureShape(vendor.message, vendor.errorCode, {
+        rawResponse: responseText,
+        vendorCode: vendor.vendorCode,
+        vendorMessage: vendor.vendorMessage,
+        retry: vendor.retry
+      });
+    }
+
     if (response.status === 429) {
       return failureShape(
         `Rate limited by ${sanitizeUrlForDisplay(endpoint)}. Retry after quota reset.`,
         "RATE_LIMITED",
-        { rawResponse: responseText }
+        { rawResponse: responseText, retry: "after-cooldown" }
       );
     }
     if (response.status === 401 || response.status === 403) {
       return failureShape(
         `Auth failed (HTTP ${response.status}). Stored api_key may be invalid or lack permission for ${model}. Re-run /glm:setup --api-key <key> to refresh.`,
         "AUTH_FAILED",
-        { rawResponse: responseText }
+        { rawResponse: responseText, retry: "never" }
       );
     }
     if (response.status === 400) {
       return failureShape(
         `Bad request (HTTP 400). Response: ${responseText.slice(0, 400)}`,
         "BAD_REQUEST",
-        { rawResponse: responseText }
+        { rawResponse: responseText, retry: "never" }
       );
     }
     if (response.status === 404) {
       return failureShape(
         `HTTP 404 from ${sanitizeUrlForDisplay(endpoint)}. Endpoint wrong for this preset? Preset base_url must be OpenAI-compatible (\`/chat/completions\` is appended automatically).`,
         "NOT_FOUND",
-        { rawResponse: responseText }
+        { rawResponse: responseText, retry: "never" }
       );
     }
     if (!response.ok) {
+      // 500/502/503/504 are transient by nature (server bug + gateway
+      // errors + gateway timeouts). Drive retry via a distinct errorCode
+      // so the retry layer doesn't confuse these with application-level
+      // vendor errors or permanent 4xx client errors.
+      const isTransientGateway = [500, 502, 503, 504].includes(response.status);
+      if (isTransientGateway) {
+        return failureShape(
+          `HTTP ${response.status} from ${sanitizeUrlForDisplay(endpoint)} (transient gateway error): ${responseText.slice(0, 400)}`,
+          "HTTP_ERROR_TRANSIENT",
+          { rawResponse: responseText, retry: "immediate" }
+        );
+      }
       return failureShape(
         `HTTP ${response.status} from ${sanitizeUrlForDisplay(endpoint)}: ${responseText.slice(0, 400)}`,
         "HTTP_ERROR",
-        { rawResponse: responseText }
+        { rawResponse: responseText, retry: "unknown" }
       );
     }
 
