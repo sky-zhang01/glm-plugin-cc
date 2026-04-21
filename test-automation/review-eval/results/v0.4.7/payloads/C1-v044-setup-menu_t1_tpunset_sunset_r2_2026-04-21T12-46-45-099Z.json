@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 85864,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit bundles an npm scope rename with a setup-command UX change. The scope rename in package.json is a potentially breaking change for existing installations — users who installed the old-scoped package will not seamlessly receive updates and may encounter broken references. The setup command modification adds interactive menu logic described only in markdown; without tests or guardrails, edge cases in the already-configured path could leave users stuck. Neither risk appears mitigated in the diff.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change with no migration path visible",
+        "body": "The commit message explicitly states 'rename npm scope' and package.json shows 4 lines changed (2+/2-), consistent with changing the package scope (e.g., @oldscope/x → @newscope/x). Existing users who installed the old-scoped package will not be updated by `npm update` or similar tooling. Any lockfiles, CI configs, or documentation referencing the old scope will silently point to a stale or nonexistent package. There is no evidence of a deprecation path, alias, or migration guide in this commit.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.82,
+        "recommendation": "Publish a deprecation notice on the old-scoped package pointing to the new one, or add a postinstall redirect. Include a migration note in CHANGELOG.md and release_card.md. Verify that no other config files (.claude-plugin/*, documentation, CI) still reference the old scope."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive menu added to setup.md without observable error handling for non-interactive contexts",
+        "body": "commands/setup.md gained 19 changed lines adding an interactive menu when already configured. Markdown-based command definitions that branch on user state (already-configured vs. not) can fail silently or produce garbled output when invoked in non-interactive or headless environments (e.g., CI, scripted setup). If the menu expects user input and none arrives, the command may hang or fall through to an unintended default. The diff shows no guards for this scenario.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.6,
+        "recommendation": "Add explicit handling for non-interactive invocation: either detect TTY absence and exit with a clear message, or provide a --yes/--force flag to skip the menu. Document the non-interactive usage path."
+      },
+      {
+        "severity": "medium",
+        "title": "release_card.md rewritten with 326 line changes but no validation against actual package behavior",
+        "body": "release_card.md shows 273 additions and 103 deletions — a near-complete rewrite. If this file documents installation steps, API surface, or setup instructions that reference the old npm scope or old setup behavior, any inconsistency between the documentation and the actual package behavior will mislead users at upgrade time. There is no mechanism to validate that documented commands or package names match the real package.json contents.",
+        "file": "release_card.md",
+        "line_start": 1,
+        "line_end": 326,
+        "confidence": 0.55,
+        "recommendation": "Verify every package name reference, install command, and setup instruction in release_card.md matches the new scope in package.json. Consider adding a CI lint step that extracts package names from package.json and asserts they appear correctly in documentation."
+      }
+    ],
+    "next_steps": [
+      "Show the full diff content for package.json so the exact scope change can be assessed for breakage.",
+      "Verify that the old-scoped npm package either still exists with a deprecation notice or has been handled via npm aliasing.",
+      "Confirm that setup.md interactive menu behavior is tested in non-TTY contexts.",
+      "Audit .claude-plugin/marketplace.json and plugin.json for any remaining references to the old scope."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"This commit bundles an npm scope rename with a setup-command UX change. The scope rename in package.json is a potentially breaking change for existing installations — users who installed the old-scoped package will not seamlessly receive updates and may encounter broken references. The setup command modification adds interactive menu logic described only in markdown; without tests or guardrails, edge cases in the already-configured path could leave users stuck. Neither risk appears mitigated in the diff.\",\"findings\":[{\"severity\":\"high\",\"title\":\"npm scope rename is a breaking change with no migration path visible\",\"body\":\"The commit message explicitly states 'rename npm scope' and package.json shows 4 lines changed (2+/2-), consistent with changing the package scope (e.g., @oldscope/x → @newscope/x). Existing users who installed the old-scoped package will not be updated by `npm update` or similar tooling. Any lockfiles, CI configs, or documentation referencing the old scope will silently point to a stale or nonexistent package. There is no evidence of a deprecation path, alias, or migration guide in this commit.\",\"file\":\"package.json\",\"line_start\":1,\"line_end\":4,\"confidence\":0.82,\"recommendation\":\"Publish a deprecation notice on the old-scoped package pointing to the new one, or add a postinstall redirect. Include a migration note in CHANGELOG.md and release_card.md. Verify that no other config files (.claude-plugin/*, documentation, CI) still reference the old scope.\"},{\"severity\":\"medium\",\"title\":\"Interactive menu added to setup.md without observable error handling for non-interactive contexts\",\"body\":\"commands/setup.md gained 19 changed lines adding an interactive menu when already configured. Markdown-based command definitions that branch on user state (already-configured vs. not) can fail silently or produce garbled output when invoked in non-interactive or headless environments (e.g., CI, scripted setup). If the menu expects user input and none arrives, the command may hang or fall through to an unintended default. The diff shows no guards for this scenario.\",\"file\":\"commands/setup.md\",\"line_start\":1,\"line_end\":19,\"confidence\":0.6,\"recommendation\":\"Add explicit handling for non-interactive invocation: either detect TTY absence and exit with a clear message, or provide a --yes/--force flag to skip the menu. Document the non-interactive usage path.\"},{\"severity\":\"medium\",\"title\":\"release_card.md rewritten with 326 line changes but no validation against actual package behavior\",\"body\":\"release_card.md shows 273 additions and 103 deletions — a near-complete rewrite. If this file documents installation steps, API surface, or setup instructions that reference the old npm scope or old setup behavior, any inconsistency between the documentation and the actual package behavior will mislead users at upgrade time. There is no mechanism to validate that documented commands or package names match the real package.json contents.\",\"file\":\"release_card.md\",\"line_start\":1,\"line_end\":326,\"confidence\":0.55,\"recommendation\":\"Verify every package name reference, install command, and setup instruction in release_card.md matches the new scope in package.json. Consider adding a CI lint step that extracts package names from package.json and asserts they appear correctly in documentation.\"}],\"next_steps\":[\"Show the full diff content for package.json so the exact scope change can be assessed for breakage.\",\"Verify that the old-scoped npm package either still exists with a deprecation notice or has been handled via npm aliasing.\",\"Confirm that setup.md interactive menu behavior is tested in non-TTY contexts.\",\"Audit .claude-plugin/marketplace.json and plugin.json for any remaining references to the old scope.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T12:46:45.121Z"
+}

@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.333,
+    "citation_false_file_hits": 0,
+    "latency_ms": 68676,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit introduces an npm scope rename alongside an interactive menu addition to the setup command. The scope rename is a breaking change for existing installations that may still reference the old package name. The interactive menu, while useful for manual usage, may silently break scripted or non-interactive invocations of /glm:setup. Without seeing guard logic for non-TTY contexts or migration handling for the scope rename, this carries real ship risk.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename may break existing installations and references",
+        "body": "The commit renames the npm scope (visible in package.json changes). Any existing installation, CI pipeline, or dependency that references the old scope name will fail to resolve. There is no visible migration path, deprecation notice, or backward-compatible alias mentioned in the changed files. Users upgrading from a prior version will experience a silent breakage where the package cannot be found under the old name.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 10,
+        "confidence": 0.8,
+        "recommendation": "Verify that the old scope name continues to resolve (e.g., via npm alias or deprecation notice), or document the breaking change prominently and provide a migration guide. If this is a plugin registry, ensure the old entry is either redirected or removed with user communication."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive menu in setup may hang or fail in non-interactive contexts",
+        "body": "The commit adds an interactive menu to /glm:setup when already configured. If the command is invoked in a non-TTY environment (CI, scripting, piped input), the interactive prompt will either hang waiting for input that never arrives or fail silently. There is no indication from the file list that the command checks for TTY availability or provides a --yes/--no-input flag to skip interactivity.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.7,
+        "recommendation": "Add a TTY detection guard: if stdin is not a TTY, either skip the interactive menu and use sensible defaults, or fail with a clear error message indicating that an interactive terminal is required. Provide a flag like --non-interactive or --force for scripted usage."
+      },
+      {
+        "severity": "low",
+        "title": "Release card diff is large and may contain stale or inconsistent documentation",
+        "body": "The release_card.md file shows 326 lines changed with significant additions and removals. Large documentation changes in tandem with functional changes risk the documentation drifting from actual behavior, especially around the interactive menu flow and new scope name. If the release card is user-facing, any inconsistency becomes a trust issue.",
+        "file": "release_card.md",
+        "line_start": 1,
+        "line_end": 326,
+        "confidence": 0.5,
+        "recommendation": "Verify that all documented commands, package names, and setup flows in release_card.md match the actual implementation post-rename. Cross-reference with commands/setup.md and package.json to ensure consistency."
+      }
+    ],
+    "next_steps": [
+      "Inspect the full diff of commands/setup.md to confirm whether TTY detection and non-interactive fallback logic exists.",
+      "Verify whether the old npm scope name has been deprecated or aliased to prevent breakage for existing users.",
+      "Check if the interactive menu has a timeout or default behavior when no input is provided.",
+      "Confirm release_card.md accurately reflects the new scope name and setup behavior."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"This commit introduces an npm scope rename alongside an interactive menu addition to the setup command. The scope rename is a breaking change for existing installations that may still reference the old package name. The interactive menu, while useful for manual usage, may silently break scripted or non-interactive invocations of /glm:setup. Without seeing guard logic for non-TTY contexts or migration handling for the scope rename, this carries real ship risk.\",\"findings\":[{\"severity\":\"high\",\"title\":\"npm scope rename may break existing installations and references\",\"body\":\"The commit renames the npm scope (visible in package.json changes). Any existing installation, CI pipeline, or dependency that references the old scope name will fail to resolve. There is no visible migration path, deprecation notice, or backward-compatible alias mentioned in the changed files. Users upgrading from a prior version will experience a silent breakage where the package cannot be found under the old name.\",\"file\":\"package.json\",\"line_start\":1,\"line_end\":10,\"confidence\":0.8,\"recommendation\":\"Verify that the old scope name continues to resolve (e.g., via npm alias or deprecation notice), or document the breaking change prominently and provide a migration guide. If this is a plugin registry, ensure the old entry is either redirected or removed with user communication.\"},{\"severity\":\"medium\",\"title\":\"Interactive menu in setup may hang or fail in non-interactive contexts\",\"body\":\"The commit adds an interactive menu to /glm:setup when already configured. If the command is invoked in a non-TTY environment (CI, scripting, piped input), the interactive prompt will either hang waiting for input that never arrives or fail silently. There is no indication from the file list that the command checks for TTY availability or provides a --yes/--no-input flag to skip interactivity.\",\"file\":\"commands/setup.md\",\"line_start\":1,\"line_end\":19,\"confidence\":0.7,\"recommendation\":\"Add a TTY detection guard: if stdin is not a TTY, either skip the interactive menu and use sensible defaults, or fail with a clear error message indicating that an interactive terminal is required. Provide a flag like --non-interactive or --force for scripted usage.\"},{\"severity\":\"low\",\"title\":\"Release card diff is large and may contain stale or inconsistent documentation\",\"body\":\"The release_card.md file shows 326 lines changed with significant additions and removals. Large documentation changes in tandem with functional changes risk the documentation drifting from actual behavior, especially around the interactive menu flow and new scope name. If the release card is user-facing, any inconsistency becomes a trust issue.\",\"file\":\"release_card.md\",\"line_start\":1,\"line_end\":326,\"confidence\":0.5,\"recommendation\":\"Verify that all documented commands, package names, and setup flows in release_card.md match the actual implementation post-rename. Cross-reference with commands/setup.md and package.json to ensure consistency.\"}],\"next_steps\":[\"Inspect the full diff of commands/setup.md to confirm whether TTY detection and non-interactive fallback logic exists.\",\"Verify whether the old npm scope name has been deprecated or aliased to prevent breakage for existing users.\",\"Check if the interactive menu has a timeout or default behavior when no input is provided.\",\"Confirm release_card.md accurately reflects the new scope name and setup behavior.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T12:44:44.299Z"
+}

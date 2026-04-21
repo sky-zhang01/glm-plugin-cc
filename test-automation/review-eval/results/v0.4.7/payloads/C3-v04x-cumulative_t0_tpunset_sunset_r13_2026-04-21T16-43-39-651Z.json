@@ -1,0 +1,91 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 13
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 73391,
+    "error_code": ""
+  },
+  "parsed": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces retry/backoff logic, BigModel error dispatch, job tracking, and state management with several material risks: retry.mjs has no circuit-breaker or max-budget cap allowing unbounded wall-clock time on sustained failures; state.mjs reads stale JSON without integrity validation or atomic writes creating corruption risk on crash; glm-client.mjs error classification can silently swallow unexpected HTTP statuses as non-retryable with no logging; tracked-jobs.mjs stores job state in a single JSON file with no locking, risking corruption under concurrent invocations. The user focus on sampling-sweep run 13 is not directly addressable from the provided context as no sampling-sweep artifact or configuration is present in the diff, but the core runtime libraries have sufficient gaps to warrant blocking.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs has no global wall-clock timeout or budget cap — unbounded retry loops on sustained upstream failures",
+        "body": "The retry module implements exponential backoff with jitter and a maxAttempts guard, but there is no overall deadline or wall-clock budget. If the upstream API returns retryable errors continuously (e.g. 429 with Retry-After, or transient 5xx), the caller will block for maxAttempts × (baseDelay × 2^attempt + jitter) which can grow to minutes. In a sampling-sweep scenario running many sequential jobs, one stuck job stalls the entire sweep with no observability signal. The absence of a deadline/AbortSignal integration means the caller cannot externally cancel a stuck retry loop either.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.82,
+        "recommendation": "Add a `deadlineMs` option to retryWithBackoff. Before each attempt, check `Date.now() - startTime > deadlineMs` and throw a DeadlineExceeded error. Default it to something sane (e.g. 5 minutes). Also accept an AbortSignal and check it in the loop."
+      },
+      {
+        "severity": "high",
+        "title": "state.mjs performs non-atomic read-modify-write on shared JSON state file — crash during write corrupts all persisted state",
+        "body": "State management reads a JSON file, modifies in memory, then writes back with fs.writeFile. If the process crashes (SIGKILL, OOM, disk full) between the write start and completion, the file will be truncated or contain partial JSON. On next invocation, JSON.parse will throw and all tracked state (job history, run metadata) is lost. This is especially dangerous for a sampling-sweep workload that accumulates results across many runs. There is no write-to-temp-then-rename atomic pattern, no checksum, and no backup/restore mechanism.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.78,
+        "recommendation": "Write to a temporary file in the same directory then rename (atomic on most filesystems): `fs.writeFile(tmpPath, data, cb) → fs.rename(tmpPath, statePath, cb)`. Add a try/catch around JSON.parse on read that falls back to a .bak file or empty-state default with a warning."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs has no file-level locking — concurrent glm-companion processes can corrupt shared job registry",
+        "body": "tracked-jobs.mjs reads and writes a shared JSON file tracking active/completed jobs. If two glm-companion.mjs invocations run concurrently (e.g. user starts two reviews, or a sweep spawns parallel runs), both read the same initial state, each modifies their in-memory copy, and the second write overwrites the first's changes — silently losing job tracking for whichever finished first. The --background flag in review.md and the job-control.mjs module suggest concurrent execution is an intended use case, making this race likely rather than edge-case.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.75,
+        "recommendation": "Use lockfile (e.g. proper-lockfile or fcntl/flock wrapper) around read-modify-write cycles. Alternatively, use per-job files in a jobs/ directory instead of a single monolithic JSON file to eliminate contention."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs classifyBigModelError silently maps unknown HTTP statuses to non-retryable with no logging",
+        "body": "The error classification function maps known BigModel API error codes to retryable/non-retryable categories. Unrecognized error codes fall through to a default non-retryable classification without any log emission. In a sampling-sweep, this means a new or changed upstream error code (e.g. a new rate-limit variant) causes immediate job failure with zero diagnostic signal — the sweep silently skips that sample and moves on, producing incomplete results that look like successful completions.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.7,
+        "recommendation": "Add a `console.warn` or structured log entry when an unrecognized error code is encountered: `Unknown BigModel error code ${code}, defaulting to non-retryable`. Consider making unknown 5xx codes retryable by default (defensive stance) rather than failing fast."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs API key handling lacks constant-time comparison and may leak key material in error stacks",
+        "body": "The GLM client constructs fetch requests with the API key in headers. Error handling that surfaces the request object (or headers) in thrown errors or logged output could expose the API key. The diff shows enhanced error dispatch in glm-client.mjs wrapping fetch failures with additional context. If the error object or its message includes request details (URL, headers), the key leaks into logs, CI output, or UAT report artifacts. Without explicit key-redaction in error serialization, this is a latent credential exposure risk.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.6,
+        "recommendation": "Ensure all error objects created from failed requests strip or redact the Authorization header before throwing. Add a `redactHeaders(error)` helper that removes sensitive headers from any error that captures the request context. Verify UAT report templates don't log raw error objects."
+      }
+    ],
+    "next_steps": [
+      "Read scripts/lib/retry.mjs in full and add a deadlineMs/AbortSignal mechanism before any sweep workload depends on it.",
+      "Read scripts/lib/state.mjs and scripts/lib/tracked-jobs.mjs together — fix atomic writes (write-then-rename) and add file locking or per-job file isolation.",
+      "Audit scripts/lib/bigmodel-errors.mjs classifyBigModelError for the default/fallthrough branch and add logging for unrecognized error codes.",
+      "Inspect scripts/lib/glm-client.mjs error paths for any place request headers or URLs are included in thrown error messages — redact API keys.",
+      "Verify the sampling-sweep run 13 configuration exists and check whether it sets any timeout/retry limits that might mitigate the above, or whether it inherits the unbounded defaults."
+    ]
+  },
+  "rawOutputHead": "{\n  \"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff introduces retry/backoff logic, BigModel error dispatch, job tracking, and state management with several material risks: retry.mjs has no circuit-breaker or max-budget cap allowing unbounded wall-clock time on sustained failures; state.mjs reads stale JSON without integrity validation or atomic writes creating corruption risk on crash; glm-client.mjs error classification can silently swallow unexpected HTTP statuses as non-retryable with no logging; tracked-jobs.mjs stores job state in a single JSON file with no locking, risking corruption under concurrent invocations. The user focus on sampling-sweep run 13 is not directly addressable from the provided context as no sampling-sweep artifact or configuration is present in the diff, but the core runtime libraries have sufficient gaps to warrant blocking.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"retry.mjs has no global wall-clock timeout or budget cap — unbounded retry loops on sustained upstream failures\",\n      \"body\": \"The retry module implements exponential backoff with jitter and a maxAttempts guard, but there is no overall deadline or wall-clock budget. If the upstream API returns retryable errors continuously (e.g. 429 with Retry-After, or transient 5xx), the caller will block for maxAttempts × (baseDelay × 2^attempt + jitter) which can grow to minutes. In a sampling-sweep scenario running many sequential jobs, one stuck job stalls the entire sweep with no observability signal. The absence of a deadline/AbortSignal integration means the caller cannot externally cancel a stuck retry loop either.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.82,\n      \"recommendation\": \"Add a `deadlineMs` option to retryWithBackoff. Before each attempt, check `Date.now() - startTime > deadlineMs` and throw a DeadlineExceeded error. Default it to something sane (e.g. 5 minutes). Also accept an AbortSignal and check it in the loop.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"state.mjs performs non-atomic read-modify-write on shared JSON state file — crash during write corrupts all persisted state\",\n      \"body\": \"State management reads a JSON file, modifies in memory, then writes back with fs.writeFile. If the process crashes (SIGKILL, OOM, disk full) between the write start and completion, the file will be truncated or contain partial JSON. On next invocation, JSON.parse will throw and all tracked state (job history, run metadata) is lost. This is especially dangerous for a sampling-sweep workload that accumulates results across many runs. There is no write-to-temp-then-rename atomic pattern, no checksum, and no backup/restore mechanism.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Write to a temporary file in the same directory then rename (atomic on most filesystems): `fs.writeFile(tmpPath, data, cb) → fs.rename(tmpPath, statePath, cb)`. Add a try/catch around JSON.parse on read that falls back to a .bak file or empty-state default with a warning.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"tracked-jobs.mjs has no file-level locking — concurrent glm-companion processes can corrupt shared job registry\",\n      \"body\": \"tracked-jobs.mjs reads and writes a shared JSON file tracking active/completed jobs. If two glm-companion.mjs invocations run concurrently (e.g. user starts two reviews, or a sweep spawns parallel runs), both read the same initial state, each modifies their in-memory copy, and the second write overwrites the first's changes — silently losing job tracking for whichever finished first. The --background flag in review.md and the job-control.mjs module suggest concurrent execution is an intended use case, making this race likely rather than edge-case.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Use lockfile (e.g. proper-lockfile or fcntl/flock wrapper) around read-modify-write cycles. Alternatively, use per-job files in a jobs/ directory instead of a single monolithic JSON file to eliminate contention.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"bigmodel-errors.mjs classifyBigModelError silently maps unknown HTTP statuses to non-retryable with no logging\",\n      \"body\": \"The error classification function maps known BigModel API error codes to retryable/non-retryable categories. Unrecognized error codes fall through to a default non-retryable classification without any log emission. In a sampling-sweep, this means a new or changed upstream error code (e.g. a new rate-limit variant) causes immediate job failure with zero diagnostic signal — the sweep silently skips that sample and moves on, producing incomplete results that look like successful completions.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Add a `console.warn` or structured log entry when an unrecognized error code is encountered: `Unknown BigModel error code ${code}, defaulting to non-retryable`. Consider making unknown 5xx codes retryable by default (defensive stance) rather than failing fast.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client.mjs API key handling lacks constant-time comparison and may leak key material in error stacks\",\n      \"body\": \"The GLM client constructs fetch requests with the API key in headers. Error handling that surfaces the request object (or headers) in thrown errors or logged output could expose the API key. The diff shows enhanced error dispatch in glm-client.mjs wrapping fetch failures with additional context. If the error object or its message includes request details (URL, headers), the key leaks into logs, CI output, or UAT report artifacts. Without explicit key-redaction in error serialization, this is a latent credential exposure risk.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Ensure all error objects created from failed requests strip or redact the Authorization header before throwing. Add a `redactHeaders(error)` helper that removes sensitive headers from any error that captures the request context. Verify UAT report templates don't log raw error objects.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Read scripts/lib/retry.mjs in full and add a deadlineMs/AbortSignal mechanism before any sweep workload depends on it.\",\n    \"Read scripts/lib/state.mjs and scripts/lib/tracked-jobs.mjs together — fix atomic writes (write-then-rename) and add file locking or per-job file isolation.\",\n    \"Audit scripts/lib/bigmodel-errors.mjs classifyBigModelError for the default/fallthrough branch and add logging for unrecognized error codes.\",\n    \"Inspect scripts/lib/glm-client.mjs error paths for any place request headers or URLs are included in thrown error messages — redact API keys.\",\n    \"Verify the sampling-sweep run 13 configuration exists and check whether it sets any timeout/retry limits that might mitigate the above, or whether it inherits the unbounded defaults.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:43:39.695Z"
+}

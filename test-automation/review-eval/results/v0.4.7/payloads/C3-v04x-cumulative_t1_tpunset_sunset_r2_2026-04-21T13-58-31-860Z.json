@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 164537,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 delta introduces retry/backoff, job tracking, BigModel error dispatch, and background execution. While test coverage expanded significantly, several high-impact modules have gaps: the retry module has untested abort/cancellation edge cases, the GLM client's error→retry wiring depends on error classification that can silently misclassify, and background job state can become orphaned on crash without recovery. At least one finding (retry abort race) could cause duplicate API calls under real production conditions.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry abort signal race: resolve/reject can both fire on overlapping cancel+success",
+        "body": "In retry.mjs, when an AbortSignal triggers mid-flight, the abort handler and the normal resolution path can both execute. The abort handler calls reject() but does not guard against the promise already being settled by a successful attempt. Under concurrent retry with signal abort, this causes unhandled promise rejection that propagates silently up to glm-client callers, potentially masking the real result or causing duplicate API submissions if the caller retries on rejection.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Add a settled flag scoped to each attempt. Both the abort handler and the normal path should check-and-set this flag before calling resolve/reject. Alternatively, use AbortSignal.abort + Promise.race pattern with a single resolution path."
+      },
+      {
+        "severity": "high",
+        "title": "Background job state orphaned on process crash — no recovery on restart",
+        "body": "The tracked-jobs module writes job state to disk for --background mode, but there is no startup reconciliation loop. If the process crashes (SIGKILL, OOM) while a background job is running, the state file records status='running' permanently. On next invocation, --wait will either hang indefinitely or report a stale 'running' status. No TTL, no stale-check, no orphan detection was found in the diff.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.78,
+        "recommendation": "Add a startup sweep that marks any 'running' jobs older than a configurable TTL (e.g., 30 minutes) as 'crashed' or 'unknown'. Alternatively, record a heartbeat timestamp and check staleness before reporting status."
+      },
+      {
+        "severity": "medium",
+        "title": "BigModel error classification falls through to generic on unmapped HTTP codes",
+        "body": "bigmodel-errors.mjs maps specific HTTP status codes and error subtypes to retryable/non-retryable classifications. If the upstream API returns an unexpected code (e.g., 403 from a new permission model, or 502 from a new gateway), the classify function returns a generic fallback that defaults to non-retryable. This means transient infrastructure errors that happen to use unmapped codes will never be retried, silently degrading reliability without any logging or telemetry.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.75,
+        "recommendation": "Add explicit logging at WARN level when an unmapped HTTP code or error structure is encountered. Consider defaulting unmapped 5xx codes to retryable and unmapped 4xx to non-retryable, with a log entry so operators can identify new error types that need mapping."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client retries mask original error context in final rejection",
+        "body": "When retry.mjs exhausts all attempts, the final rejection includes the last error but discards the error history (intermediate failures, status codes, attempt count). A caller receiving the final rejection cannot distinguish 'failed once with 500' from 'failed 5 times with mixed 429/500/timeout'. This makes incident diagnosis significantly harder in production.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.7,
+        "recommendation": "Attach an attemptLog or errorHistory array to the final error before rejecting, containing each attempt's error class, status code, and timestamp. This preserves diagnostic context for the caller."
+      },
+      {
+        "severity": "medium",
+        "title": "No idempotency guard on job submission — duplicate jobs on retry",
+        "body": "When glm-client retries a request that was already received by the server (e.g., timeout on response but server processed it), the retry creates a duplicate job. The job-control module does not include an idempotency key in the request. Under network instability, this can cause the same prompt to be processed multiple times, wasting compute and producing duplicate outputs.",
+        "file": "scripts/lib/job-control.mjs",
+        "line_start": 1,
+        "line_end": 20,
+        "confidence": 0.65,
+        "recommendation": "Generate a UUID-based idempotency key at first attempt and include it in the request payload or header. On retry, reuse the same key so the server can deduplicate. If the server API does not support idempotency keys, document this as a known limitation."
+      }
+    ],
+    "next_steps": [
+      "Inspect retry.mjs abort/signal handling in detail and verify the test suite covers abort-during-flight, abort-after-resolve, and abort-after-reject scenarios",
+      "Review tracked-jobs.mjs for any heartbeat/staleness logic I may have missed; if absent, add orphan detection before v0.4.7",
+      "Run the existing retry.test.mjs suite with injected abort timing to confirm whether the race is reproducible",
+      "Audit bigmodel-errors.mjs against the actual BigModel API error catalog to find unmapped codes",
+      "Add integration test for crash-recovery of background jobs before shipping --background as stable"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 delta introduces retry/backoff, job tracking, BigModel error dispatch, and background execution. While test coverage expanded significantly, several high-impact modules have gaps: the retry module has untested abort/cancellation edge cases, the GLM client's error→retry wiring depends on error classification that can silently misclassify, and background job state can become orphaned on crash without recovery. At least one finding (retry abort race) could cause duplicate API calls under real production conditions.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Retry abort signal race: resolve/reject can both fire on overlapping cancel+success\",\"body\":\"In retry.mjs, when an AbortSignal triggers mid-flight, the abort handler and the normal resolution path can both execute. The abort handler calls reject() but does not guard against the promise already being settled by a successful attempt. Under concurrent retry with signal abort, this causes unhandled promise rejection that propagates silently up to glm-client callers, potentially masking the real result or causing duplicate API submissions if the caller retries on rejection.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.72,\"recommendation\":\"Add a settled flag scoped to each attempt. Both the abort handler and the normal path should check-and-set this flag before calling resolve/reject. Alternatively, use AbortSignal.abort + Promise.race pattern with a single resolution path.\"},{\"severity\":\"high\",\"title\":\"Background job state orphaned on process crash — no recovery on restart\",\"body\":\"The tracked-jobs module writes job state to disk for --background mode, but there is no startup reconciliation loop. If the process crashes (SIGKILL, OOM) while a background job is running, the state file records status='running' permanently. On next invocation, --wait will either hang indefinitely or report a stale 'running' status. No TTL, no stale-check, no orphan detection was found in the diff.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.78,\"recommendation\":\"Add a startup sweep that marks any 'running' jobs older than a configurable TTL (e.g., 30 minutes) as 'crashed' or 'unknown'. Alternatively, record a heartbeat timestamp and check staleness before reporting status.\"},{\"severity\":\"medium\",\"title\":\"BigModel error classification falls through to generic on unmapped HTTP codes\",\"body\":\"bigmodel-errors.mjs maps specific HTTP status codes and error subtypes to retryable/non-retryable classifications. If the upstream API returns an unexpected code (e.g., 403 from a new permission model, or 502 from a new gateway), the classify function returns a generic fallback that defaults to non-retryable. This means transient infrastructure errors that happen to use unmapped codes will never be retried, silently degrading reliability without any logging or telemetry.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.75,\"recommendation\":\"Add explicit logging at WARN level when an unmapped HTTP code or error structure is encountered. Consider defaulting unmapped 5xx codes to retryable and unmapped 4xx to non-retryable, with a log entry so operators can identify new error types that need mapping.\"},{\"severity\":\"medium\",\"title\":\"glm-client retries mask original error context in final rejection\",\"body\":\"When retry.mjs exhausts all attempts, the final rejection includes the last error but discards the error history (intermediate failures, status codes, attempt count). A caller receiving the final rejection cannot distinguish 'failed once with 500' from 'failed 5 times with mixed 429/500/timeout'. This makes incident diagnosis significantly harder in production.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.7,\"recommendation\":\"Attach an attemptLog or errorHistory array to the final error before rejecting, containing each attempt's error class, status code, and timestamp. This preserves diagnostic context for the caller.\"},{\"severity\":\"medium\",\"title\":\"No idempotency guard on job submission — duplicate jobs on retry\",\"body\":\"When glm-client retries a request that was already received by the server (e.g., timeout on response but server processed it), the retry creates a duplicate job. The job-control module does not include an idempotency key in the request. Under network instability, this can cause the same prompt to be processed multiple times, wasting compute and producing duplicate outputs.\",\"file\":\"scripts/lib/job-control.mjs\",\"line_start\":1,\"line_end\":20,\"confidence\":0.65,\"recommendation\":\"Generate a UUID-based idempotency key at first attempt and include it in the request payload or header. On retry, reuse the same key so the server can deduplicate. If the server API does not support idempotency keys, document this as a known limitation.\"}],\"next_steps\":[\"Inspect retry.mjs abort/signal handling in detail and verify the test suite covers abort-during-flight, abort-after-resolve, and abort-after-reject scenarios\",\"Review tracked-jobs.mjs for any heartbeat/staleness logic I may have missed; if absent, add orphan detection before v0.4.7\",\"Run the existing retry.test.mjs suite with injected abort timing to confirm whether the race is reproducible\",\"Audit bigmodel-errors.mjs against the actual BigModel API error catalog to find unmapped codes\",\"Add integration test for crash-recovery of background jobs before shipping --background as stable\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T13:58:31.904Z"
+}

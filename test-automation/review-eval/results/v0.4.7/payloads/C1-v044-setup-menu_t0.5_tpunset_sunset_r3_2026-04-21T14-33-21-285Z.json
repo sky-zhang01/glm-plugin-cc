@@ -1,0 +1,58 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 2,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 48041,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit bundles an npm scope rename with a functional change to the setup command. The scope rename is a breaking change for existing installations unless migration is handled, and the interactive menu addition in setup.md needs verification that it doesn't trap users who already have valid configurations. I could not inspect the actual diff content — the repository context only provides file names and stats, not line-level changes — so I cannot fully rule out defects in the menu logic or metadata consistency.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change with no visible migration path",
+        "body": "package.json and .claude-plugin/plugin.json both show changes consistent with an npm scope rename. Existing users who installed under the old scope will have stale references. The CHANGELOG entry should explicitly document migration steps, and the old scope package should either remain as a redirect or be clearly deprecated. Without seeing the diff, I cannot confirm this was handled, and bundling a scope rename into a patch-level change without migration tooling risks breaking existing installations silently.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 10,
+        "confidence": 0.65,
+        "recommendation": "Verify the diff includes: (1) old scope package deprecated or forwarding, (2) CHANGELOG migration instructions, (3) no hardcoded references to the old scope remaining in commands/setup.md or release_card.md. If any are missing, add them before shipping."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive menu in setup.md may block or confuse automated/non-interactive usage",
+        "body": "The commit message states 'add interactive menu to /glm:setup when already configured.' If the setup command now unconditionally prompts for user input, any scripted or non-interactive invocation will hang or fail silently. Claude plugin commands invoked in contexts without interactive input could stall. The defensive pattern is to detect non-interactive context and either skip the menu or exit with a clear message.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.55,
+        "recommendation": "Inspect the setup.md diff and confirm the interactive menu has a non-interactive escape hatch (e.g., a flag like --force, --skip-menu, or auto-detection of TTY). If not, add one."
+      }
+    ],
+    "next_steps": [
+      "Provide the full diff text so the interactive menu logic in commands/setup.md can be reviewed for edge cases (empty input, unexpected state, re-entrancy on repeated runs).",
+      "Confirm that all references to the old npm scope have been removed or redirected across the entire repo, not just the changed files.",
+      "Verify the CHANGELOG.md entry specifies version bump semantics — a scope rename should likely be a major or at least minor bump, not a patch."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"This commit bundles an npm scope rename with a functional change to the setup command. The scope rename is a breaking change for existing installations unless migration is handled, and the interactive menu addition in setup.md needs verification that it doesn't trap users who already have valid configurations. I could not inspect the actual diff content — the repository context only provides file names and stats, not line-level changes — so I cannot fully rule out defects in the menu logic or metadata consistency.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename is a breaking change with no visible migration path\",\n      \"body\": \"package.json and .claude-plugin/plugin.json both show changes consistent with an npm scope rename. Existing users who installed under the old scope will have stale references. The CHANGELOG entry should explicitly document migration steps, and the old scope package should either remain as a redirect or be clearly deprecated. Without seeing the diff, I cannot confirm this was handled, and bundling a scope rename into a patch-level change without migration tooling risks breaking existing installations silently.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 10,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Verify the diff includes: (1) old scope package deprecated or forwarding, (2) CHANGELOG migration instructions, (3) no hardcoded references to the old scope remaining in commands/setup.md or release_card.md. If any are missing, add them before shipping.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Interactive menu in setup.md may block or confuse automated/non-interactive usage\",\n      \"body\": \"The commit message states 'add interactive menu to /glm:setup when already configured.' If the setup command now unconditionally prompts for user input, any scripted or non-interactive invocation will hang or fail silently. Claude plugin commands invoked in contexts without interactive input could stall. The defensive pattern is to detect non-interactive context and either skip the menu or exit with a clear message.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Inspect the setup.md diff and confirm the interactive menu has a non-interactive escape hatch (e.g., a flag like --force, --skip-menu, or auto-detection of TTY). If not, add one.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Provide the full diff text so the interactive menu logic in commands/setup.md can be reviewed for edge cases (empty input, unexpected state, re-entrancy on repeated runs).\",\n    \"Confirm that all references to the old npm scope have been removed or redirected across the entire repo, not just the changed files.\",\n    \"Verify the CHANGELOG.md entry specifies version bump semantics — a scope rename should likely be a major or at least minor bump, not a patch.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:33:21.299Z"
+}

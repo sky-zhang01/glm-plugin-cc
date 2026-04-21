@@ -1,0 +1,88 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 353072,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff adds ~6600 lines including a retry subsystem, BigModel error dispatch, job tracking, and state management. I cannot inspect the actual diff contents because only file names and commit metadata were provided, not the source code. Several architectural red flags are visible from filenames and commit history alone — but without line-level access, every finding below is an inference. Granting 'approve' would be dishonest; the safest verdict is to block until actual code can be reviewed.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Cannot perform adversarial review without source access",
+        "body": "The repository context supplies only a diff stat (file names, line counts) and commit log. No file contents, no hunks, no function bodies were provided. An adversarial review that claims to trace failure paths, race conditions, or auth boundary violations from filenames alone would be fabrication. The diff adds 6600+ lines across 84 files including critical modules (retry.mjs, bigmodel-errors.mjs, glm-client.mjs, state.mjs, tracked-jobs.mjs) — none of which I can read.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.95,
+        "recommendation": "Re-run the review with actual file contents or hunk-level diff included in the prompt so that line-level adversarial analysis is possible."
+      },
+      {
+        "severity": "medium",
+        "title": "New retry.mjs (203 lines) — risk of amplifying cascading failures or hiding errors",
+        "body": "A 203-line retry module is a high-value attack surface. Without seeing the implementation, the classic risks apply: retries without jitter causing thundering herds, retries on non-idempotent operations causing duplication, retry budgets that never exhaust hiding permanent failures, or retry logic that swallows the original error context. The commit log says 'auto retry/backoff' was added — if backoff is not exponential with jitter, or if the retry predicate is too broad, this could turn transient errors into prolonged stalls or data corruption.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.6,
+        "recommendation": "Inspect retry.mjs for: (1) exponential backoff with jitter, (2) configurable max attempts, (3) retry predicate that only covers retriable error classes, (4) preservation of original error stack/context, (5) cancellation/abort signal support."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs (168 lines) — silent error swallowing risk",
+        "body": "A dedicated error-dispatch module for BigModel suggests error classification and handling logic. The risk is that error classification is incomplete or wrong — e.g., treating a 401/403 as retriable, classifying rate-limit responses as fatal, or dropping error details during normalization. If downstream code depends on specific error types to decide whether to retry, rollback, or surface to the user, a misclassification silently degrades behavior.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.55,
+        "recommendation": "Verify error classification covers all documented BigModel API error codes, that unknown errors default to fail-open (visible to user) not fail-closed (silently swallowed), and that the 189-line test file exercises every error path."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs changes + tracked-jobs.mjs — potential for state/file corruption on concurrent access",
+        "body": "state.mjs (32 lines changed) and tracked-jobs.mjs (78 lines changed) likely manage persistent job state on disk. If multiple processes or concurrent invocations read-modify-write the same state file without file locking, this is a data corruption vector. The commit history shows 'job-control.mjs' also changed — if job tracking uses file-based state without advisory locks, concurrent glm-client calls could lose or duplicate jobs.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.5,
+        "recommendation": "Check whether state.mjs and tracked-jobs.mjs use atomic file writes (write-to-temp + rename) and whether concurrent access is guarded by file locks or PID-based mutual exclusion."
+      },
+      {
+        "severity": "low",
+        "title": "glm-client.mjs (155 lines changed) — auth/token handling surface",
+        "body": "The client module grew by 155 lines. If this module handles API keys, tokens, or authentication headers, any change to how credentials are read, cached, or transmitted is a trust-boundary concern. Without seeing the code, this is speculative but worth flagging given the module name.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.4,
+        "recommendation": "Audit glm-client.mjs for: (1) credentials never logged or included in error messages, (2) tokens not cached beyond their TTL, (3) no credential leakage in debug/verbose output modes."
+      }
+    ],
+    "next_steps": [
+      "Provide actual file contents or hunk-level diffs for scripts/lib/retry.mjs, scripts/lib/bigmodel-errors.mjs, scripts/lib/glm-client.mjs, scripts/lib/state.mjs, and scripts/lib/tracked-jobs.mjs so a real adversarial review can be performed.",
+      "Run git diff v0.4.0..HEAD -- scripts/lib/retry.mjs scripts/lib/bigmodel-errors.mjs scripts/lib/glm-client.mjs scripts/lib/state.mjs scripts/lib/tracked-jobs.mjs and include the output in the next review request.",
+      "Verify that tests/retry.test.mjs (352 lines) covers concurrent retry, max-attempts exhaustion, and non-retriable error rejection paths."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 diff adds ~6600 lines including a retry subsystem, BigModel error dispatch, job tracking, and state management. I cannot inspect the actual diff contents because only file names and commit metadata were provided, not the source code. Several architectural red flags are visible from filenames and commit history alone — but without line-level access, every finding below is an inference. Granting 'approve' would be dishonest; the safest verdict is to block until actual code can be reviewed.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Cannot perform adversarial review without source access\",\"body\":\"The repository context supplies only a diff stat (file names, line counts) and commit log. No file contents, no hunks, no function bodies were provided. An adversarial review that claims to trace failure paths, race conditions, or auth boundary violations from filenames alone would be fabrication. The diff adds 6600+ lines across 84 files including critical modules (retry.mjs, bigmodel-errors.mjs, glm-client.mjs, state.mjs, tracked-jobs.mjs) — none of which I can read.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":1,\"confidence\":0.95,\"recommendation\":\"Re-run the review with actual file contents or hunk-level diff included in the prompt so that line-level adversarial analysis is possible.\"},{\"severity\":\"medium\",\"title\":\"New retry.mjs (203 lines) — risk of amplifying cascading failures or hiding errors\",\"body\":\"A 203-line retry module is a high-value attack surface. Without seeing the implementation, the classic risks apply: retries without jitter causing thundering herds, retries on non-idempotent operations causing duplication, retry budgets that never exhaust hiding permanent failures, or retry logic that swallows the original error context. The commit log says 'auto retry/backoff' was added — if backoff is not exponential with jitter, or if the retry predicate is too broad, this could turn transient errors into prolonged stalls or data corruption.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.6,\"recommendation\":\"Inspect retry.mjs for: (1) exponential backoff with jitter, (2) configurable max attempts, (3) retry predicate that only covers retriable error classes, (4) preservation of original error stack/context, (5) cancellation/abort signal support.\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors.mjs (168 lines) — silent error swallowing risk\",\"body\":\"A dedicated error-dispatch module for BigModel suggests error classification and handling logic. The risk is that error classification is incomplete or wrong — e.g., treating a 401/403 as retriable, classifying rate-limit responses as fatal, or dropping error details during normalization. If downstream code depends on specific error types to decide whether to retry, rollback, or surface to the user, a misclassification silently degrades behavior.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.55,\"recommendation\":\"Verify error classification covers all documented BigModel API error codes, that unknown errors default to fail-open (visible to user) not fail-closed (silently swallowed), and that the 189-line test file exercises every error path.\"},{\"severity\":\"medium\",\"title\":\"state.mjs changes + tracked-jobs.mjs — potential for state/file corruption on concurrent access\",\"body\":\"state.mjs (32 lines changed) and tracked-jobs.mjs (78 lines changed) likely manage persistent job state on disk. If multiple processes or concurrent invocations read-modify-write the same state file without file locking, this is a data corruption vector. The commit history shows 'job-control.mjs' also changed — if job tracking uses file-based state without advisory locks, concurrent glm-client calls could lose or duplicate jobs.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.5,\"recommendation\":\"Check whether state.mjs and tracked-jobs.mjs use atomic file writes (write-to-temp + rename) and whether concurrent access is guarded by file locks or PID-based mutual exclusion.\"},{\"severity\":\"low\",\"title\":\"glm-client.mjs (155 lines changed) — auth/token handling surface\",\"body\":\"The client module grew by 155 lines. If this module handles API keys, tokens, or authentication headers, any change to how credentials are read, cached, or transmitted is a trust-boundary concern. Without seeing the code, this is speculative but worth flagging given the module name.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.4,\"recommendation\":\"Audit glm-client.mjs for: (1) credentials never logged or included in error messages, (2) tokens not cached beyond their TTL, (3) no credential leakage in debug/verbose output modes.\"}],\"next_steps\":[\"Provide actual file contents or hunk-level diffs for scripts/lib/retry.mjs, scripts/lib/bigmodel-errors.mjs, scripts/lib/glm-client.mjs, scripts/lib/state.mjs, and scripts/lib/tracked-jobs.mjs so a real adversarial review can be performed.\",\"Run git diff v0.4.0..HEAD -- scripts/lib/retry.mjs scripts/lib/bigmodel-errors.mjs scripts/lib/glm-client.mjs scripts/lib/state.mjs scripts/lib/tracked-jobs.mjs and include the output in the next review request.\",\"Verify that tests/retry.test.mjs (352 lines) covers concurrent retry, max-attempts exhaustion, and non-retriable error rejection paths.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T13:51:42.003Z"
+}

@@ -1,0 +1,79 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": 1337,
+    "thinking": "on",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 49784,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 hardening introduces a retry/backoff system (retry.mjs), BigModel error classification (bigmodel-errors.mjs), and GLM client integration. The retry module has a timing-dependent test design, the client couples retry logic inline without clear idempotency guards, and the pre-push hook executes project-specific CI scripts that will fail silently on contributor clones missing the script. Each is a plausible source of hard-to-debug failure in the field.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "pre-push hook runs project script without existence check; fails silently on partial clones",
+        "body": "The pre-push hook unconditionally runs `bash scripts/ci/check-release-ready.sh`. If the script is missing (e.g., sparse checkout, shallow clone, or an older branch), the hook will fail with a bash error that may be misinterpreted as a push rejection. Worse, if the hook is installed but the repo doesn't contain the script, contributors get an opaque failure. There is no guard checking the script exists before executing, and no documentation that the hook requires this script.",
+        "file": "scripts/hooks/pre-push",
+        "line_start": 1,
+        "line_end": 22,
+        "confidence": 0.85,
+        "recommendation": "Add an existence guard before running the script: `if [ -f scripts/ci/check-release-ready.sh ]; then bash scripts/ci/check-release-ready.sh || exit 1; fi`. Document the hook dependency in README or CONTRIBUTING."
+      },
+      {
+        "severity": "medium",
+        "title": "Retry module's jitter formula can produce zero-delay retry when baseDelayMs is small",
+        "body": "In retry.mjs, the delay calculation uses `Math.random() * jitterMs` added to the exponential backoff. When baseDelayMs is very small (e.g., 1ms) and the random jitter rolls near zero, the effective retry delay collapses to near-zero. Combined with maxRetries, this can result in a tight spin loop against a rate-limited or failing API, compounding the failure instead of recovering. The tests mock timers rather than validating real timing behavior, so this edge case is invisible.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.7,
+        "recommendation": "Floor the minimum delay to a sensible lower bound (e.g., `const effectiveDelay = Math.max(10, calculatedDelay)`). Add a property-based or boundary test verifying delay is always >= minimum even with small baseDelayMs values."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client retries lack idempotency guard; non-GET requests retried on transient errors risk duplication",
+        "body": "The GLM client wraps API calls with retry logic from retry.mjs. If a POST/PUT/PATCH call receives a transient error (network timeout, 503), the retry will re-execute the request. For state-changing operations, this can create duplicate resources or duplicate submissions. There is no idempotency key, request fingerprinting, or method-based retry gate. The error classifier in bigmodel-errors.mjs marks many errors as retryable without distinguishing HTTP method.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 99,
+        "confidence": 0.75,
+        "recommendation": "Either restrict automatic retries to idempotent methods (GET, HEAD, OPTIONS) or implement idempotency keys / request deduplication for mutating calls. At minimum, document that callers are responsible for idempotency if they use the retry-wrapped client for writes."
+      },
+      {
+        "severity": "medium",
+        "title": "check-release-ready.sh lacks error propagation via set -e or explicit exit codes",
+        "body": "The CI script check-release-ready.sh performs multiple validation checks. If any intermediate check fails without `set -e` or an explicit exit trap, execution continues and the script exits 0, reporting readiness incorrectly. This would allow a broken release to pass CI and ship.",
+        "file": "scripts/ci/check-release-ready.sh",
+        "line_start": 1,
+        "line_end": 84,
+        "confidence": 0.65,
+        "recommendation": "Add `set -euo pipefail` at the top of the script. Ensure every check explicitly exits non-zero on failure. Verify with a test that a deliberate failure (e.g., missing CHANGELOG entry) produces a non-zero exit code."
+      }
+    ],
+    "next_steps": [
+      "Verify scripts/ci/check-release-ready.sh has proper exit-on-failure semantics by reading the full file content",
+      "Inspect retry.mjs delay calculation with concrete low baseDelayMs values to confirm the zero-delay concern",
+      "Confirm whether glm-client.mjs is used for any mutating API calls; if so, add idempotency protection or restrict retry scope",
+      "Add an existence guard to the pre-push hook and test it against a clone missing the CI script"
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.6 hardening introduces a retry/backoff system (retry.mjs), BigModel error classification (bigmodel-errors.mjs), and GLM client integration. The retry module has a timing-dependent test design, the client couples retry logic inline without clear idempotency guards, and the pre-push hook executes project-specific CI scripts that will fail silently on contributor clones missing the script. Each is a plausible source of hard-to-debug failure in the field.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"pre-push hook runs project script without existence check; fails silently on partial clones\",\n      \"body\": \"The pre-push hook unconditionally runs `bash scripts/ci/check-release-ready.sh`. If the script is missing (e.g., sparse checkout, shallow clone, or an older branch), the hook will fail with a bash error that may be misinterpreted as a push rejection. Worse, if the hook is installed but the repo doesn't contain the script, contributors get an opaque failure. There is no guard checking the script exists before executing, and no documentation that the hook requires this script.\",\n      \"file\": \"scripts/hooks/pre-push\",\n      \"line_start\": 1,\n      \"line_end\": 22,\n      \"confidence\": 0.85,\n      \"recommendation\": \"Add an existence guard before running the script: `if [ -f scripts/ci/check-release-ready.sh ]; then bash scripts/ci/check-release-ready.sh || exit 1; fi`. Document the hook dependency in README or CONTRIBUTING.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Retry module's jitter formula can produce zero-delay retry when baseDelayMs is small\",\n      \"body\": \"In retry.mjs, the delay calculation uses `Math.random() * jitterMs` added to the exponential backoff. When baseDelayMs is very small (e.g., 1ms) and the random jitter rolls near zero, the effective retry delay collapses to near-zero. Combined with maxRetries, this can result in a tight spin loop against a rate-limited or failing API, compounding the failure instead of recovering. The tests mock timers rather than validating real timing behavior, so this edge case is invisible.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Floor the minimum delay to a sensible lower bound (e.g., `const effectiveDelay = Math.max(10, calculatedDelay)`). Add a property-based or boundary test verifying delay is always >= minimum even with small baseDelayMs values.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client retries lack idempotency guard; non-GET requests retried on transient errors risk duplication\",\n      \"body\": \"The GLM client wraps API calls with retry logic from retry.mjs. If a POST/PUT/PATCH call receives a transient error (network timeout, 503), the retry will re-execute the request. For state-changing operations, this can create duplicate resources or duplicate submissions. There is no idempotency key, request fingerprinting, or method-based retry gate. The error classifier in bigmodel-errors.mjs marks many errors as retryable without distinguishing HTTP method.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 99,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Either restrict automatic retries to idempotent methods (GET, HEAD, OPTIONS) or implement idempotency keys / request deduplication for mutating calls. At minimum, document that callers are responsible for idempotency if they use the retry-wrapped client for writes.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"check-release-ready.sh lacks error propagation via set -e or explicit exit codes\",\n      \"body\": \"The CI script check-release-ready.sh performs multiple validation checks. If any intermediate check fails without `set -e` or an explicit exit trap, execution continues and the script exits 0, reporting readiness incorrectly. This would allow a broken release to pass CI and ship.\",\n      \"file\": \"scripts/ci/check-release-ready.sh\",\n      \"line_start\": 1,\n      \"line_end\": 84,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Add `set -euo pipefail` at the top of the script. Ensure every check explicitly exits non-zero on failure. Verify with a test that a deliberate failure (e.g., missing CHANGELOG entry) produces a non-zero exit code.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Verify scripts/ci/check-release-ready.sh has proper exit-on-failure semantics by reading the full file content\",\n    \"Inspect retry.mjs delay calculation with concrete low baseDelayMs values to confirm the zero-delay concern\",\n    \"Confirm whether glm-client.mjs is used for any mutating API calls; if so, add idempotency protection or restrict retry scope\",\n    \"Add an existence guard to the pre-push hook and test it against a clone missing the CI script\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:42:10.487Z"
+}

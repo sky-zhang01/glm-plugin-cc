@@ -1,0 +1,101 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 6,
+    "citation_accuracy": 0.833,
+    "citation_false_file_hits": 0,
+    "latency_ms": 96288,
+    "error_code": ""
+  },
+  "parsed": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces substantial new infra (retry, bigmodel-errors, job tracking, CI gates) but the cumulative changes carry real risk: the new retry.mjs and glm-client.mjs interaction has unguarded recursion potential on persistent failures, tracked-jobs state can silently desync from actual BigModel job state, and the deleted process.mjs removes utilities other modules may still reference. Several critical paths lack observability for partial-failure diagnosis. Recommend hardening before calling this sweep-ready.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs retryWithBackoff can mask persistent failures silently",
+        "body": "The new retry.mjs module provides a general-purpose retryWithBackoff that is called from glm-client.mjs for BigModel API calls. If the BigModel API returns a steady stream of retryable errors (e.g. 429 rate-limit or transient 5xx), the retry loop will consume the entire retry budget and then throw — but any side effects from partially-completed request setup (e.g. job state written to tracked-jobs, temp files created) are NOT cleaned up on final failure. This creates orphan state that confuses subsequent status/poll commands. The absence of a finally/cleanup hook in the retry wrapper means every caller must independently handle teardown, and the glm-client.mjs caller does not.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.78,
+        "recommendation": "Add an onFinalFailure or cleanup callback option to retryWithBackoff, and have glm-client.mjs use it to remove any tracked-job entries or temp state created before the retry sequence began. Alternatively, structure job tracking as a two-phase commit: only persist after first successful response."
+      },
+      {
+        "severity": "high",
+        "title": "tracked-jobs.mjs can desync from actual BigModel job lifecycle",
+        "body": "The tracked-jobs module manages local state about submitted BigModel jobs, but there is no heartbeat or reconciliation mechanism. If the local process crashes or is killed between submitting a job and recording it in tracked-jobs (or between a poll and a state update), the local state diverges from reality. On restart, commands like /glm:status or the review --wait path will see stale/missing entries with no way to detect the inconsistency. The diff shows state.mjs changes and tracked-jobs.mjs changes but no recovery/reconciliation logic.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.82,
+        "recommendation": "Add a reconciliation step: on startup/status, query BigModel for any jobs associated with the configured API key/project that are not in tracked-jobs, and either import or flag them. At minimum, add a staleness timestamp and warn when tracked entries have not been updated in N minutes."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error classification may misclassify unknown error shapes",
+        "body": "The new bigmodel-errors.mjs module classifies API errors to determine retryability and dispatch behavior. If BigModel changes its error response schema (or returns an unexpected shape — e.g. a network-level error that is not a proper JSON body), the classifier will fall through to a default that may be retry=true or retry=false depending on the implementation. A wrong classification on a non-idempotent write operation (like job submission) could cause duplicate submissions or missed retries. The test file exists but coverage of edge cases (non-JSON responses, truncated responses, HTML error pages from proxies) is not evidenced.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.72,
+        "recommendation": "Audit the default/fallback classification in classifyError to ensure unknown errors default to non-retryable for mutating operations. Add explicit tests for: non-JSON response bodies, network timeouts, DNS failures, and proxy HTML error pages. Document the contract: what does 'unknown' mean for retry decisions?"
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs retry integration may cause duplicate job submissions on timeout",
+        "body": "glm-client.mjs wraps BigModel API calls with retry logic. For job-submission endpoints, a timeout after the request was received but before the response was read means the job was created server-side but the client sees a failure. On retry, a second job is submitted. This is the classic non-idempotent-retry problem. Without an idempotency key or deduplication mechanism, users can get duplicate jobs running in parallel, consuming quota and producing duplicate review output.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.85,
+        "recommendation": "For job-submission calls, either: (a) generate and send an idempotency key that BigModel can use to deduplicate, or (b) on retry after timeout, first poll for any recently-created job matching the same parameters before re-submitting. At minimum, document this as a known limitation and add a warning in logs when retrying a POST/submit operation."
+      },
+      {
+        "severity": "medium",
+        "title": "process.mjs deleted but may still be imported by external consumers or plugin hooks",
+        "body": "scripts/lib/process.mjs (67 lines removed) was deleted in this diff. If any external tooling, hooks, or user scripts import from this module (directly or via re-export), they will encounter a runtime ModuleNotFoundError at invocation time. The session-lifecycle-hook.mjs was modified, but there is no evidence of a deprecation period or migration guide for downstream consumers.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.65,
+        "recommendation": "Verify no external consumers reference process.mjs (search npm registry, local scripts, hooks). If any exist, restore the module with a deprecation stub that logs a warning and re-exports from the replacement module, rather than hard-deleting."
+      },
+      {
+        "severity": "low",
+        "title": "CI check-no-local-paths.sh may false-negative on encoded paths or multi-line strings",
+        "body": "The new CI guard check-no-local-paths.sh scans for hardcoded local filesystem paths in committed files. Simple regex-based approaches can miss: URL-encoded paths, paths split across line boundaries, or paths inside binary/marshaled data. A false negative here would leak developer machine paths into the release, which is a security/reputation concern given the stated purpose of this check.",
+        "file": "scripts/ci/check-no-local-paths.sh",
+        "line_start": 1,
+        "line_end": 97,
+        "confidence": 0.55,
+        "recommendation": "Supplement the regex check with a known-bad-prefix list (e.g. /home/, /Users/, C:\\) and test against actual leak cases from prior incidents. Consider adding the check as a pre-commit hook for immediate feedback rather than CI-only."
+      }
+    ],
+    "next_steps": [
+      "Read scripts/lib/retry.mjs and scripts/lib/glm-client.mjs in full to confirm the retry-without-cleanup and duplicate-submission hypotheses; trace the exact call chain for job submission with retries.",
+      "Read scripts/lib/tracked-jobs.mjs and scripts/lib/state.mjs to verify whether any reconciliation/staleness-detection exists post-crash.",
+      "Read scripts/lib/bigmodel-errors.mjs to audit the default classification for unknown error shapes.",
+      "Search codebase for any remaining imports of scripts/lib/process.mjs to confirm the deletion is safe.",
+      "Run the existing test suite (tests/retry.test.mjs, tests/bigmodel-errors.test.mjs) and verify coverage of timeout-during-submit and non-JSON-response edge cases."
+    ]
+  },
+  "rawOutputHead": "{\n  \"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 diff introduces substantial new infra (retry, bigmodel-errors, job tracking, CI gates) but the cumulative changes carry real risk: the new retry.mjs and glm-client.mjs interaction has unguarded recursion potential on persistent failures, tracked-jobs state can silently desync from actual BigModel job state, and the deleted process.mjs removes utilities other modules may still reference. Several critical paths lack observability for partial-failure diagnosis. Recommend hardening before calling this sweep-ready.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"retry.mjs retryWithBackoff can mask persistent failures silently\",\n      \"body\": \"The new retry.mjs module provides a general-purpose retryWithBackoff that is called from glm-client.mjs for BigModel API calls. If the BigModel API returns a steady stream of retryable errors (e.g. 429 rate-limit or transient 5xx), the retry loop will consume the entire retry budget and then throw — but any side effects from partially-completed request setup (e.g. job state written to tracked-jobs, temp files created) are NOT cleaned up on final failure. This creates orphan state that confuses subsequent status/poll commands. The absence of a finally/cleanup hook in the retry wrapper means every caller must independently handle teardown, and the glm-client.mjs caller does not.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Add an onFinalFailure or cleanup callback option to retryWithBackoff, and have glm-client.mjs use it to remove any tracked-job entries or temp state created before the retry sequence began. Alternatively, structure job tracking as a two-phase commit: only persist after first successful response.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"tracked-jobs.mjs can desync from actual BigModel job lifecycle\",\n      \"body\": \"The tracked-jobs module manages local state about submitted BigModel jobs, but there is no heartbeat or reconciliation mechanism. If the local process crashes or is killed between submitting a job and recording it in tracked-jobs (or between a poll and a state update), the local state diverges from reality. On restart, commands like /glm:status or the review --wait path will see stale/missing entries with no way to detect the inconsistency. The diff shows state.mjs changes and tracked-jobs.mjs changes but no recovery/reconciliation logic.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.82,\n      \"recommendation\": \"Add a reconciliation step: on startup/status, query BigModel for any jobs associated with the configured API key/project that are not in tracked-jobs, and either import or flag them. At minimum, add a staleness timestamp and warn when tracked entries have not been updated in N minutes.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"bigmodel-errors.mjs error classification may misclassify unknown error shapes\",\n      \"body\": \"The new bigmodel-errors.mjs module classifies API errors to determine retryability and dispatch behavior. If BigModel changes its error response schema (or returns an unexpected shape — e.g. a network-level error that is not a proper JSON body), the classifier will fall through to a default that may be retry=true or retry=false depending on the implementation. A wrong classification on a non-idempotent write operation (like job submission) could cause duplicate submissions or missed retries. The test file exists but coverage of edge cases (non-JSON responses, truncated responses, HTML error pages from proxies) is not evidenced.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Audit the default/fallback classification in classifyError to ensure unknown errors default to non-retryable for mutating operations. Add explicit tests for: non-JSON response bodies, network timeouts, DNS failures, and proxy HTML error pages. Document the contract: what does 'unknown' mean for retry decisions?\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client.mjs retry integration may cause duplicate job submissions on timeout\",\n      \"body\": \"glm-client.mjs wraps BigModel API calls with retry logic. For job-submission endpoints, a timeout after the request was received but before the response was read means the job was created server-side but the client sees a failure. On retry, a second job is submitted. This is the classic non-idempotent-retry problem. Without an idempotency key or deduplication mechanism, users can get duplicate jobs running in parallel, consuming quota and producing duplicate review output.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.85,\n      \"recommendation\": \"For job-submission calls, either: (a) generate and send an idempotency key that BigModel can use to deduplicate, or (b) on retry after timeout, first poll for any recently-created job matching the same parameters before re-submitting. At minimum, document this as a known limitation and add a warning in logs when retrying a POST/submit operation.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"process.mjs deleted but may still be imported by external consumers or plugin hooks\",\n      \"body\": \"scripts/lib/process.mjs (67 lines removed) was deleted in this diff. If any external tooling, hooks, or user scripts import from this module (directly or via re-export), they will encounter a runtime ModuleNotFoundError at invocation time. The session-lifecycle-hook.mjs was modified, but there is no evidence of a deprecation period or migration guide for downstream consumers.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Verify no external consumers reference process.mjs (search npm registry, local scripts, hooks). If any exist, restore the module with a deprecation stub that logs a warning and re-exports from the replacement module, rather than hard-deleting.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"CI check-no-local-paths.sh may false-negative on encoded paths or multi-line strings\",\n      \"body\": \"The new CI guard check-no-local-paths.sh scans for hardcoded local filesystem paths in committed files. Simple regex-based approaches can miss: URL-encoded paths, paths split across line boundaries, or paths inside binary/marshaled data. A false negative here would leak developer machine paths into the release, which is a security/reputation concern given the stated purpose of this check.\",\n      \"file\": \"scripts/ci/check-no-local-paths.sh\",\n      \"line_start\": 1,\n      \"line_end\": 97,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Supplement the regex check with a known-bad-prefix list (e.g. /home/, /Users/, C:\\\\) and test against actual leak cases from prior incidents. Consider adding the check as a pre-commit hook for immediate feedback rather than CI-only.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Read scripts/lib/retry.mjs and scripts/lib/glm-client.mjs in full to confirm the retry-without-cleanup and duplicate-submission hypotheses; trace the exact call chain for job submission with retries.\",\n    \"Read scripts/lib/tracked-jobs.mjs and scripts/lib/state.mjs to verify whether any reconciliation/staleness-detection exists post-crash.\",\n    \"Read scripts/lib/bigmodel-errors.mjs to audit the default classification for unknown error shapes.\",\n    \"Search codebase for any remaining imports of scripts/lib/process.mjs to confirm the deletion is safe.\",\n    \"Run the existing test suite (tests/retry.test.mjs, tests/bigmodel-errors.test.mjs) and verify coverage of timeout-during-submit and non-JSON-response edge cases.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T13:09:29.508Z"
+}

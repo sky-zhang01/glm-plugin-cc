@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 9
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 62958,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit bundles an npm scope rename with a behavioral change to the setup command. The scope rename is a compatibility break for any existing consumer referencing the old package name, and adding interactivity to a previously idempotent setup command risks breaking scripted or automated workflows. These two concerns ship together without visible migration guidance or backward-compatibility shim.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change with no visible migration path",
+        "body": "package.json shows 4 lines changed (scope rename per commit message). Changing the npm package scope breaks every existing installation that references the old scoped name — import paths, lockfiles, CI caches, and any consumer package.json that depends on it. There is no evidence of a deprecation notice, a dual-publish strategy under both scopes, or documented migration instructions. If this publishes under the new scope without the old one also resolving, existing users will get install failures on next update.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.75,
+        "recommendation": "Before publishing under the new scope, either dual-publish under both scopes for at least one transition release, or add a clear migration guide to the changelog and README. Verify that the old scope name is either retained as a redirect or explicitly deprecated on the registry."
+      },
+      {
+        "severity": "medium",
+        "title": "Adding interactive menu to setup may break automated or scripted invocations",
+        "body": "The commit message states an interactive menu is added to /glm:setup when already configured. If the setup command was previously non-interactive (returning silently or with a status message when already configured), introducing a blocking interactive prompt will hang any CI, script, or non-TTY invocation that re-runs setup. There is no evidence of a --non-interactive flag, TTY detection, or skip-when-scripted guard. This is especially dangerous because 'already configured' is exactly the state a repeat/automated run would encounter.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.7,
+        "recommendation": "Guard the interactive menu behind a TTY check. If stdin is not a TTY (or a --yes/--non-interactive flag is set), emit a non-interactive summary and exit cleanly instead of blocking on user input."
+      },
+      {
+        "severity": "low",
+        "title": "Plugin metadata scope change may not propagate to already-installed instances",
+        "body": "Both .claude-plugin/marketplace.json and plugin.json are updated (presumably to reflect the new scope). Already-installed plugin instances will retain old metadata until manually reinstalled. If the plugin loader or resolver uses the scope from these metadata files for resolution or authentication, stale cached copies could produce confusing 'not found' or auth errors after the rename.",
+        "file": ".claude-plugin/marketplace.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.5,
+        "recommendation": "Verify that the plugin system handles stale metadata gracefully after a scope rename. Consider adding a version check or migration trigger that detects the old scope in local config and prompts the user to reinstall."
+      }
+    ],
+    "next_steps": [
+      "Inspect the actual diff of package.json to confirm the scope rename and check if the old scope name is preserved anywhere as a compat alias.",
+      "Read the full commands/setup.md diff to determine whether the interactive menu has any TTY guard or --non-interactive escape hatch.",
+      "Check if CHANGELOG.md documents the scope rename as a breaking change and provides migration instructions for existing users.",
+      "Verify whether dual-publishing under both scopes is planned or already configured in CI."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"This commit bundles an npm scope rename with a behavioral change to the setup command. The scope rename is a compatibility break for any existing consumer referencing the old package name, and adding interactivity to a previously idempotent setup command risks breaking scripted or automated workflows. These two concerns ship together without visible migration guidance or backward-compatibility shim.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename is a breaking change with no visible migration path\",\n      \"body\": \"package.json shows 4 lines changed (scope rename per commit message). Changing the npm package scope breaks every existing installation that references the old scoped name — import paths, lockfiles, CI caches, and any consumer package.json that depends on it. There is no evidence of a deprecation notice, a dual-publish strategy under both scopes, or documented migration instructions. If this publishes under the new scope without the old one also resolving, existing users will get install failures on next update.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Before publishing under the new scope, either dual-publish under both scopes for at least one transition release, or add a clear migration guide to the changelog and README. Verify that the old scope name is either retained as a redirect or explicitly deprecated on the registry.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Adding interactive menu to setup may break automated or scripted invocations\",\n      \"body\": \"The commit message states an interactive menu is added to /glm:setup when already configured. If the setup command was previously non-interactive (returning silently or with a status message when already configured), introducing a blocking interactive prompt will hang any CI, script, or non-TTY invocation that re-runs setup. There is no evidence of a --non-interactive flag, TTY detection, or skip-when-scripted guard. This is especially dangerous because 'already configured' is exactly the state a repeat/automated run would encounter.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Guard the interactive menu behind a TTY check. If stdin is not a TTY (or a --yes/--non-interactive flag is set), emit a non-interactive summary and exit cleanly instead of blocking on user input.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"Plugin metadata scope change may not propagate to already-installed instances\",\n      \"body\": \"Both .claude-plugin/marketplace.json and plugin.json are updated (presumably to reflect the new scope). Already-installed plugin instances will retain old metadata until manually reinstalled. If the plugin loader or resolver uses the scope from these metadata files for resolution or authentication, stale cached copies could produce confusing 'not found' or auth errors after the rename.\",\n      \"file\": \".claude-plugin/marketplace.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.5,\n      \"recommendation\": \"Verify that the plugin system handles stale metadata gracefully after a scope rename. Consider adding a version check or migration trigger that detects the old scope in local config and prompts the user to reinstall.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect the actual diff of package.json to confirm the scope rename and check if the old scope name is preserved anywhere as a compat alias.\",\n    \"Read the full commands/setup.md diff to determine whether the interactive menu has any TTY guard or --non-interactive escape hatch.\",\n    \"Check if CHANGELOG.md documents the scope rename as a breaking change and provides migration instructions for existing users.\",\n    \"Verify whether dual-publishing under both scopes is planned or already configured in CI.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:38:14.982Z"
+}

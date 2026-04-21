@@ -1,0 +1,92 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 6
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 74859,
+    "error_code": ""
+  },
+  "parsed": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces a retry subsystem, BigModel error dispatch, job tracking overhaul, and CI quality gates across 84 files (+6623/-480 lines). While test coverage is broad, several material risks remain: the retry system has a potential unbounded-accumulation path when errors are non-classifiable, the glm-client error handling branches on error-classification that can silently fall through to generic behavior, and the new BigModel error dispatcher uses string-matching heuristics that may misclassify transient network errors as permanent quota exhaustion — causing premature job abandonment. These are the kinds of silent failures that show up under production load, not unit tests.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "BigModel error classifier may misclassify transient errors as permanent, causing silent job abandonment",
+        "body": "The new `bigmodel-errors.mjs` module classifies API errors to determine retry vs abort strategy. String-matching heuristics against error messages/status codes are fragile: a transient gateway timeout returning an unexpected error body format could match a 'quota exceeded' or 'invalid request' pattern, causing the retry layer to give up immediately instead of retrying. The impact is silent job abandonment — the user sees a vague failure with no indication the error was misclassified. Under production conditions (proxy servers, CDNs, rate-limit headers) the error body shape is not guaranteed.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.72,
+        "recommendation": "Add a safe default: if classification confidence is ambiguous (e.g., multiple pattern matches or no match on a 5xx), default to retryable=true rather than permanent-failure. Add integration-level tests that pass unexpected error body shapes and verify they don't trigger premature abandonment. Log the raw error alongside the classification so misclassifications are discoverable post-hoc."
+      },
+      {
+        "severity": "high",
+        "title": "Retry system may accumulate unlimited delays on consecutive transient failures with jitter",
+        "body": "The new `retry.mjs` module implements exponential backoff with jitter. If the backoff multiplier, max attempts, and jitter are all configurable but the max-total-wait-time is not bounded at the top level, a long-running retry loop with high jitter could delay a single operation for arbitrarily long periods. In a CLI context this blocks the user's terminal; in a batch/sweep context (the stated focus: sampling-sweep) this could stall an entire sweep pipeline on one stuck request with no timeout circuit-breaker at the sweep level.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.68,
+        "recommendation": "Add a hard wall-clock timeout parameter to the retry function (e.g., `maxWallClockMs`) that aborts regardless of attempt count. Ensure the sampling-sweep orchestration layer sets this per-request and has its own sweep-level deadline. Document the effective worst-case latency given default settings."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client error handling has implicit fallthrough on unhandled error shapes",
+        "body": "The refactored `glm-client.mjs` dispatches errors through the BigModel error classifier, but if the classifier returns an unexpected shape or the catch block receives a non-Error thrown value (e.g., a string from a lower library), the error handling may fall through to a generic catch that swallows context. This creates a silent failure mode where the user gets a generic 'request failed' message with no actionable information, and the retry layer never activates because the error wasn't properly classified.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.65,
+        "recommendation": "Guard all catch paths with a type-check on the thrown value. If it's not an Error instance, wrap it in one preserving the original value. Ensure the default/fallthrough error branch logs the raw value at warn level and propagates enough context for the retry layer to make a correct retry/abort decision."
+      },
+      {
+        "severity": "medium",
+        "title": "State file writes lack atomicity — crash during write corrupts job state",
+        "body": "The `state.mjs` and `tracked-jobs.mjs` modules persist job tracking state to disk. If the process is interrupted (SIGKILL, OOM, disk full) during a JSON.stringify → writeFile sequence, the state file can be left as a partial/empty JSON blob. On restart, parsing this file fails and the user loses all tracked job state — potentially losing in-progress sweep results. This is a classic partial-failure hazard that is likely under a sweep workload.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.7,
+        "recommendation": "Use write-file-atomic pattern: write to a temp file in the same directory, then rename (atomic on most filesystems). On read, if the primary file is corrupt, attempt to read the previous-state backup. Add a test that simulates mid-write crash (write partial data) and verifies recovery."
+      },
+      {
+        "severity": "medium",
+        "title": "Job tracking has no stale-job reaping — orphaned jobs accumulate indefinitely",
+        "body": "The new `tracked-jobs.mjs` module tracks in-progress jobs but the diff shows no mechanism to reap jobs that were started by a process that subsequently crashed or was killed. Over time (especially under repeated sweep runs), stale job entries accumulate in the state file. This could cause: false 'job already running' conflicts preventing new sweeps, bloated state files causing slow startup, or stale results being returned for completed-but-unreaped jobs.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.6,
+        "recommendation": "Add a TTL or timestamp to each tracked job entry. On load, reap entries older than a configurable threshold (e.g., 24h). Add a `--reap-stale` CLI flag or automatic reaping on sweep start. Test that a crash-and-restart scenario doesn't block subsequent operations."
+      }
+    ],
+    "next_steps": [
+      "Read scripts/lib/bigmodel-errors.mjs fully and trace every error classification path — verify that 5xx-range errors with unexpected bodies default to retryable, not permanent failure.",
+      "Read scripts/lib/retry.mjs and confirm there is a hard wall-clock timeout ceiling independent of attempt count and jitter.",
+      "Read scripts/lib/state.mjs and tracked-jobs.mjs write paths — confirm atomic write (temp+rename) is used, not direct overwrite.",
+      "Read the glm-client.mjs catch blocks and verify non-Error thrown values (strings, numbers) are handled without silent swallow.",
+      "Check if the sampling-sweep orchestration (the user's stated focus) sets per-request timeouts and sweep-level deadlines.",
+      "Run the existing retry.test.mjs and bigmodel-errors.test.mjs suites and verify coverage of edge cases: unknown error codes, empty error bodies, non-Error thrown values, and max-wall-clock expiry."
+    ]
+  },
+  "rawOutputHead": "{\n  \"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 diff introduces a retry subsystem, BigModel error dispatch, job tracking overhaul, and CI quality gates across 84 files (+6623/-480 lines). While test coverage is broad, several material risks remain: the retry system has a potential unbounded-accumulation path when errors are non-classifiable, the glm-client error handling branches on error-classification that can silently fall through to generic behavior, and the new BigModel error dispatcher uses string-matching heuristics that may misclassify transient network errors as permanent quota exhaustion — causing premature job abandonment. These are the kinds of silent failures that show up under production load, not unit tests.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"BigModel error classifier may misclassify transient errors as permanent, causing silent job abandonment\",\n      \"body\": \"The new `bigmodel-errors.mjs` module classifies API errors to determine retry vs abort strategy. String-matching heuristics against error messages/status codes are fragile: a transient gateway timeout returning an unexpected error body format could match a 'quota exceeded' or 'invalid request' pattern, causing the retry layer to give up immediately instead of retrying. The impact is silent job abandonment — the user sees a vague failure with no indication the error was misclassified. Under production conditions (proxy servers, CDNs, rate-limit headers) the error body shape is not guaranteed.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Add a safe default: if classification confidence is ambiguous (e.g., multiple pattern matches or no match on a 5xx), default to retryable=true rather than permanent-failure. Add integration-level tests that pass unexpected error body shapes and verify they don't trigger premature abandonment. Log the raw error alongside the classification so misclassifications are discoverable post-hoc.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"Retry system may accumulate unlimited delays on consecutive transient failures with jitter\",\n      \"body\": \"The new `retry.mjs` module implements exponential backoff with jitter. If the backoff multiplier, max attempts, and jitter are all configurable but the max-total-wait-time is not bounded at the top level, a long-running retry loop with high jitter could delay a single operation for arbitrarily long periods. In a CLI context this blocks the user's terminal; in a batch/sweep context (the stated focus: sampling-sweep) this could stall an entire sweep pipeline on one stuck request with no timeout circuit-breaker at the sweep level.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Add a hard wall-clock timeout parameter to the retry function (e.g., `maxWallClockMs`) that aborts regardless of attempt count. Ensure the sampling-sweep orchestration layer sets this per-request and has its own sweep-level deadline. Document the effective worst-case latency given default settings.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client error handling has implicit fallthrough on unhandled error shapes\",\n      \"body\": \"The refactored `glm-client.mjs` dispatches errors through the BigModel error classifier, but if the classifier returns an unexpected shape or the catch block receives a non-Error thrown value (e.g., a string from a lower library), the error handling may fall through to a generic catch that swallows context. This creates a silent failure mode where the user gets a generic 'request failed' message with no actionable information, and the retry layer never activates because the error wasn't properly classified.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Guard all catch paths with a type-check on the thrown value. If it's not an Error instance, wrap it in one preserving the original value. Ensure the default/fallthrough error branch logs the raw value at warn level and propagates enough context for the retry layer to make a correct retry/abort decision.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"State file writes lack atomicity — crash during write corrupts job state\",\n      \"body\": \"The `state.mjs` and `tracked-jobs.mjs` modules persist job tracking state to disk. If the process is interrupted (SIGKILL, OOM, disk full) during a JSON.stringify → writeFile sequence, the state file can be left as a partial/empty JSON blob. On restart, parsing this file fails and the user loses all tracked job state — potentially losing in-progress sweep results. This is a classic partial-failure hazard that is likely under a sweep workload.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Use write-file-atomic pattern: write to a temp file in the same directory, then rename (atomic on most filesystems). On read, if the primary file is corrupt, attempt to read the previous-state backup. Add a test that simulates mid-write crash (write partial data) and verifies recovery.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Job tracking has no stale-job reaping — orphaned jobs accumulate indefinitely\",\n      \"body\": \"The new `tracked-jobs.mjs` module tracks in-progress jobs but the diff shows no mechanism to reap jobs that were started by a process that subsequently crashed or was killed. Over time (especially under repeated sweep runs), stale job entries accumulate in the state file. This could cause: false 'job already running' conflicts preventing new sweeps, bloated state files causing slow startup, or stale results being returned for completed-but-unreaped jobs.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Add a TTL or timestamp to each tracked job entry. On load, reap entries older than a configurable threshold (e.g., 24h). Add a `--reap-stale` CLI flag or automatic reaping on sweep start. Test that a crash-and-restart scenario doesn't block subsequent operations.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Read scripts/lib/bigmodel-errors.mjs fully and trace every error classification path — verify that 5xx-range errors with unexpected bodies default to retryable, not permanent failure.\",\n    \"Read scripts/lib/retry.mjs and confirm there is a hard wall-clock timeout ceiling independent of attempt count and jitter.\",\n    \"Read scripts/lib/state.mjs and tracked-jobs.mjs write paths — confirm atomic write (temp+rename) is used, not direct overwrite.\",\n    \"Read the glm-client.mjs catch blocks and verify non-Error thrown values (strings, numbers) are handled without silent swallow.\",\n    \"Check if the sampling-sweep orchestration (the user's stated focus) sets per-request timeouts and sweep-level deadlines.\",\n    \"Run the existing retry.test.mjs and bigmodel-errors.test.mjs suites and verify coverage of edge cases: unknown error codes, empty error bodies, non-Error thrown values, and max-wall-clock expiry.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T15:11:27.170Z"
+}

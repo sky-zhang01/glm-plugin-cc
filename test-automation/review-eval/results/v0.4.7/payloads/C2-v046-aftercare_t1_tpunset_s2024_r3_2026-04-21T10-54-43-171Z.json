@@ -1,0 +1,79 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 1,
+    "topP": null,
+    "seed": 2024,
+    "thinking": "on",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 44325,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 changes introduce retry and error-dispatch infrastructure for the GLM client, but the retry logic has gaps that could cause silent data loss or runaway resource consumption under real failure conditions. The retry module exposes configurable concurrency and delay defaults but lacks hard upper-bound clamping, and the GLM client integrates retry without verifying that retried requests are truly idempotent. The pre-push hook executes release-readiness checks that could block pushes with unclear error provenance. These are ship-blocking concerns for a release tagged v0.4.6.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs uses setInterval for polling without a hard ceiling on maxAttempts, enabling unbounded retry loops",
+        "body": "The retry module (scripts/lib/retry.mjs) accepts `maxAttempts` as a parameter with no documented hard upper bound. If a caller passes a very large value (or if the default is high), and the operation never succeeds, the polling interval will fire indefinitely. Under a sustained downstream outage, this creates silent resource leaks (timers, memory for accumulated results) with no circuit-breaker or global timeout. The exported API surface does not enforce a cap. Combined with the GLM client calling retry on API requests, a prolonged BigModel outage could cause every CLI invocation to hang silently until the user kills the process.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Add a hard upper bound for maxAttempts (e.g. 20) in the retry entry point and a total wall-clock timeout parameter with a sensible default (e.g. 120s). Fail loudly with a clear error if either limit is exceeded."
+      },
+      {
+        "severity": "high",
+        "title": "GLM client retries may replay non-idempotent requests or lose partial response state",
+        "body": "scripts/lib/glm-client.mjs wraps API calls with retry logic. If the BigModel API accepts a request but returns a transport-level error (timeout, network reset), the retry will re-issue the request. For chat/completion endpoints this can result in duplicate tokens charged to the user or, if the API is not idempotent, duplicated side effects. There is no request-idempotency key or deduplication mechanism visible in the diff. The retry config is also wired without visible confirmation that only idempotent HTTP methods are retried.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 99,
+        "confidence": 0.78,
+        "recommendation": "Restrict retries to clearly safe error codes (e.g. 429, 503) and add an idempotency-key header to retried requests so the server can deduplicate. Document which error codes trigger retries and which fail fast."
+      },
+      {
+        "severity": "medium",
+        "title": "Pre-push hook runs check-release-ready.sh without clear failure isolation or skip mechanism",
+        "body": "scripts/hooks/pre-push executes scripts/ci/check-release-ready.sh on every push. If the script has a bug, hits a missing tool dependency, or fails due to environment differences (e.g. CI-only tools not present locally), the user's push is blocked with no documented escape hatch beyond --no-verify. For a hook installed automatically, this is a footgun that could block developer productivity in non-release branches. There is no visible branch guard (e.g. only run on main/develop).",
+        "file": "scripts/hooks/pre-push",
+        "line_start": 1,
+        "line_end": 22,
+        "confidence": 0.74,
+        "recommendation": "Add a branch check so the hook only runs on release-candidate branches, or make it warn-only unless SKIP_RELEASE_CHECK is set. Document the --no-verify escape hatch clearly in the hook output."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs dispatch logic has no test coverage for unknown/unexpected error shapes",
+        "body": "scripts/lib/bigmodel-errors.mjs classifies errors for retry vs. fail-fast decisions. The test file (tests/bigmodel-errors.test.mjs) covers known error codes, but if BigModel returns an unexpected error structure (new error code, missing body, non-JSON response), the dispatcher falls through to a default path that must be correct. A misclassification here would either suppress real errors (retrying permanently fatal errors) or fail-fast on transient ones (losing user work). Without an explicit test for the unknown/fallback path, a regression in the default branch is invisible.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.65,
+        "recommendation": "Add explicit test cases for: (1) a completely unknown error code, (2) a malformed/empty response body, (3) a non-JSON response. Verify the default path classifies as non-retryable and surfaces the raw error to the caller."
+      }
+    ],
+    "next_steps": [
+      "Inspect scripts/lib/retry.mjs to verify there is a wall-clock timeout or maxAttempts cap and add one if missing.",
+      "Review the GLM client retry integration to confirm only idempotent-safe error codes trigger retries.",
+      "Check if check-release-ready.sh has a branch guard or documented skip mechanism for non-release pushes.",
+      "Add fallback/unknown error shape tests to bigmodel-errors.test.mjs before tagging a release."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.6 changes introduce retry and error-dispatch infrastructure for the GLM client, but the retry logic has gaps that could cause silent data loss or runaway resource consumption under real failure conditions. The retry module exposes configurable concurrency and delay defaults but lacks hard upper-bound clamping, and the GLM client integrates retry without verifying that retried requests are truly idempotent. The pre-push hook executes release-readiness checks that could block pushes with unclear error provenance. These are ship-blocking concerns for a release tagged v0.4.6.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs uses setInterval for polling without a hard ceiling on maxAttempts, enabling unbounded retry loops\",\"body\":\"The retry module (scripts/lib/retry.mjs) accepts `maxAttempts` as a parameter with no documented hard upper bound. If a caller passes a very large value (or if the default is high), and the operation never succeeds, the polling interval will fire indefinitely. Under a sustained downstream outage, this creates silent resource leaks (timers, memory for accumulated results) with no circuit-breaker or global timeout. The exported API surface does not enforce a cap. Combined with the GLM client calling retry on API requests, a prolonged BigModel outage could cause every CLI invocation to hang silently until the user kills the process.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.72,\"recommendation\":\"Add a hard upper bound for maxAttempts (e.g. 20) in the retry entry point and a total wall-clock timeout parameter with a sensible default (e.g. 120s). Fail loudly with a clear error if either limit is exceeded.\"},{\"severity\":\"high\",\"title\":\"GLM client retries may replay non-idempotent requests or lose partial response state\",\"body\":\"scripts/lib/glm-client.mjs wraps API calls with retry logic. If the BigModel API accepts a request but returns a transport-level error (timeout, network reset), the retry will re-issue the request. For chat/completion endpoints this can result in duplicate tokens charged to the user or, if the API is not idempotent, duplicated side effects. There is no request-idempotency key or deduplication mechanism visible in the diff. The retry config is also wired without visible confirmation that only idempotent HTTP methods are retried.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":99,\"confidence\":0.78,\"recommendation\":\"Restrict retries to clearly safe error codes (e.g. 429, 503) and add an idempotency-key header to retried requests so the server can deduplicate. Document which error codes trigger retries and which fail fast.\"},{\"severity\":\"medium\",\"title\":\"Pre-push hook runs check-release-ready.sh without clear failure isolation or skip mechanism\",\"body\":\"scripts/hooks/pre-push executes scripts/ci/check-release-ready.sh on every push. If the script has a bug, hits a missing tool dependency, or fails due to environment differences (e.g. CI-only tools not present locally), the user's push is blocked with no documented escape hatch beyond --no-verify. For a hook installed automatically, this is a footgun that could block developer productivity in non-release branches. There is no visible branch guard (e.g. only run on main/develop).\",\"file\":\"scripts/hooks/pre-push\",\"line_start\":1,\"line_end\":22,\"confidence\":0.74,\"recommendation\":\"Add a branch check so the hook only runs on release-candidate branches, or make it warn-only unless SKIP_RELEASE_CHECK is set. Document the --no-verify escape hatch clearly in the hook output.\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors.mjs dispatch logic has no test coverage for unknown/unexpected error shapes\",\"body\":\"scripts/lib/bigmodel-errors.mjs classifies errors for retry vs. fail-fast decisions. The test file (tests/bigmodel-errors.test.mjs) covers known error codes, but if BigModel returns an unexpected error structure (new error code, missing body, non-JSON response), the dispatcher falls through to a default path that must be correct. A misclassification here would either suppress real errors (retrying permanently fatal errors) or fail-fast on transient ones (losing user work). Without an explicit test for the unknown/fallback path, a regression in the default branch is invisible.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.65,\"recommendation\":\"Add explicit test cases for: (1) a completely unknown error code, (2) a malformed/empty response body, (3) a non-JSON response. Verify the default path classifies as non-retryable and surfaces the raw error to the caller.\"}],\"next_steps\":[\"Inspect scripts/lib/retry.mjs to verify there is a wall-clock timeout or maxAttempts cap and add one if missing.\",\"Review the GLM client retry integration to confirm only idempotent-safe error codes trigger retries.\",\"Check if check-release-ready.sh has a branch guard or documented skip mechanism for non-release pushes.\",\"Add fallback/unknown error shape tests to bigmodel-errors.test.mjs before tagging a release.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:54:43.200Z"
+}

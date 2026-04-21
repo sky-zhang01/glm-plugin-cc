@@ -1,0 +1,100 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 9
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 6,
+    "citation_accuracy": 0.833,
+    "citation_false_file_hits": 0,
+    "latency_ms": 263516,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces substantial new infrastructure (retry.mjs, bigmodel-errors.mjs, tracked-jobs.mjs, background execution modes) with 6600+ lines added across 84 files. Several high-severity concerns around retry idempotency, job-state race conditions, and silent failure modes in the new BigModel error dispatch need explicit confirmation before this ships.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs exponential backoff may re-execute non-idempotent operations on ambiguous failures",
+        "body": "The new retry library (scripts/lib/retry.mjs, 203 lines) is wired into glm-client.mjs which performs HTTP calls to the BigModel API. If a request times out after the server has already processed it (a classic ambiguous failure), the retry will re-execute the operation — potentially creating duplicate review jobs or duplicate API charges. Without an idempotency key or request-deduplication mechanism, retries on POST-like operations risk silent duplication. The retry.test.mjs (352 lines) tests backoff timing but the test file name alone doesn't confirm idempotency-key propagation is tested.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Verify that glm-client.mjs passes an idempotency header (e.g., Idempotency-Key) on mutating requests, and that retry.mjs only retries on safe/readonly operations or after confirming the previous attempt definitively failed. Add a test case for the ambiguous-timeout-then-retry scenario."
+      },
+      {
+        "severity": "high",
+        "title": "tracked-jobs.mjs background execution creates state-file race window without file locking",
+        "body": "The new --wait/--background execution modes (from v0.4.5, d573807) introduce tracked-jobs.mjs (78 lines) which presumably writes job state to the filesystem so a background process can be polled. If two concurrent invocations write the same state file (e.g., same project + same review type), the last writer wins and one job's state is silently lost. The state.mjs file (32 lines changed) likely shares this concern. No advisory or mandatory file locking is visible in the diff stat.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.68,
+        "recommendation": "Add advisory file locking (e.g., flock/proper-exclusive-write) around state-file mutations in tracked-jobs.mjs and state.mjs. Include a concurrency test that launches two simultaneous background jobs and verifies both states survive."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error classification may silently swallow unrecognized error shapes",
+        "body": "The new 168-line error dispatch module (scripts/lib/bigmodel-errors.mjs) classifies BigModel API errors for retry/backoff decisions. If the API returns an error shape not covered by the classifier (e.g., a new error code from a version skew), the default path must be explicitly safe — either treat as retryable or propagate loudly. The risk is that an unmapped error is classified as non-retryable and non-fatal, causing the system to silently return an empty/partial result to the caller without indication of failure.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.65,
+        "recommendation": "Audit the default/fallback branch of the error classifier to ensure unrecognized errors are either retried with backoff or explicitly surfaced as hard errors with the raw response attached. Add a test for a completely novel error shape and verify it doesn't produce a silent empty result."
+      },
+      {
+        "severity": "medium",
+        "title": "process.mjs deleted but may still be imported by surviving code paths",
+        "body": "The diff shows scripts/lib/process.mjs as 67 lines deleted. If any surviving file imports from this module (directly or transitively), those imports will throw at runtime with MODULE_NOT_FOUND — a failure mode that only manifests when the specific code path is exercised. The large scope of changes (84 files) increases the chance a dangling import was missed.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.55,
+        "recommendation": "Grep the entire codebase for any remaining import/require of 'process.mjs' or './lib/process' or '../lib/process'. Verify that scripts/check-imports.mjs (which was modified, 5 lines changed) validates no dangling imports exist. Run the full test suite and confirm zero MODULE_NOT_FOUND errors."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs rewrite (155 lines changed) may have changed error propagation contract",
+        "body": "The client library was substantially rewritten alongside the new retry and error-dispatch modules. Callers that previously caught specific error types may now receive wrapped/reclassified errors, breaking error handling in downstream commands (review.md, rescue.md). If the new error chain doesn't preserve the original error message or stack, debugging production failures becomes significantly harder.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.6,
+        "recommendation": "Verify that all errors propagated from glm-client.mjs preserve the original error as a cause property, and that the error.name / error.code contract expected by downstream command handlers is maintained. Add integration tests that exercise error paths through the full stack (client → retry → bigmodel-errors → command handler)."
+      },
+      {
+        "severity": "low",
+        "title": "UAT test scenarios use static JSON fixtures that may not cover edge cases introduced in v0.4.5–v0.4.6",
+        "body": "The UAT reports for v0.4.4 and v0.4.5 exist (scenarios A–F2, G, I) but the major new features in v0.4.6 (BigModel error dispatch, auto retry/backoff, tracked background jobs) appear to lack corresponding UAT scenarios. The v0.4.5 run-uat.sh is 335 lines but no v0.4.6 UAT report directory is visible in the diff, suggesting the retry/backoff/error-dispatch path has only unit-test coverage, not integration/UAT coverage.",
+        "file": "test-automation/uat-reports/v0.4.5/run-uat.sh",
+        "line_start": 1,
+        "line_end": 335,
+        "confidence": 0.7,
+        "recommendation": "Create a v0.4.6 UAT suite that specifically exercises: (1) retry behavior on simulated API failures, (2) background job lifecycle (--background then --wait), (3) error classification for ambiguous/server-error responses. Do not ship without at least one end-to-end UAT pass on the retry path."
+      }
+    ],
+    "next_steps": [
+      "Inspect scripts/lib/retry.mjs and scripts/lib/glm-client.mjs to confirm idempotency-key handling on POST retries",
+      "Run `grep -r 'process\\.mjs\\|/process' scripts/` to verify no dangling imports from the deleted module",
+      "Audit the default branch of the error classifier in bigmodel-errors.mjs for silent-failure risk",
+      "Execute the full test suite (`npm test`) and verify zero failures, especially MODULE_NOT_FOUND",
+      "Create v0.4.6 UAT scenarios covering retry/backoff and background execution before promoting to v0.4.7"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 diff introduces substantial new infrastructure (retry.mjs, bigmodel-errors.mjs, tracked-jobs.mjs, background execution modes) with 6600+ lines added across 84 files. Several high-severity concerns around retry idempotency, job-state race conditions, and silent failure modes in the new BigModel error dispatch need explicit confirmation before this ships.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs exponential backoff may re-execute non-idempotent operations on ambiguous failures\",\"body\":\"The new retry library (scripts/lib/retry.mjs, 203 lines) is wired into glm-client.mjs which performs HTTP calls to the BigModel API. If a request times out after the server has already processed it (a classic ambiguous failure), the retry will re-execute the operation — potentially creating duplicate review jobs or duplicate API charges. Without an idempotency key or request-deduplication mechanism, retries on POST-like operations risk silent duplication. The retry.test.mjs (352 lines) tests backoff timing but the test file name alone doesn't confirm idempotency-key propagation is tested.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.72,\"recommendation\":\"Verify that glm-client.mjs passes an idempotency header (e.g., Idempotency-Key) on mutating requests, and that retry.mjs only retries on safe/readonly operations or after confirming the previous attempt definitively failed. Add a test case for the ambiguous-timeout-then-retry scenario.\"},{\"severity\":\"high\",\"title\":\"tracked-jobs.mjs background execution creates state-file race window without file locking\",\"body\":\"The new --wait/--background execution modes (from v0.4.5, d573807) introduce tracked-jobs.mjs (78 lines) which presumably writes job state to the filesystem so a background process can be polled. If two concurrent invocations write the same state file (e.g., same project + same review type), the last writer wins and one job's state is silently lost. The state.mjs file (32 lines changed) likely shares this concern. No advisory or mandatory file locking is visible in the diff stat.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.68,\"recommendation\":\"Add advisory file locking (e.g., flock/proper-exclusive-write) around state-file mutations in tracked-jobs.mjs and state.mjs. Include a concurrency test that launches two simultaneous background jobs and verifies both states survive.\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors.mjs error classification may silently swallow unrecognized error shapes\",\"body\":\"The new 168-line error dispatch module (scripts/lib/bigmodel-errors.mjs) classifies BigModel API errors for retry/backoff decisions. If the API returns an error shape not covered by the classifier (e.g., a new error code from a version skew), the default path must be explicitly safe — either treat as retryable or propagate loudly. The risk is that an unmapped error is classified as non-retryable and non-fatal, causing the system to silently return an empty/partial result to the caller without indication of failure.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.65,\"recommendation\":\"Audit the default/fallback branch of the error classifier to ensure unrecognized errors are either retried with backoff or explicitly surfaced as hard errors with the raw response attached. Add a test for a completely novel error shape and verify it doesn't produce a silent empty result.\"},{\"severity\":\"medium\",\"title\":\"process.mjs deleted but may still be imported by surviving code paths\",\"body\":\"The diff shows scripts/lib/process.mjs as 67 lines deleted. If any surviving file imports from this module (directly or transitively), those imports will throw at runtime with MODULE_NOT_FOUND — a failure mode that only manifests when the specific code path is exercised. The large scope of changes (84 files) increases the chance a dangling import was missed.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":67,\"confidence\":0.55,\"recommendation\":\"Grep the entire codebase for any remaining import/require of 'process.mjs' or './lib/process' or '../lib/process'. Verify that scripts/check-imports.mjs (which was modified, 5 lines changed) validates no dangling imports exist. Run the full test suite and confirm zero MODULE_NOT_FOUND errors.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs rewrite (155 lines changed) may have changed error propagation contract\",\"body\":\"The client library was substantially rewritten alongside the new retry and error-dispatch modules. Callers that previously caught specific error types may now receive wrapped/reclassified errors, breaking error handling in downstream commands (review.md, rescue.md). If the new error chain doesn't preserve the original error message or stack, debugging production failures becomes significantly harder.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.60,\"recommendation\":\"Verify that all errors propagated from glm-client.mjs preserve the original error as a cause property, and that the error.name / error.code contract expected by downstream command handlers is maintained. Add integration tests that exercise error paths through the full stack (client → retry → bigmodel-errors → command handler).\"},{\"severity\":\"low\",\"title\":\"UAT test scenarios use static JSON fixtures that may not cover edge cases introduced in v0.4.5–v0.4.6\",\"body\":\"The UAT reports for v0.4.4 and v0.4.5 exist (scenarios A–F2, G, I) but the major new features in v0.4.6 (BigModel error dispatch, auto retry/backoff, tracked background jobs) appear to lack corresponding UAT scenarios. The v0.4.5 run-uat.sh is 335 lines but no v0.4.6 UAT report directory is visible in the diff, suggesting the retry/backoff/error-dispatch path has only unit-test coverage, not integration/UAT coverage.\",\"file\":\"test-automation/uat-reports/v0.4.5/run-uat.sh\",\"line_start\":1,\"line_end\":335,\"confidence\":0.70,\"recommendation\":\"Create a v0.4.6 UAT suite that specifically exercises: (1) retry behavior on simulated API failures, (2) background job lifecycle (--background then --wait), (3) error classification for ambiguous/server-error responses. Do not ship without at least one end-to-end UAT pass on the retry path.\"}],\"next_steps\":[\"Inspect scripts/lib/retry.mjs and scripts/lib/glm-client.mjs to confirm idempotency-key handling on POST retries\",\"Run `grep -r 'process\\\\.mjs\\\\|/process' scripts/` to verify no dangling imports from the deleted module\",\"Audit the default branch of the error classifier in bigmodel-errors.mjs for silent-failure risk\",\"Execute the full test suite (`npm test`) and verify zero failures, especially MODULE_NOT_FOUND\",\"Create v0.4.6 UAT scenarios covering retry/backoff and background execution before promoting to v0.4.7\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T16:40:03.985Z"
+}

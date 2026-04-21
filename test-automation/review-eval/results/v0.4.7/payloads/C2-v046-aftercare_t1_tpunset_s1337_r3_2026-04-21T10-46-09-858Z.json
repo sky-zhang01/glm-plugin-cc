@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 1,
+    "topP": null,
+    "seed": 1337,
+    "thinking": "on",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 51663,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 hardening aftercare introduces retry/backoff and BigModel error dispatch logic with several material gaps: the retry module has no cancellation/abort support, error classification may silently swallow unexpected error shapes, and the GLM client changes layer retry logic without clear idempotency guards. The removal of the verify-release workflow without replacement verification in CI is a regression in release safety.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry module lacks abort/cancellation signal support",
+        "body": "The retry.mjs module provides exponential backoff with jitter but has no mechanism for callers to cancel an in-progress retry loop (e.g., via AbortController or AbortSignal). If the GLM client is called from a context where the user or system needs to abort (timeout, shutdown, navigation away), the retry loop will continue sleeping and firing requests until maxRetries is exhausted. This creates a resource leak and poor UX scenario where retries cannot be stopped.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.75,
+        "recommendation": "Add an optional AbortSignal parameter to the retry function. Check signal.aborted before each attempt and between sleep intervals. Reject immediately with an AbortError if the signal fires during a sleep."
+      },
+      {
+        "severity": "high",
+        "title": "Removed verify-release.yml workflow with no CI replacement visible",
+        "body": "The verify-release.yml GitHub Actions workflow (102 lines) was deleted entirely. While a scripts/ci/check-release-ready.sh was added, there is no corresponding GitHub Actions workflow that calls it. This means release verification is now purely manual (pre-push hook or local script), removing the CI safety net that catches issues after push. A developer who bypasses the pre-push hook (--no-verify) or pushes from an environment without the hook will ship without release checks.",
+        "file": ".github/workflows/verify-release.yml",
+        "line_start": 1,
+        "line_end": 102,
+        "confidence": 0.85,
+        "recommendation": "Either restore a CI workflow that invokes check-release-ready.sh, or create a new workflow that validates releases in CI. The pre-push hook alone is insufficient as a release gate since it can be bypassed."
+      },
+      {
+        "severity": "medium",
+        "title": "BigModel error classification may misclassify unknown error shapes as non-retryable",
+        "body": "The bigmodel-errors.mjs error dispatch module classifies errors for retry decisions. If BigModel returns an unexpected error shape (new error code, changed response structure, undocumented fields), the classifier will likely fall through to a default case. Depending on that default's retry policy, previously retryable transient errors could become silent failures. The tests cover known error codes but there is no test for truly unknown/unexpected error responses, leaving a gap in coverage for forward compatibility.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.7,
+        "recommendation": "Add explicit handling and test cases for unknown/unexpected error shapes. Consider defaulting to retryable=true with a lower max retry count for unrecognized errors, and log a warning so new error patterns are observable rather than silently dropped."
+      },
+      {
+        "severity": "medium",
+        "title": "GLM client retry integration lacks idempotency documentation or guards",
+        "body": "The glm-client.mjs changes layer retry logic on top of API calls. If the GLM API call is not idempotent (e.g., message submission that could be duplicated on retry after a timeout), wrapping it in automatic retries risks double-submission. There is no visible idempotency key mechanism, deduplication guard, or documentation clarifying which operations are safe to retry.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 99,
+        "confidence": 0.65,
+        "recommendation": "Document which GLM API operations are idempotent and safe for automatic retry. For non-idempotent operations, either disable retry or add idempotency keys/request deduplication. Add a configuration option to disable retries per-call for non-idempotent operations."
+      },
+      {
+        "severity": "low",
+        "title": "check-release-ready.sh not invoked by any CI pipeline",
+        "body": "The new scripts/ci/check-release-ready.sh appears to be a local-only release check. Without CI integration, its effectiveness depends entirely on developer discipline. The file has no shebang-line visibility into whether it's been tested across environments (macOS vs Linux shell differences, etc.).",
+        "file": "scripts/ci/check-release-ready.sh",
+        "line_start": 1,
+        "line_end": 84,
+        "confidence": 0.6,
+        "recommendation": "Wire check-release-ready.sh into a CI workflow so it runs on every push to release branches. Add a shebang line (#!/usr/bin/env bash) and set -euo pipefail for robustness."
+      }
+    ],
+    "next_steps": [
+      "Read retry.mjs, bigmodel-errors.mjs, and glm-client.mjs in full to verify the error classification default and retry loop structure",
+      "Confirm whether verify-release.yml removal was intentional and if a replacement CI workflow is planned",
+      "Verify that all GLM API calls wrapped with retry are idempotent or have deduplication",
+      "Run the test suite to confirm test coverage for unknown error shapes in bigmodel-errors",
+      "Check if the pre-push hook references check-release-ready.sh correctly and test with --no-verify bypass scenario"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.6 hardening aftercare introduces retry/backoff and BigModel error dispatch logic with several material gaps: the retry module has no cancellation/abort support, error classification may silently swallow unexpected error shapes, and the GLM client changes layer retry logic without clear idempotency guards. The removal of the verify-release workflow without replacement verification in CI is a regression in release safety.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Retry module lacks abort/cancellation signal support\",\"body\":\"The retry.mjs module provides exponential backoff with jitter but has no mechanism for callers to cancel an in-progress retry loop (e.g., via AbortController or AbortSignal). If the GLM client is called from a context where the user or system needs to abort (timeout, shutdown, navigation away), the retry loop will continue sleeping and firing requests until maxRetries is exhausted. This creates a resource leak and poor UX scenario where retries cannot be stopped.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.75,\"recommendation\":\"Add an optional AbortSignal parameter to the retry function. Check signal.aborted before each attempt and between sleep intervals. Reject immediately with an AbortError if the signal fires during a sleep.\"},{\"severity\":\"high\",\"title\":\"Removed verify-release.yml workflow with no CI replacement visible\",\"body\":\"The verify-release.yml GitHub Actions workflow (102 lines) was deleted entirely. While a scripts/ci/check-release-ready.sh was added, there is no corresponding GitHub Actions workflow that calls it. This means release verification is now purely manual (pre-push hook or local script), removing the CI safety net that catches issues after push. A developer who bypasses the pre-push hook (--no-verify) or pushes from an environment without the hook will ship without release checks.\",\"file\":\".github/workflows/verify-release.yml\",\"line_start\":1,\"line_end\":102,\"confidence\":0.85,\"recommendation\":\"Either restore a CI workflow that invokes check-release-ready.sh, or create a new workflow that validates releases in CI. The pre-push hook alone is insufficient as a release gate since it can be bypassed.\"},{\"severity\":\"medium\",\"title\":\"BigModel error classification may misclassify unknown error shapes as non-retryable\",\"body\":\"The bigmodel-errors.mjs error dispatch module classifies errors for retry decisions. If BigModel returns an unexpected error shape (new error code, changed response structure, undocumented fields), the classifier will likely fall through to a default case. Depending on that default's retry policy, previously retryable transient errors could become silent failures. The tests cover known error codes but there is no test for truly unknown/unexpected error responses, leaving a gap in coverage for forward compatibility.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.7,\"recommendation\":\"Add explicit handling and test cases for unknown/unexpected error shapes. Consider defaulting to retryable=true with a lower max retry count for unrecognized errors, and log a warning so new error patterns are observable rather than silently dropped.\"},{\"severity\":\"medium\",\"title\":\"GLM client retry integration lacks idempotency documentation or guards\",\"body\":\"The glm-client.mjs changes layer retry logic on top of API calls. If the GLM API call is not idempotent (e.g., message submission that could be duplicated on retry after a timeout), wrapping it in automatic retries risks double-submission. There is no visible idempotency key mechanism, deduplication guard, or documentation clarifying which operations are safe to retry.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":99,\"confidence\":0.65,\"recommendation\":\"Document which GLM API operations are idempotent and safe for automatic retry. For non-idempotent operations, either disable retry or add idempotency keys/request deduplication. Add a configuration option to disable retries per-call for non-idempotent operations.\"},{\"severity\":\"low\",\"title\":\"check-release-ready.sh not invoked by any CI pipeline\",\"body\":\"The new scripts/ci/check-release-ready.sh appears to be a local-only release check. Without CI integration, its effectiveness depends entirely on developer discipline. The file has no shebang-line visibility into whether it's been tested across environments (macOS vs Linux shell differences, etc.).\",\"file\":\"scripts/ci/check-release-ready.sh\",\"line_start\":1,\"line_end\":84,\"confidence\":0.6,\"recommendation\":\"Wire check-release-ready.sh into a CI workflow so it runs on every push to release branches. Add a shebang line (#!/usr/bin/env bash) and set -euo pipefail for robustness.\"}],\"next_steps\":[\"Read retry.mjs, bigmodel-errors.mjs, and glm-client.mjs in full to verify the error classification default and retry loop structure\",\"Confirm whether verify-release.yml removal was intentional and if a replacement CI workflow is planned\",\"Verify that all GLM API calls wrapped with retry are idempotent or have deduplication\",\"Run the test suite to confirm test coverage for unknown error shapes in bigmodel-errors\",\"Check if the pre-push hook references check-release-ready.sh correctly and test with --no-verify bypass scenario\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:46:09.892Z"
+}

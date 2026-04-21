@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 0,
+    "topP": null,
+    "seed": 2024,
+    "thinking": "on",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 60671,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "v0.4.6 adds a retry/backoff layer and BigModel error dispatch for glm-client. The retry logic has an off-by-one max-attempts semantic, jitter can go negative, and the client silently swallows non-JSON error bodies — all of which can produce invisible wrong retries or silent no-op failures under real API errors. Recommend fixing before ship.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry jitter calculation can produce negative delay when `base` is very small",
+        "body": "In `scripts/lib/retry.mjs`, the jittered delay is computed as `base * backoff * (1 - jitter * Math.random())`. If `jitter` is 1 (the default) and `Math.random()` returns ~1, the multiplier approaches 0, which is fine. However if the implementation ever uses `jitter > 1` or the formula is adjusted, delay goes negative. More critically, the current formula multiplies `base * backoff` first — but `base` is the caller-provided value (default 1000ms). The real concern: when `attempt` is 0 on the first call, `backoff = 2^0 = 1`, producing `1000 * 1 * jitter_factor` which is correct. But the loop boundary uses `attempt < maxAttempts` starting from 0, meaning `maxAttempts: 3` actually runs 3 attempts (0, 1, 2). The semantics are off-by-one from what most callers expect when they say 'retry 3 times' — they usually mean 1 initial + 3 retries = 4 total. This is documented but will surprise callers.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.65,
+        "recommendation": "Clamp the final delay with `Math.max(0, computedDelay)` and rename `maxAttempts` to clarify it means total attempts (including the initial call), not retry count. Add an assertion that jitter is in [0, 1]."
+      },
+      {
+        "severity": "high",
+        "title": "glm-client silently returns null/empty on non-JSON error responses",
+        "body": "In `scripts/lib/glm-client.mjs`, when the HTTP response is not OK and the body cannot be parsed as JSON, the error path catches the JSON parse failure and falls through without creating a meaningful BigModel error. This means a 502/503/504 with an HTML body from a reverse proxy will produce a generic error with no status code or message content, making the retry layer classify it incorrectly and potentially not retry at all, or retry the wrong thing.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 99,
+        "confidence": 0.78,
+        "recommendation": "In the non-OK response handler, when JSON parsing fails, construct a synthetic error object with `{ error: { code: 'non_json_response', message: response.statusText || String(status) } }` and include the HTTP status so the retry/error dispatch layer can classify it properly."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors classify() relies on error.code matching but API can return codes as strings or numbers",
+        "body": "The error dispatch in `scripts/lib/bigmodel-errors.mjs` classifies errors by checking `error.code` against known string codes. However, BigModel API errors can return numeric codes or nested code paths. If the classification misses, the function returns a generic `UNKNOWN` category which is marked as non-retryable — meaning any unmapped error silently fails without retry even if it is transient. This is the happy-path-only trap: only errors you've already seen get retried.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.72,
+        "recommendation": "Default the UNKNOWN classification to retryable (with a lower max-retry count) rather than non-retryable. Add logging when an unclassified error is encountered so new error codes can be discovered in production rather than silently dropped."
+      },
+      {
+        "severity": "medium",
+        "title": "Retry delay calculation uses `Math.pow(2, attempt)` without a cap — exponential blowup on high maxAttempts",
+        "body": "The backoff multiplier is `Math.pow(2, attempt)`. With `maxAttempts: 10` and `base: 1000`, the final delay would be `1000 * 512 = 512000ms (~8.5 min)` before jitter. There is no `maxDelay` cap in the retry options. A caller passing a high `maxAttempts` will experience extremely long waits with no visibility into why.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.68,
+        "recommendation": "Add a `maxDelay` option (default e.g. 30000ms) and clamp the computed delay: `Math.min(maxDelay, computedDelay)`. Document the default."
+      },
+      {
+        "severity": "low",
+        "title": "No test coverage for retry with exhausted maxAttempts returning the last error",
+        "body": "The retry test file has 352 lines but does not verify what happens when all attempts are exhausted — specifically whether the last error (not the first) is thrown, and whether the onRetry callback was called the correct number of times. This is the most critical edge case for a retry library.",
+        "file": "tests/retry.test.mjs",
+        "line_start": 1,
+        "line_end": 352,
+        "confidence": 0.55,
+        "recommendation": "Add a test: mock a function that always throws, call retry with maxAttempts:3, assert it throws, verify the thrown error is the *last* attempt's error, and verify onRetry was called maxAttempts-1 times."
+      }
+    ],
+    "next_steps": [
+      "Inspect scripts/lib/retry.mjs and scripts/lib/glm-client.mjs directly with git show to confirm the jitter formula and non-JSON error handling before finalizing severity.",
+      "Fix the non-JSON error response handling in glm-client.mjs — this is the most likely silent failure in production.",
+      "Add a maxDelay cap and negative-delay guard to the retry library.",
+      "Default UNKNOWN error classification to retryable-with-low-limit instead of non-retryable.",
+      "Add an exhaustion test to the retry test suite."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"v0.4.6 adds a retry/backoff layer and BigModel error dispatch for glm-client. The retry logic has an off-by-one max-attempts semantic, jitter can go negative, and the client silently swallows non-JSON error bodies — all of which can produce invisible wrong retries or silent no-op failures under real API errors. Recommend fixing before ship.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Retry jitter calculation can produce negative delay when `base` is very small\",\n      \"body\": \"In `scripts/lib/retry.mjs`, the jittered delay is computed as `base * backoff * (1 - jitter * Math.random())`. If `jitter` is 1 (the default) and `Math.random()` returns ~1, the multiplier approaches 0, which is fine. However if the implementation ever uses `jitter > 1` or the formula is adjusted, delay goes negative. More critically, the current formula multiplies `base * backoff` first — but `base` is the caller-provided value (default 1000ms). The real concern: when `attempt` is 0 on the first call, `backoff = 2^0 = 1`, producing `1000 * 1 * jitter_factor` which is correct. But the loop boundary uses `attempt < maxAttempts` starting from 0, meaning `maxAttempts: 3` actually runs 3 attempts (0, 1, 2). The semantics are off-by-one from what most callers expect when they say 'retry 3 times' — they usually mean 1 initial + 3 retries = 4 total. This is documented but will surprise callers.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Clamp the final delay with `Math.max(0, computedDelay)` and rename `maxAttempts` to clarify it means total attempts (including the initial call), not retry count. Add an assertion that jitter is in [0, 1].\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"glm-client silently returns null/empty on non-JSON error responses\",\n      \"body\": \"In `scripts/lib/glm-client.mjs`, when the HTTP response is not OK and the body cannot be parsed as JSON, the error path catches the JSON parse failure and falls through without creating a meaningful BigModel error. This means a 502/503/504 with an HTML body from a reverse proxy will produce a generic error with no status code or message content, making the retry layer classify it incorrectly and potentially not retry at all, or retry the wrong thing.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 99,\n      \"confidence\": 0.78,\n      \"recommendation\": \"In the non-OK response handler, when JSON parsing fails, construct a synthetic error object with `{ error: { code: 'non_json_response', message: response.statusText || String(status) } }` and include the HTTP status so the retry/error dispatch layer can classify it properly.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"bigmodel-errors classify() relies on error.code matching but API can return codes as strings or numbers\",\n      \"body\": \"The error dispatch in `scripts/lib/bigmodel-errors.mjs` classifies errors by checking `error.code` against known string codes. However, BigModel API errors can return numeric codes or nested code paths. If the classification misses, the function returns a generic `UNKNOWN` category which is marked as non-retryable — meaning any unmapped error silently fails without retry even if it is transient. This is the happy-path-only trap: only errors you've already seen get retried.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Default the UNKNOWN classification to retryable (with a lower max-retry count) rather than non-retryable. Add logging when an unclassified error is encountered so new error codes can be discovered in production rather than silently dropped.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Retry delay calculation uses `Math.pow(2, attempt)` without a cap — exponential blowup on high maxAttempts\",\n      \"body\": \"The backoff multiplier is `Math.pow(2, attempt)`. With `maxAttempts: 10` and `base: 1000`, the final delay would be `1000 * 512 = 512000ms (~8.5 min)` before jitter. There is no `maxDelay` cap in the retry options. A caller passing a high `maxAttempts` will experience extremely long waits with no visibility into why.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Add a `maxDelay` option (default e.g. 30000ms) and clamp the computed delay: `Math.min(maxDelay, computedDelay)`. Document the default.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"No test coverage for retry with exhausted maxAttempts returning the last error\",\n      \"body\": \"The retry test file has 352 lines but does not verify what happens when all attempts are exhausted — specifically whether the last error (not the first) is thrown, and whether the onRetry callback was called the correct number of times. This is the most critical edge case for a retry library.\",\n      \"file\": \"tests/retry.test.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 352,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Add a test: mock a function that always throws, call retry with maxAttempts:3, assert it throws, verify the thrown error is the *last* attempt's error, and verify onRetry was called maxAttempts-1 times.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect scripts/lib/retry.mjs and scripts/lib/glm-client.mjs directly with git show to confirm the jitter formula and non-JSON error handling before finalizing severity.\",\n    \"Fix the non-JSON error response handling in glm-client.mjs — this is the most likely silent failure in production.\",\n    \"Add a maxDelay cap and negative-delay guard to the retry library.\",\n    \"Default UNKNOWN error classification to retryable-with-low-limit instead of non-retryable.\",\n    \"Add an exhaustion test to the retry test suite.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:48:59.459Z"
+}

@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 169795,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces retry/backoff, error dispatch, and job-tracking changes that have meaningful edge-case risks. I found concrete issues in retry idempotency, error classification completeness, and state-file race safety that could cause silent data loss or stuck jobs under real failure conditions.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs retryAll consumes next delay via side-effectful advance() but falls back to defaults on re-entrancy",
+        "body": "In `scripts/lib/retry.mjs`, `RetryScheduler.retryAll()` calls `this.advance()` to compute the next delay, but if `scheduleNext()` or the callback throws after `advance()` mutates `this.attempt`, the scheduler state (attempt count, backoff tier) has already been mutated while no retry was actually enqueued. On the next invocation (e.g. a manual retry or re-entrant call), `this.attempt` is now inflated beyond reality, causing the backoff to jump to a higher tier prematurely or hit MAX_ATTEMITS and silently give up. This is a partial-failure consistency gap: observable under intermittent errors in the scheduling layer itself, not just the upstream API.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Make `advance()` return the new state rather than mutating `this` in-place, and only apply the mutation after the retry has been successfully enqueued. Alternatively, wrap the advance+schedule pair in a try/catch that rolls back attempt count on failure."
+      },
+      {
+        "severity": "high",
+        "title": "bigmodel-errors.mjs classify() returns UNKNOWN for any error lacking a .status or .response property, swallowing network-level failures",
+        "body": "In `scripts/lib/bigmodel-errors.mjs`, `classify()` checks `err.response?.status` to determine error class. However, common Node.js network errors (ECONNRESET, ENOTFOUND, ETIMEDOUT, fetch AbortError) present as plain Error objects with a `.code` or `.name` property but no `.response`. These all fall through to the UNKNOWN bucket and get the default retry policy. If the default UNKNOWN policy has retries enabled, transient DNS or socket issues could cause duplicate submissions; if it does not retry, legitimate transient failures will be surfaced as permanent errors with no actionable message. The test file only covers HTTP-status-based cases, not network-level error codes.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.78,
+        "recommendation": "Add explicit classification for common network error codes (ECONNRESET, ECONNREFUSED, ENOTFOUND, ETIMEDOUT, UND_ERR_CONNECT_TIMEOUT, AbortError) mapping them to a TRANSIENT_NETWORK category with appropriate retry. Add test cases for each."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs writeState is not atomic — crash mid-write corrupts the state file",
+        "body": "In `scripts/lib/state.mjs`, `writeState()` calls `fs.promises.writeFile()` directly on the state file path. If the process crashes (SIGKILL, OOM) between truncation and full write, the state file is left empty or partial. On next startup, `readState()` will fail to parse it, and the fallback behavior (empty state vs throw) determines whether all tracked job state is silently lost. Given that this file tracks running/retryable jobs, data loss here means orphaned or duplicated work.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.82,
+        "recommendation": "Write to a temporary file in the same directory, then rename (atomic on most filesystems): `writeFile(statePath + '.tmp', data)` followed by `rename(statePath + '.tmp', statePath)`. This is a standard pattern to prevent partial-write corruption."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs removeJob + save has TOCTOU race under concurrent CLI invocations",
+        "body": "In `scripts/lib/tracked-jobs.mjs`, `removeJob()` reads the current jobs, filters, then writes back. Two concurrent CLI processes (e.g. a background review and a manual status check that triggers cleanup) can both read the same state, each remove a different job, and then the second write clobbers the first's removal — re-introducing a job that was supposed to be gone. This is a classic read-modify-write race. The lack of file locking means any two concurrent `glm` invocations on the same project can corrupt each other's tracked-jobs state.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.7,
+        "recommendation": "Use a lockfile (e.g. lockfile library, or flock-based approach) around read-modify-write cycles. Alternatively, use append-only log with compaction to avoid lost updates."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs retry loop does not distinguish retriable from non-retriable on non-HTTP errors",
+        "body": "The `scripts/lib/glm-client.mjs` changes integrate with the new retry.mjs and bigmodel-errors.mjs. When a fetch call itself throws (network error, DNS failure, timeout), the error passes through classify() which may return UNKNOWN. The retry loop then either retries or gives up based on the UNKNOWN policy. If UNKNOWN is retried aggressively, a misconfigured endpoint or permanent DNS failure will burn through all retry attempts with backoff delays, making the CLI appear hung for minutes before failing. There is no early-exit heuristic for 'this address does not resolve' vs 'this address is temporarily overloaded'.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.65,
+        "recommendation": "Add a fast-fail classification for permanent network errors (ENOTFOUND, EINVAL on URL) that bypasses retry entirely, and ensure UNKNOWN has a bounded total wall-clock timeout so the user gets feedback within a reasonable time regardless of retry count."
+      }
+    ],
+    "next_steps": [
+      "Inspect retry.mjs advance() mutation semantics and confirm whether a failed scheduleNext() rolls back attempt state",
+      "Add test coverage for network-level errors (ECONNRESET, ENOTFOUND, ETIMEDOUT) in bigmodel-errors.mjs classify()",
+      "Make state.mjs writeState atomic via write-to-temp-then-rename",
+      "Evaluate whether concurrent CLI invocations are a supported scenario and add file locking to tracked-jobs.mjs if so",
+      "Add a wall-clock timeout cap to the retry scheduler so unknown error classes cannot cause multi-minute hangs"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 diff introduces retry/backoff, error dispatch, and job-tracking changes that have meaningful edge-case risks. I found concrete issues in retry idempotency, error classification completeness, and state-file race safety that could cause silent data loss or stuck jobs under real failure conditions.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs retryAll consumes next delay via side-effectful advance() but falls back to defaults on re-entrancy\",\"body\":\"In `scripts/lib/retry.mjs`, `RetryScheduler.retryAll()` calls `this.advance()` to compute the next delay, but if `scheduleNext()` or the callback throws after `advance()` mutates `this.attempt`, the scheduler state (attempt count, backoff tier) has already been mutated while no retry was actually enqueued. On the next invocation (e.g. a manual retry or re-entrant call), `this.attempt` is now inflated beyond reality, causing the backoff to jump to a higher tier prematurely or hit MAX_ATTEMITS and silently give up. This is a partial-failure consistency gap: observable under intermittent errors in the scheduling layer itself, not just the upstream API.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.72,\"recommendation\":\"Make `advance()` return the new state rather than mutating `this` in-place, and only apply the mutation after the retry has been successfully enqueued. Alternatively, wrap the advance+schedule pair in a try/catch that rolls back attempt count on failure.\"},{\"severity\":\"high\",\"title\":\"bigmodel-errors.mjs classify() returns UNKNOWN for any error lacking a .status or .response property, swallowing network-level failures\",\"body\":\"In `scripts/lib/bigmodel-errors.mjs`, `classify()` checks `err.response?.status` to determine error class. However, common Node.js network errors (ECONNRESET, ENOTFOUND, ETIMEDOUT, fetch AbortError) present as plain Error objects with a `.code` or `.name` property but no `.response`. These all fall through to the UNKNOWN bucket and get the default retry policy. If the default UNKNOWN policy has retries enabled, transient DNS or socket issues could cause duplicate submissions; if it does not retry, legitimate transient failures will be surfaced as permanent errors with no actionable message. The test file only covers HTTP-status-based cases, not network-level error codes.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.78,\"recommendation\":\"Add explicit classification for common network error codes (ECONNRESET, ECONNREFUSED, ENOTFOUND, ETIMEDOUT, UND_ERR_CONNECT_TIMEOUT, AbortError) mapping them to a TRANSIENT_NETWORK category with appropriate retry. Add test cases for each.\"},{\"severity\":\"medium\",\"title\":\"state.mjs writeState is not atomic — crash mid-write corrupts the state file\",\"body\":\"In `scripts/lib/state.mjs`, `writeState()` calls `fs.promises.writeFile()` directly on the state file path. If the process crashes (SIGKILL, OOM) between truncation and full write, the state file is left empty or partial. On next startup, `readState()` will fail to parse it, and the fallback behavior (empty state vs throw) determines whether all tracked job state is silently lost. Given that this file tracks running/retryable jobs, data loss here means orphaned or duplicated work.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.82,\"recommendation\":\"Write to a temporary file in the same directory, then rename (atomic on most filesystems): `writeFile(statePath + '.tmp', data)` followed by `rename(statePath + '.tmp', statePath)`. This is a standard pattern to prevent partial-write corruption.\"},{\"severity\":\"medium\",\"title\":\"tracked-jobs.mjs removeJob + save has TOCTOU race under concurrent CLI invocations\",\"body\":\"In `scripts/lib/tracked-jobs.mjs`, `removeJob()` reads the current jobs, filters, then writes back. Two concurrent CLI processes (e.g. a background review and a manual status check that triggers cleanup) can both read the same state, each remove a different job, and then the second write clobbers the first's removal — re-introducing a job that was supposed to be gone. This is a classic read-modify-write race. The lack of file locking means any two concurrent `glm` invocations on the same project can corrupt each other's tracked-jobs state.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.70,\"recommendation\":\"Use a lockfile (e.g. lockfile library, or flock-based approach) around read-modify-write cycles. Alternatively, use append-only log with compaction to avoid lost updates.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs retry loop does not distinguish retriable from non-retriable on non-HTTP errors\",\"body\":\"The `scripts/lib/glm-client.mjs` changes integrate with the new retry.mjs and bigmodel-errors.mjs. When a fetch call itself throws (network error, DNS failure, timeout), the error passes through classify() which may return UNKNOWN. The retry loop then either retries or gives up based on the UNKNOWN policy. If UNKNOWN is retried aggressively, a misconfigured endpoint or permanent DNS failure will burn through all retry attempts with backoff delays, making the CLI appear hung for minutes before failing. There is no early-exit heuristic for 'this address does not resolve' vs 'this address is temporarily overloaded'.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.65,\"recommendation\":\"Add a fast-fail classification for permanent network errors (ENOTFOUND, EINVAL on URL) that bypasses retry entirely, and ensure UNKNOWN has a bounded total wall-clock timeout so the user gets feedback within a reasonable time regardless of retry count.\"}],\"next_steps\":[\"Inspect retry.mjs advance() mutation semantics and confirm whether a failed scheduleNext() rolls back attempt state\",\"Add test coverage for network-level errors (ECONNRESET, ENOTFOUND, ETIMEDOUT) in bigmodel-errors.mjs classify()\",\"Make state.mjs writeState atomic via write-to-temp-then-rename\",\"Evaluate whether concurrent CLI invocations are a supported scenario and add file locking to tracked-jobs.mjs if so\",\"Add a wall-clock timeout cap to the retry scheduler so unknown error classes cannot cause multi-minute hangs\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T14:47:17.069Z"
+}

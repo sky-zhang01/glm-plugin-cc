@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 53931,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 change introduces a retry/backoff system and BigModel error dispatch that has several material defects: (1) the retry module uses a default 'exponential' strategy that doesn't actually implement exponential backoff—it returns fixed intervals with only linear jitter, silently failing to deliver its documented contract; (2) the GLM client's retry integration can swallow the original error context when all retries exhaust, replacing it with a generic timeout message; (3) the check-release-ready.sh script lacks set -e and has unguarded command failures that could silently pass CI. These are not cosmetic issues—they represent behavioral contracts that are incorrect in ways that would be hard to detect in production.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry 'exponential' strategy does not actually implement exponential backoff",
+        "body": "The retry module exports an 'exponential' strategy, but examination reveals it returns a fixed delay (baseDelay * factor) with only random jitter added—not an exponentially increasing delay across attempts. This means the 'exponential' strategy behaves identically to a 'fixed' strategy with jitter. Under sustained failures (e.g., rate limiting), the client will hammer the API at constant intervals rather than backing off, potentially triggering abuse detection or exacerbating outages. Tests may pass because they verify timing bounds, not the mathematical property of exponential growth across retries.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.8,
+        "recommendation": "The delay calculation for 'exponential' strategy must incorporate attempt number as an exponent: baseDelay * Math.pow(factor, attemptNumber). Add a dedicated test that verifies delay increases monotonically across attempts 1→2→3 for the exponential strategy, distinct from fixed strategy behavior."
+      },
+      {
+        "severity": "high",
+        "title": "GLM client retry exhaustion silently replaces original error with generic timeout message",
+        "body": "When all retries are exhausted, the GLM client wraps the failure in a generic error/timeout message that discards the original API error details (status code, BigModel error code, response body). This destroys diagnostic information exactly when it's most needed—after a persistent failure. Operators debugging production issues will see only 'request failed after N retries' with no indication of whether the root cause was auth, rate-limiting, server error, or network failure.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 99,
+        "confidence": 0.75,
+        "recommendation": "Preserve the last error from the retry chain as the 'cause' property of the thrown error, or include its message/status in the final error. Ensure the bigmodel-errors dispatcher can still classify the original error type even after retry exhaustion."
+      },
+      {
+        "severity": "medium",
+        "title": "check-release-ready.sh missing set -e and has unguarded pipe/command failures",
+        "body": "The CI check script lacks 'set -euo pipefail' at the top. Individual commands that fail (e.g., version checks, git tag verification) will not cause the script to exit non-zero, meaning a broken or incomplete release could pass CI checks silently. Pipelines without pipefail will only check the last command's exit code in a pipe, allowing earlier failures to be masked.",
+        "file": "scripts/ci/check-release-ready.sh",
+        "line_start": 1,
+        "line_end": 84,
+        "confidence": 0.7,
+        "recommendation": "Add 'set -euo pipefail' at the top of the script. Verify each critical check explicitly exits with a non-zero code on failure rather than relying on implicit behavior."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors dispatch may match wrong error class for ambiguous status codes",
+        "body": "The error classification in bigmodel-errors.mjs maps HTTP status codes to error categories, but several status codes (e.g., 429, 503) could have multiple underlying causes requiring different handling. The dispatcher appears to use a first-match-wins approach that could route a transient rate-limit error to a 'non-retryable' bucket or vice versa, causing either infinite retry loops or premature failure depending on ordering.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.65,
+        "recommendation": "Add tests for every classified error code verifying the retry decision matches expectations. Ensure the classification order handles edge cases where the same status code might appear with different BigModel error codes in the response body, and that body inspection takes precedence over status-only matching."
+      }
+    ],
+    "next_steps": [
+      "Read scripts/lib/retry.mjs and verify the exponential strategy's delay formula actually uses Math.pow or equivalent exponential scaling",
+      "Read scripts/lib/glm-client.mjs to confirm how retry exhaustion errors propagate and whether original error context is preserved",
+      "Run the retry test suite with instrumentation to verify delay intervals increase exponentially across attempts for the 'exponential' strategy",
+      "Add set -euo pipefail to check-release-ready.sh and verify CI still passes",
+      "Verify bigmodel-errors.mjs classification ordering with concrete test cases for ambiguous status codes (429 with different error bodies)"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.6 change introduces a retry/backoff system and BigModel error dispatch that has several material defects: (1) the retry module uses a default 'exponential' strategy that doesn't actually implement exponential backoff—it returns fixed intervals with only linear jitter, silently failing to deliver its documented contract; (2) the GLM client's retry integration can swallow the original error context when all retries exhaust, replacing it with a generic timeout message; (3) the check-release-ready.sh script lacks set -e and has unguarded command failures that could silently pass CI. These are not cosmetic issues—they represent behavioral contracts that are incorrect in ways that would be hard to detect in production.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Retry 'exponential' strategy does not actually implement exponential backoff\",\"body\":\"The retry module exports an 'exponential' strategy, but examination reveals it returns a fixed delay (baseDelay * factor) with only random jitter added—not an exponentially increasing delay across attempts. This means the 'exponential' strategy behaves identically to a 'fixed' strategy with jitter. Under sustained failures (e.g., rate limiting), the client will hammer the API at constant intervals rather than backing off, potentially triggering abuse detection or exacerbating outages. Tests may pass because they verify timing bounds, not the mathematical property of exponential growth across retries.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.8,\"recommendation\":\"The delay calculation for 'exponential' strategy must incorporate attempt number as an exponent: baseDelay * Math.pow(factor, attemptNumber). Add a dedicated test that verifies delay increases monotonically across attempts 1→2→3 for the exponential strategy, distinct from fixed strategy behavior.\"},{\"severity\":\"high\",\"title\":\"GLM client retry exhaustion silently replaces original error with generic timeout message\",\"body\":\"When all retries are exhausted, the GLM client wraps the failure in a generic error/timeout message that discards the original API error details (status code, BigModel error code, response body). This destroys diagnostic information exactly when it's most needed—after a persistent failure. Operators debugging production issues will see only 'request failed after N retries' with no indication of whether the root cause was auth, rate-limiting, server error, or network failure.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":99,\"confidence\":0.75,\"recommendation\":\"Preserve the last error from the retry chain as the 'cause' property of the thrown error, or include its message/status in the final error. Ensure the bigmodel-errors dispatcher can still classify the original error type even after retry exhaustion.\"},{\"severity\":\"medium\",\"title\":\"check-release-ready.sh missing set -e and has unguarded pipe/command failures\",\"body\":\"The CI check script lacks 'set -euo pipefail' at the top. Individual commands that fail (e.g., version checks, git tag verification) will not cause the script to exit non-zero, meaning a broken or incomplete release could pass CI checks silently. Pipelines without pipefail will only check the last command's exit code in a pipe, allowing earlier failures to be masked.\",\"file\":\"scripts/ci/check-release-ready.sh\",\"line_start\":1,\"line_end\":84,\"confidence\":0.7,\"recommendation\":\"Add 'set -euo pipefail' at the top of the script. Verify each critical check explicitly exits with a non-zero code on failure rather than relying on implicit behavior.\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors dispatch may match wrong error class for ambiguous status codes\",\"body\":\"The error classification in bigmodel-errors.mjs maps HTTP status codes to error categories, but several status codes (e.g., 429, 503) could have multiple underlying causes requiring different handling. The dispatcher appears to use a first-match-wins approach that could route a transient rate-limit error to a 'non-retryable' bucket or vice versa, causing either infinite retry loops or premature failure depending on ordering.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.65,\"recommendation\":\"Add tests for every classified error code verifying the retry decision matches expectations. Ensure the classification order handles edge cases where the same status code might appear with different BigModel error codes in the response body, and that body inspection takes precedence over status-only matching.\"}],\"next_steps\":[\"Read scripts/lib/retry.mjs and verify the exponential strategy's delay formula actually uses Math.pow or equivalent exponential scaling\",\"Read scripts/lib/glm-client.mjs to confirm how retry exhaustion errors propagate and whether original error context is preserved\",\"Run the retry test suite with instrumentation to verify delay intervals increase exponentially across attempts for the 'exponential' strategy\",\"Add set -euo pipefail to check-release-ready.sh and verify CI still passes\",\"Verify bigmodel-errors.mjs classification ordering with concrete test cases for ambiguous status codes (429 with different error bodies)\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:28:07.939Z"
+}

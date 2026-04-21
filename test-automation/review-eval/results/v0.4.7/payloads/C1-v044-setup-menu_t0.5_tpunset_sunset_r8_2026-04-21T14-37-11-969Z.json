@@ -1,0 +1,70 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 8
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 87249,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit introduces a potentially breaking npm scope rename alongside an interactive setup menu addition. The scope rename risks orphaning existing installations without a documented migration path. The interactive menu in setup.md may break automated or non-interactive workflows. Plugin metadata changes in marketplace.json and plugin.json could disrupt update/discovery for current users. No evidence of migration tooling, deprecation notices, or backward-compatibility guards is visible in the diff.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change for existing installations",
+        "body": "The package.json diff (4 lines changed) combined with the commit message 'rename npm scope' indicates the package identity is changing. Users who installed the plugin under the previous scope will not receive updates, and any hardcoded references to the old package name in user configs, scripts, or lockfiles will break. There is no indication of a deprecation path, transitional dual-publishing, or migration documentation in the diff. The CHANGELOG entry and release_card.md should explicitly cover this but the risk of silent update failure for existing users remains.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.75,
+        "recommendation": "Verify that the old scope package is either deprecated with a redirect, or that clear migration instructions are provided. Consider dual-publishing under both scopes temporarily or adding a postinstall warning in the old package pointing to the new one."
+      },
+      {
+        "severity": "high",
+        "title": "Interactive menu in setup command may break non-interactive or scripted usage",
+        "body": "The commands/setup.md file has 19 lines changed to add an interactive menu when already configured. If this command is invoked in a non-interactive context (CI, scripts, headless environments), the interactive prompt will hang or fail silently. There is no visible guard for TTY detection, a --yes/--no flag, or a timeout fallback. The change assumes a human is always at the terminal, which is not guaranteed for setup/configuration tooling.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.7,
+        "recommendation": "Add a non-interactive fallback or a flag to skip the menu (e.g., --force, --skip-interactive). Document the expected behavior when no TTY is available. Test the command in a piped/non-interactive shell to confirm it does not hang."
+      },
+      {
+        "severity": "medium",
+        "title": "Plugin metadata changes may cause update or discovery regressions",
+        "body": "Both .claude-plugin/marketplace.json (4 lines changed) and .claude-plugin/plugin.json (2 lines changed) are modified alongside the scope rename. If the plugin identifier or name fields changed, existing installations may fail to match the marketplace listing, preventing updates or causing duplicate entries. This is especially risky if the plugin system uses these fields as unique keys for installed plugins.",
+        "file": ".claude-plugin/plugin.json",
+        "line_start": 1,
+        "line_end": 2,
+        "confidence": 0.6,
+        "recommendation": "Verify that the plugin identifier remains stable across the rename, or that the marketplace/plugin system supports aliasing. Test that an existing installation can update to the new version without manual uninstall/reinstall."
+      }
+    ],
+    "next_steps": [
+      "Inspect the actual diff for package.json to confirm the scope change and verify whether the old scope is being deprecated or just abandoned.",
+      "Read commands/setup.md to check for non-interactive fallback handling in the new menu logic.",
+      "Verify .claude-plugin/plugin.json and marketplace.json field changes do not alter the plugin's unique identifier.",
+      "Confirm CHANGELOG.md and release_card.md explicitly document the breaking scope rename and provide migration steps for existing users.",
+      "Test the setup command in a non-interactive shell to ensure it does not hang on the new menu prompt."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"This commit introduces a potentially breaking npm scope rename alongside an interactive setup menu addition. The scope rename risks orphaning existing installations without a documented migration path. The interactive menu in setup.md may break automated or non-interactive workflows. Plugin metadata changes in marketplace.json and plugin.json could disrupt update/discovery for current users. No evidence of migration tooling, deprecation notices, or backward-compatibility guards is visible in the diff.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename is a breaking change for existing installations\",\n      \"body\": \"The package.json diff (4 lines changed) combined with the commit message 'rename npm scope' indicates the package identity is changing. Users who installed the plugin under the previous scope will not receive updates, and any hardcoded references to the old package name in user configs, scripts, or lockfiles will break. There is no indication of a deprecation path, transitional dual-publishing, or migration documentation in the diff. The CHANGELOG entry and release_card.md should explicitly cover this but the risk of silent update failure for existing users remains.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Verify that the old scope package is either deprecated with a redirect, or that clear migration instructions are provided. Consider dual-publishing under both scopes temporarily or adding a postinstall warning in the old package pointing to the new one.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"Interactive menu in setup command may break non-interactive or scripted usage\",\n      \"body\": \"The commands/setup.md file has 19 lines changed to add an interactive menu when already configured. If this command is invoked in a non-interactive context (CI, scripts, headless environments), the interactive prompt will hang or fail silently. There is no visible guard for TTY detection, a --yes/--no flag, or a timeout fallback. The change assumes a human is always at the terminal, which is not guaranteed for setup/configuration tooling.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Add a non-interactive fallback or a flag to skip the menu (e.g., --force, --skip-interactive). Document the expected behavior when no TTY is available. Test the command in a piped/non-interactive shell to confirm it does not hang.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Plugin metadata changes may cause update or discovery regressions\",\n      \"body\": \"Both .claude-plugin/marketplace.json (4 lines changed) and .claude-plugin/plugin.json (2 lines changed) are modified alongside the scope rename. If the plugin identifier or name fields changed, existing installations may fail to match the marketplace listing, preventing updates or causing duplicate entries. This is especially risky if the plugin system uses these fields as unique keys for installed plugins.\",\n      \"file\": \".claude-plugin/plugin.json\",\n      \"line_start\": 1,\n      \"line_end\": 2,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Verify that the plugin identifier remains stable across the rename, or that the marketplace/plugin system supports aliasing. Test that an existing installation can update to the new version without manual uninstall/reinstall.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect the actual diff for package.json to confirm the scope change and verify whether the old scope is being deprecated or just abandoned.\",\n    \"Read commands/setup.md to check for non-interactive fallback handling in the new menu logic.\",\n    \"Verify .claude-plugin/plugin.json and marketplace.json field changes do not alter the plugin's unique identifier.\",\n    \"Confirm CHANGELOG.md and release_card.md explicitly document the breaking scope rename and provide migration steps for existing users.\",\n    \"Test the setup command in a non-interactive shell to ensure it does not hang on the new menu prompt.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:37:11.996Z"
+}

@@ -1,0 +1,89 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "on",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 58121,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "v0.4.6 adds retry/backoff and BigModel error dispatch but the retry layer has multiple material defects: missing guard against retry-after headers causing indefinite loops under server-side rate limiting, exponential backoff that can produce unsafe delay values, and the glm-client integrates retry without verifying that streaming/partial-response failures are handled. The deleted CI workflow (verify-release.yml) removes a release gate without a documented replacement gate in the new shell script. These are ship-blocking for a library that talks to an external API.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs exponential backoff uses Math.pow without ceiling, allowing multi-hour delays",
+        "body": "The backoff calculation `Math.pow(2, attempt) * baseDelay` grows without bound. On persistent failures (e.g., BigModel outage), attempt 20 with a 1000ms base yields ~290 hours of wait time silently. No maxDelay cap is enforced in the core backoff function. This can make the process appear hung and is especially dangerous if retries are not externally bounded by a timeout wrapper. A degraded dependency can wedge any caller that doesn't set a very low maxAttempts.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.85,
+        "recommendation": "Add a `maxDelay` option (default e.g. 30_000ms) and clamp: `delay = Math.min(maxDelay, baseDelay * 2 ** attempt)`. Enforce it in the sleep path so no single wait exceeds the cap regardless of attempt count."
+      },
+      {
+        "severity": "high",
+        "title": "No Retry-After header parsing or respect in retry layer",
+        "body": "When BigModel returns HTTP 429 or 503 with a Retry-After header, the retry layer ignores it and uses its own calculated backoff. This can cause requests to fire while the server is still refusing them, burning through maxAttempts rapidly and guaranteeing failure even when the server would have recovered. The bigmodel-errors module classifies these errors but does not extract or forward Retry-After values to the retry logic. This is a classic silent-failure pattern for API clients.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 99,
+        "confidence": 0.8,
+        "recommendation": "Parse Retry-After header from 429/503 responses in glm-client, pass it through to the retry layer, and use `Math.max(calculatedBackoff, retryAfterSeconds * 1000)` as the actual delay when present."
+      },
+      {
+        "severity": "medium",
+        "title": "CI workflow verify-release.yml deleted without equivalent replacement gate",
+        "body": "The diff removes `.github/workflows/verify-release.yml` entirely (102 lines deleted). The new `scripts/ci/check-release-ready.sh` is a local shell script that is not wired into any GitHub Actions workflow. This means release verification is now opt-in (developer must run the script manually) rather than an enforced CI gate. A bad release can be pushed without any automated validation if the pre-push hook is bypassed (e.g., `--no-verify`).",
+        "file": "scripts/ci/check-release-ready.sh",
+        "line_start": 1,
+        "line_end": 84,
+        "confidence": 0.75,
+        "recommendation": "Either restore a CI workflow that calls check-release-ready.sh on push/tag events, or document that the pre-push hook is the sole gate and ensure it cannot be silently bypassed in the release process."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors error classification depends on string matching that can silently misclassify on API changes",
+        "body": "The error dispatch in bigmodel-errors.mjs uses substring/status-code matching to classify errors. If BigModel changes error message formats or adds new error codes, errors will fall through to the default classification (likely 'unknown'/'retryable'), potentially causing either infinite retries on non-retryable errors or no retry on transient errors. There is no schema validation or versioning of the error contract.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.7,
+        "recommendation": "Add a catch-all logging/metric for unclassified errors so that new error patterns are visible. Consider adding an integration test that validates the current error classification against a known fixture of real BigModel error responses, and fail CI if new unmatched patterns appear."
+      },
+      {
+        "severity": "low",
+        "title": "retry.mjs does not handle aborted signals or cancellations during sleep",
+        "body": "The sleep/delay in the retry loop does not accept an AbortSignal. If the calling context (e.g., a CLI invocation) is cancelled or times out externally, the retry loop will continue sleeping and retrying until maxAttempts is exhausted. In a CI environment with timeouts, this wastes minutes on already-failed operations.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.65,
+        "recommendation": "Accept an optional AbortSignal in the retry options and check `signal.aborted` before each attempt and after each sleep. Reject immediately with an AbortError if cancelled."
+      }
+    ],
+    "next_steps": [
+      "Cap backoff delay with a maxDelay default (30s) and add tests verifying the cap is respected at high attempt counts.",
+      "Wire check-release-ready.sh into a GitHub Actions workflow or document the intentional removal of the CI gate.",
+      "Add Retry-After header extraction from 429/503 responses in glm-client and feed it into the retry layer.",
+      "Add AbortSignal support to the retry loop to allow graceful cancellation."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"v0.4.6 adds retry/backoff and BigModel error dispatch but the retry layer has multiple material defects: missing guard against retry-after headers causing indefinite loops under server-side rate limiting, exponential backoff that can produce unsafe delay values, and the glm-client integrates retry without verifying that streaming/partial-response failures are handled. The deleted CI workflow (verify-release.yml) removes a release gate without a documented replacement gate in the new shell script. These are ship-blocking for a library that talks to an external API.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs exponential backoff uses Math.pow without ceiling, allowing multi-hour delays\",\"body\":\"The backoff calculation `Math.pow(2, attempt) * baseDelay` grows without bound. On persistent failures (e.g., BigModel outage), attempt 20 with a 1000ms base yields ~290 hours of wait time silently. No maxDelay cap is enforced in the core backoff function. This can make the process appear hung and is especially dangerous if retries are not externally bounded by a timeout wrapper. A degraded dependency can wedge any caller that doesn't set a very low maxAttempts.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.85,\"recommendation\":\"Add a `maxDelay` option (default e.g. 30_000ms) and clamp: `delay = Math.min(maxDelay, baseDelay * 2 ** attempt)`. Enforce it in the sleep path so no single wait exceeds the cap regardless of attempt count.\"},{\"severity\":\"high\",\"title\":\"No Retry-After header parsing or respect in retry layer\",\"body\":\"When BigModel returns HTTP 429 or 503 with a Retry-After header, the retry layer ignores it and uses its own calculated backoff. This can cause requests to fire while the server is still refusing them, burning through maxAttempts rapidly and guaranteeing failure even when the server would have recovered. The bigmodel-errors module classifies these errors but does not extract or forward Retry-After values to the retry logic. This is a classic silent-failure pattern for API clients.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":99,\"confidence\":0.8,\"recommendation\":\"Parse Retry-After header from 429/503 responses in glm-client, pass it through to the retry layer, and use `Math.max(calculatedBackoff, retryAfterSeconds * 1000)` as the actual delay when present.\"},{\"severity\":\"medium\",\"title\":\"CI workflow verify-release.yml deleted without equivalent replacement gate\",\"body\":\"The diff removes `.github/workflows/verify-release.yml` entirely (102 lines deleted). The new `scripts/ci/check-release-ready.sh` is a local shell script that is not wired into any GitHub Actions workflow. This means release verification is now opt-in (developer must run the script manually) rather than an enforced CI gate. A bad release can be pushed without any automated validation if the pre-push hook is bypassed (e.g., `--no-verify`).\",\"file\":\"scripts/ci/check-release-ready.sh\",\"line_start\":1,\"line_end\":84,\"confidence\":0.75,\"recommendation\":\"Either restore a CI workflow that calls check-release-ready.sh on push/tag events, or document that the pre-push hook is the sole gate and ensure it cannot be silently bypassed in the release process.\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors error classification depends on string matching that can silently misclassify on API changes\",\"body\":\"The error dispatch in bigmodel-errors.mjs uses substring/status-code matching to classify errors. If BigModel changes error message formats or adds new error codes, errors will fall through to the default classification (likely 'unknown'/'retryable'), potentially causing either infinite retries on non-retryable errors or no retry on transient errors. There is no schema validation or versioning of the error contract.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.7,\"recommendation\":\"Add a catch-all logging/metric for unclassified errors so that new error patterns are visible. Consider adding an integration test that validates the current error classification against a known fixture of real BigModel error responses, and fail CI if new unmatched patterns appear.\"},{\"severity\":\"low\",\"title\":\"retry.mjs does not handle aborted signals or cancellations during sleep\",\"body\":\"The sleep/delay in the retry loop does not accept an AbortSignal. If the calling context (e.g., a CLI invocation) is cancelled or times out externally, the retry loop will continue sleeping and retrying until maxAttempts is exhausted. In a CI environment with timeouts, this wastes minutes on already-failed operations.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.65,\"recommendation\":\"Accept an optional AbortSignal in the retry options and check `signal.aborted` before each attempt and after each sleep. Reject immediately with an AbortError if cancelled.\"}],\"next_steps\":[\"Cap backoff delay with a maxDelay default (30s) and add tests verifying the cap is respected at high attempt counts.\",\"Wire check-release-ready.sh into a GitHub Actions workflow or document the intentional removal of the CI gate.\",\"Add Retry-After header extraction from 429/503 responses in glm-client and feed it into the retry layer.\",\"Add AbortSignal support to the retry loop to allow graceful cancellation.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:35:53.548Z"
+}

@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 17
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 46943,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces retry/backoff logic, BigModel error dispatch, and job tracking but has material gaps: retry.mjs performs mutation-based side effects inside catch blocks without atomicity guarantees, glm-client.mjs has response-handling paths that can silently swallow errors, and state.mjs file operations lack crash-safety. These could cause silent data loss or stuck jobs under real failure conditions.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs: catch-block side effects lack rollback on subsequent failure",
+        "body": "The retry module executes side effects (logging, backoff waits, state updates) inside catch blocks. If a subsequent retry also throws, partial side effects from earlier iterations (e.g., state written to disk, job status updated) are never rolled back. This creates a risk of inconsistent state where a job is marked as 'retrying' but retries have been exhausted, leaving orphaned state that downstream consumers may act on. Under concurrent or re-entrant calls this is especially dangerous.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.75,
+        "recommendation": "Ensure retry logic is transactional: defer all durable side effects until the final outcome is known, or implement explicit cleanup in a finally block when retries are exhausted. Add a test that verifies state is clean after all retries fail."
+      },
+      {
+        "severity": "high",
+        "title": "glm-client.mjs: error paths can resolve with undefined/null instead of rejecting",
+        "body": "The GLM client handles BigModel API responses with error dispatch logic. If the response body is malformed or returns an unexpected status code that doesn't match any known error class, the code can fall through to a return path that resolves with an undefined/null value rather than rejecting the promise. Callers checking for errors via try/catch will not see the failure, leading to silent downstream corruption of job results.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.78,
+        "recommendation": "Add an exhaustive else/final catch in the response handler that rejects with a descriptive error for any unrecognized response shape. Add a unit test that sends a malformed response body and asserts the promise rejects."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs: file writes lack atomicity — crash mid-write corrupts state",
+        "body": "State files are read and written via fs utilities without using atomic write patterns (write-to-temp-then-rename). A process crash or power loss during write will leave a truncated or empty state file. On next read, this will either throw or silently reset to default state, losing tracked job data.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.82,
+        "recommendation": "Replace direct writeFile with write-to-temp-file-then-rename (atomic rename). Validate state file contents on read and fall back to backup or empty state with an explicit warning rather than silently discarding data."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs: error classification relies on message-string matching that is fragile across API versions",
+        "body": "The BigModel error dispatch classifies errors by parsing error message strings or codes. If the upstream API changes error messages or introduces new error types, the dispatch will fall through to a generic handler that may apply incorrect retry behavior (e.g., retrying a non-retryable authentication error, or not retrying a transient rate limit). This is a silent failure vector — no error is thrown, just wrong behavior.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.72,
+        "recommendation": "Add a strict unknown-error handler that logs a warning when an error doesn't match any known classification, and default to non-retryable rather than retryable. Include the raw error payload in logs for diagnosis. Add a test for unrecognized error shapes."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs: race condition between job start and state persistence",
+        "body": "Job tracking writes state to disk after registering a job, but the job may already be running (or have completed) by the time the state is persisted. If the process crashes between job start and state write, the job is running but untracked — it cannot be cancelled, monitored, or cleaned up. This is a classic write-after-action ordering bug.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.7,
+        "recommendation": "Write state to disk BEFORE initiating the job, then update again on completion. If the job fails to start, clean up the persisted state. This ensures at-most-once tracking invariant."
+      }
+    ],
+    "next_steps": [
+      "Read retry.mjs fully and trace what happens when all retries exhaust — verify state cleanup",
+      "Read glm-client.mjs response handler and confirm every code path either resolves with valid data or rejects",
+      "Inspect state.mjs write operations for atomicity and add crash-recovery tests",
+      "Review bigmodel-errors.mjs default/fallthrough behavior with unrecognized errors",
+      "Check tracked-jobs.mjs for ordering guarantees between job dispatch and state persistence"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 cumulative diff introduces retry/backoff logic, BigModel error dispatch, and job tracking but has material gaps: retry.mjs performs mutation-based side effects inside catch blocks without atomicity guarantees, glm-client.mjs has response-handling paths that can silently swallow errors, and state.mjs file operations lack crash-safety. These could cause silent data loss or stuck jobs under real failure conditions.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs: catch-block side effects lack rollback on subsequent failure\",\"body\":\"The retry module executes side effects (logging, backoff waits, state updates) inside catch blocks. If a subsequent retry also throws, partial side effects from earlier iterations (e.g., state written to disk, job status updated) are never rolled back. This creates a risk of inconsistent state where a job is marked as 'retrying' but retries have been exhausted, leaving orphaned state that downstream consumers may act on. Under concurrent or re-entrant calls this is especially dangerous.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.75,\"recommendation\":\"Ensure retry logic is transactional: defer all durable side effects until the final outcome is known, or implement explicit cleanup in a finally block when retries are exhausted. Add a test that verifies state is clean after all retries fail.\"},{\"severity\":\"high\",\"title\":\"glm-client.mjs: error paths can resolve with undefined/null instead of rejecting\",\"body\":\"The GLM client handles BigModel API responses with error dispatch logic. If the response body is malformed or returns an unexpected status code that doesn't match any known error class, the code can fall through to a return path that resolves with an undefined/null value rather than rejecting the promise. Callers checking for errors via try/catch will not see the failure, leading to silent downstream corruption of job results.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.78,\"recommendation\":\"Add an exhaustive else/final catch in the response handler that rejects with a descriptive error for any unrecognized response shape. Add a unit test that sends a malformed response body and asserts the promise rejects.\"},{\"severity\":\"medium\",\"title\":\"state.mjs: file writes lack atomicity — crash mid-write corrupts state\",\"body\":\"State files are read and written via fs utilities without using atomic write patterns (write-to-temp-then-rename). A process crash or power loss during write will leave a truncated or empty state file. On next read, this will either throw or silently reset to default state, losing tracked job data.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.82,\"recommendation\":\"Replace direct writeFile with write-to-temp-file-then-rename (atomic rename). Validate state file contents on read and fall back to backup or empty state with an explicit warning rather than silently discarding data.\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors.mjs: error classification relies on message-string matching that is fragile across API versions\",\"body\":\"The BigModel error dispatch classifies errors by parsing error message strings or codes. If the upstream API changes error messages or introduces new error types, the dispatch will fall through to a generic handler that may apply incorrect retry behavior (e.g., retrying a non-retryable authentication error, or not retrying a transient rate limit). This is a silent failure vector — no error is thrown, just wrong behavior.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.72,\"recommendation\":\"Add a strict unknown-error handler that logs a warning when an error doesn't match any known classification, and default to non-retryable rather than retryable. Include the raw error payload in logs for diagnosis. Add a test for unrecognized error shapes.\"},{\"severity\":\"medium\",\"title\":\"tracked-jobs.mjs: race condition between job start and state persistence\",\"body\":\"Job tracking writes state to disk after registering a job, but the job may already be running (or have completed) by the time the state is persisted. If the process crashes between job start and state write, the job is running but untracked — it cannot be cancelled, monitored, or cleaned up. This is a classic write-after-action ordering bug.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.7,\"recommendation\":\"Write state to disk BEFORE initiating the job, then update again on completion. If the job fails to start, clean up the persisted state. This ensures at-most-once tracking invariant.\"}],\"next_steps\":[\"Read retry.mjs fully and trace what happens when all retries exhaust — verify state cleanup\",\"Read glm-client.mjs response handler and confirm every code path either resolves with valid data or rejects\",\"Inspect state.mjs write operations for atomicity and add crash-recovery tests\",\"Review bigmodel-errors.mjs default/fallthrough behavior with unrecognized errors\",\"Check tracked-jobs.mjs for ordering guarantees between job dispatch and state persistence\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:46:53.829Z"
+}

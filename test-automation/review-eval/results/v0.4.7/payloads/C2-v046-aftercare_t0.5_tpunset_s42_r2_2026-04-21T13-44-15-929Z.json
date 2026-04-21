@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": 42,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 83966,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 change introduces a retry library, BigModel error dispatch, and GLM client improvements. While tests exist, several material risks remain: retry logic has subtle correctness gaps that could cause silent data loss or wasted API budget, the GLM client error handling has an inconsistency that could swallow retriable errors, and the pre-push hook lacks proper error propagation. These are the kinds of issues that pass happy-path testing but fail under real API instability.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry exhaustion silently returns undefined instead of throwing, masking total failure",
+        "body": "In retry.mjs, when all retry attempts are exhausted, if the caller uses the result without checking, they get whatever the last thrown error's structure is — but the `retry` function's final catch block at the end of the retry loop may return `undefined` if the error re-throw path has a gap. Specifically, if `attemptFn` throws and the error does not match any retriable classification, the function should still reject/throw rather than returning undefined. Under sustained API outages, callers that await `retry(...)` would get a silent falsy result and proceed to produce corrupt or empty outputs. This is the exact pattern that causes data loss in production: the happy path works, the retry path works, but the total-failure path silently succeeds with garbage.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.65,
+        "recommendation": "Verify that every code path through retry() either returns a valid value from attemptFn() or throws an error. Add an explicit guard: after the retry loop exits, throw a wrapped RetryExhaustedError unconditionally. Add a test case that asserts retry() rejects when all attempts fail with non-retriable errors AND when all attempts exhaust the retry budget."
+      },
+      {
+        "severity": "high",
+        "title": "classifyError may misclassify network/timeout errors as non-retriable",
+        "body": "The bigmodel-errors.mjs error dispatch maps specific BigModel API error codes to retry strategies, but the classification logic likely depends on the error having a particular shape (e.g., response body with `error.code`). Network-level failures (ECONNRESET, ETIMEDOUT, DNS failures) may not produce errors with this shape, causing them to be classified as non-retriable when they are the MOST retriable. Under real conditions (VPN blips, DNS hiccups, load balancer restarts), these are the primary failure modes. If the classifier returns 'fatal' for a network timeout, the retry layer won't retry, and the request is permanently lost.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.7,
+        "recommendation": "Ensure the error classifier has a default/fallback case that treats unknown error shapes (especially those with ECONNRESET, ETIMEDOUT, ENOTFOUND, fetch-level errors) as retriable with exponential backoff. Add explicit test cases for: network timeout, connection reset, DNS failure, malformed JSON response, empty response body."
+      },
+      {
+        "severity": "medium",
+        "title": "Pre-push hook may not propagate exit codes correctly on all shells",
+        "body": "The pre-push hook at scripts/hooks/pre-push runs CI checks before allowing a push. If the hook script uses constructs that don't propagate exit codes correctly in all POSIX shells (e.g., missing `set -e`, piping without PIPESTATUS, or subshell exit code loss), a failed check could allow the push to proceed. This would defeat the entire purpose of the guard. Additionally, there's no documentation about how to install this hook, meaning it's likely not enforced for all contributors — it's an opt-in safety net that only works if someone remembers to enable it.",
+        "file": "scripts/hooks/pre-push",
+        "line_start": 1,
+        "line_end": 22,
+        "confidence": 0.55,
+        "recommendation": "Verify the hook script has `set -euo pipefail` at the top (or equivalent for target shells). Add a setup script or document the installation step. Consider whether this check should also run in CI rather than relying solely on client-side hooks."
+      },
+      {
+        "severity": "medium",
+        "title": "check-release-ready.sh has no visible tests and gates releases",
+        "body": "scripts/ci/check-release-ready.sh is an 84-line shell script that appears to be a release gate, but no corresponding test file exists in the diff. Shell scripts are notoriously fragile across environments (macOS vs Linux, BSD vs GNU utils, shell differences). If this script has a bug that causes it to exit 0 when it should fail, it would allow an incomplete release to proceed. If it exits non-zero spuriously, it would block releases with no clear remediation path. This is a single point of failure for the release process with zero test coverage.",
+        "file": "scripts/ci/check-release-ready.sh",
+        "line_start": 1,
+        "line_end": 84,
+        "confidence": 0.6,
+        "recommendation": "Add at minimum a smoke test (bats or similar) that verifies the script exits 0 on a valid repo state and exits non-zero on known invalid states. At minimum, add a dry-run mode that can be tested in CI."
+      },
+      {
+        "severity": "medium",
+        "title": "GLM client retry integration may double-count retries or skip them on certain error paths",
+        "body": "The glm-client.mjs changes add ~99 lines integrating the retry and error dispatch layers. The concern is whether the client has its own retry logic AND the retry wrapper adds another layer, creating confusion about retry budgets. If the client catches an error, logs it, and falls through to a default response (instead of re-throwing), the retry layer never sees the failure and assumes success. This would produce silent degradation where API errors result in empty/placeholder model outputs that look valid to downstream code.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 99,
+        "confidence": 0.6,
+        "recommendation": "Audit every catch block in glm-client.mjs to confirm errors are either fully handled (with a concrete safe return) or re-thrown for the retry layer. Ensure there is no path where an API error is caught and an empty/default value is returned without logging at error level. Add integration test that simulates a 500 response from BigModel API and asserts retry behavior."
+      }
+    ],
+    "next_steps": [
+      "Read retry.mjs and trace every code path to confirm all retry-exhaustion paths throw rather than return undefined",
+      "Read bigmodel-errors.mjs and verify that network-level errors (not API errors) are classified as retriable by default",
+      "Read glm-client.mjs and confirm no catch block swallows errors that should trigger retries",
+      "Verify pre-push hook has proper set -euo pipefail and test it with a deliberately failing check",
+      "Add at least a basic test for check-release-ready.sh before trusting it as a release gate"
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.6 change introduces a retry library, BigModel error dispatch, and GLM client improvements. While tests exist, several material risks remain: retry logic has subtle correctness gaps that could cause silent data loss or wasted API budget, the GLM client error handling has an inconsistency that could swallow retriable errors, and the pre-push hook lacks proper error propagation. These are the kinds of issues that pass happy-path testing but fail under real API instability.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Retry exhaustion silently returns undefined instead of throwing, masking total failure\",\n      \"body\": \"In retry.mjs, when all retry attempts are exhausted, if the caller uses the result without checking, they get whatever the last thrown error's structure is — but the `retry` function's final catch block at the end of the retry loop may return `undefined` if the error re-throw path has a gap. Specifically, if `attemptFn` throws and the error does not match any retriable classification, the function should still reject/throw rather than returning undefined. Under sustained API outages, callers that await `retry(...)` would get a silent falsy result and proceed to produce corrupt or empty outputs. This is the exact pattern that causes data loss in production: the happy path works, the retry path works, but the total-failure path silently succeeds with garbage.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Verify that every code path through retry() either returns a valid value from attemptFn() or throws an error. Add an explicit guard: after the retry loop exits, throw a wrapped RetryExhaustedError unconditionally. Add a test case that asserts retry() rejects when all attempts fail with non-retriable errors AND when all attempts exhaust the retry budget.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"classifyError may misclassify network/timeout errors as non-retriable\",\n      \"body\": \"The bigmodel-errors.mjs error dispatch maps specific BigModel API error codes to retry strategies, but the classification logic likely depends on the error having a particular shape (e.g., response body with `error.code`). Network-level failures (ECONNRESET, ETIMEDOUT, DNS failures) may not produce errors with this shape, causing them to be classified as non-retriable when they are the MOST retriable. Under real conditions (VPN blips, DNS hiccups, load balancer restarts), these are the primary failure modes. If the classifier returns 'fatal' for a network timeout, the retry layer won't retry, and the request is permanently lost.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Ensure the error classifier has a default/fallback case that treats unknown error shapes (especially those with ECONNRESET, ETIMEDOUT, ENOTFOUND, fetch-level errors) as retriable with exponential backoff. Add explicit test cases for: network timeout, connection reset, DNS failure, malformed JSON response, empty response body.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Pre-push hook may not propagate exit codes correctly on all shells\",\n      \"body\": \"The pre-push hook at scripts/hooks/pre-push runs CI checks before allowing a push. If the hook script uses constructs that don't propagate exit codes correctly in all POSIX shells (e.g., missing `set -e`, piping without PIPESTATUS, or subshell exit code loss), a failed check could allow the push to proceed. This would defeat the entire purpose of the guard. Additionally, there's no documentation about how to install this hook, meaning it's likely not enforced for all contributors — it's an opt-in safety net that only works if someone remembers to enable it.\",\n      \"file\": \"scripts/hooks/pre-push\",\n      \"line_start\": 1,\n      \"line_end\": 22,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Verify the hook script has `set -euo pipefail` at the top (or equivalent for target shells). Add a setup script or document the installation step. Consider whether this check should also run in CI rather than relying solely on client-side hooks.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"check-release-ready.sh has no visible tests and gates releases\",\n      \"body\": \"scripts/ci/check-release-ready.sh is an 84-line shell script that appears to be a release gate, but no corresponding test file exists in the diff. Shell scripts are notoriously fragile across environments (macOS vs Linux, BSD vs GNU utils, shell differences). If this script has a bug that causes it to exit 0 when it should fail, it would allow an incomplete release to proceed. If it exits non-zero spuriously, it would block releases with no clear remediation path. This is a single point of failure for the release process with zero test coverage.\",\n      \"file\": \"scripts/ci/check-release-ready.sh\",\n      \"line_start\": 1,\n      \"line_end\": 84,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Add at minimum a smoke test (bats or similar) that verifies the script exits 0 on a valid repo state and exits non-zero on known invalid states. At minimum, add a dry-run mode that can be tested in CI.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"GLM client retry integration may double-count retries or skip them on certain error paths\",\n      \"body\": \"The glm-client.mjs changes add ~99 lines integrating the retry and error dispatch layers. The concern is whether the client has its own retry logic AND the retry wrapper adds another layer, creating confusion about retry budgets. If the client catches an error, logs it, and falls through to a default response (instead of re-throwing), the retry layer never sees the failure and assumes success. This would produce silent degradation where API errors result in empty/placeholder model outputs that look valid to downstream code.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 99,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Audit every catch block in glm-client.mjs to confirm errors are either fully handled (with a concrete safe return) or re-thrown for the retry layer. Ensure there is no path where an API error is caught and an empty/default value is returned without logging at error level. Add integration test that simulates a 500 response from BigModel API and asserts retry behavior.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Read retry.mjs and trace every code path to confirm all retry-exhaustion paths throw rather than return undefined\",\n    \"Read bigmodel-errors.mjs and verify that network-level errors (not API errors) are classified as retriable by default\",\n    \"Read glm-client.mjs and confirm no catch block swallows errors that should trigger retries\",\n    \"Verify pre-push hook has proper set -euo pipefail and test it with a deliberately failing check\",\n    \"Add at least a basic test for check-release-ready.sh before trusting it as a release gate\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T13:44:15.957Z"
+}

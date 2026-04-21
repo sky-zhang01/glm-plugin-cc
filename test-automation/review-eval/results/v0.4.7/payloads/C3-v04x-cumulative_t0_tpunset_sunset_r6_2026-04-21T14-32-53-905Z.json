@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 6
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 72102,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 delta introduces substantial new surface area—retry logic, BigModel error dispatch, job tracking, state management, and a companion client—without clear evidence of concurrency safety, idempotency, or failure-path correctness under real workload. The retry module, GLM client, and state/job-control modules form a chain where partial failures, race conditions on tracked-jobs state, and silent data loss are plausible. Several modules lack defensive guards for empty/null/corrupt persisted state. Recommend targeted hardening before v0.4.7 ships.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs exponential backoff can silently swallow unrecoverable errors and mask data loss",
+        "body": "The retry module is a new 200+ line addition that wraps all remote GLM API calls. If the retry logic treats transient HTTP errors the same as permanent failures (e.g., 400/Bad Request, 403/Forbidden), it will burn through retry budget on unrecoverable errors and then return a misleading timeout/error instead of the real cause. Conversely, if it retries non-idempotent mutations (POST creating jobs), partial success on retry could cause duplicate job submissions. The lack of idempotency-key handling or retry-after header parsing in a generic retry wrapper is a systemic risk. Without seeing the implementation guard against retrying non-idempotent operations, this is a material gap.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Audit retry.mjs to confirm: (1) only idempotent HTTP methods are retried, or idempotency keys are attached, (2) 4xx errors are NOT retried (except 429), (3) the original error cause is preserved through the retry chain so callers can distinguish timeout from permanent failure, (4) add explicit tests for non-idempotent retry scenarios."
+      },
+      {
+        "severity": "high",
+        "title": "tracked-jobs.mjs and state.mjs have no concurrency or atomicity guarantees on shared state file",
+        "body": "tracked-jobs.mjs (78 lines changed) and state.mjs (32 lines changed) both manage persisted job/state data. If two GLM companion processes run concurrently (e.g., two terminals or a background + foreground job), both will read-modify-write the same state file with no locking, no atomic rename, and no conflict detection. This can cause silent job loss (one process overwrites the other's additions) or corrupt JSON (truncated writes from concurrent processes). This is a real scenario given the new --background/--wait flags from v0.4.5.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.78,
+        "recommendation": "Add atomic file writes (write to temp file, rename) for state mutations. Add a PID or lockfile mechanism, or at minimum detect concurrent modification via file mtime comparison before overwrite. Test concurrent read-modify-write scenarios explicitly."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error dispatch may silently fall through on unknown error shapes",
+        "body": "The new 168-line bigmodel-errors.mjs module is responsible for classifying BigModel API errors and determining retry eligibility. If the error dispatch uses a pattern-match or instanceof chain that doesn't cover all possible error shapes from the HTTP client (network errors, timeout errors, JSON parse errors on non-JSON responses, DNS errors), the unhandled error type will silently drop through without retry classification, potentially causing the caller to treat a transient network failure as permanent. This is a classic silent-failure pattern in error dispatch modules.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.7,
+        "recommendation": "Ensure the error dispatch has an exhaustive default/fallthrough case that (1) logs the unrecognized error shape at warn level, (2) defaults to retryable=true with a capped retry count, or (3) wraps the unknown error in a classified wrapper with the original cause attached. Add tests for unexpected error shapes (null message, undefined code, non-Error thrown values)."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs changes lack evidence of timeout and streaming-partial-failure handling",
+        "body": "The GLM client (155 lines changed) wraps remote API calls with the new retry and error dispatch modules. If the client uses streaming responses and the stream breaks mid-transfer, the retry logic may re-request, but any partial output already written to the caller's stream/sink is lost or duplicated. There is no indication of checkpoint/resume or deduplication for partial streaming results. Under real network instability, this manifests as garbled or duplicated output to the user.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.65,
+        "recommendation": "Verify that streaming response paths handle mid-stream failures gracefully—either buffer the full response before returning, or implement a deduplication/resume mechanism. Add integration tests that simulate network interruption during streaming response delivery."
+      },
+      {
+        "severity": "medium",
+        "title": "process.mjs deleted (67 lines removed) — migration completeness unknown",
+        "body": "scripts/lib/process.mjs was entirely deleted (67 lines removed). If any other module or downstream consumer still imports from process.mjs (dynamically, via string interpolation, or in untested code paths), it will throw a runtime module-not-found error. The check-imports.mjs script was modified (5 lines changed) but there is no evidence it validates runtime dynamic imports or re-exports.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.68,
+        "recommendation": "Grep the entire codebase for any remaining references to 'process.mjs' or 'lib/process' in imports, dynamic imports, require, or string-based module resolution. Run the full test suite and the check-imports.mjs script to confirm no dangling references. If the module was inlined elsewhere, verify all original functionality is preserved."
+      }
+    ],
+    "next_steps": [
+      "Inspect retry.mjs implementation for idempotency guards and non-retriable status code handling",
+      "Audit tracked-jobs.mjs and state.mjs for atomic write and concurrency safety patterns",
+      "Review bigmodel-errors.mjs dispatch exhaustiveness with focus on fallthrough behavior",
+      "Verify no remaining imports reference the deleted process.mjs module",
+      "Run the full test suite to confirm no runtime import failures from the process.mjs deletion"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 delta introduces substantial new surface area—retry logic, BigModel error dispatch, job tracking, state management, and a companion client—without clear evidence of concurrency safety, idempotency, or failure-path correctness under real workload. The retry module, GLM client, and state/job-control modules form a chain where partial failures, race conditions on tracked-jobs state, and silent data loss are plausible. Several modules lack defensive guards for empty/null/corrupt persisted state. Recommend targeted hardening before v0.4.7 ships.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs exponential backoff can silently swallow unrecoverable errors and mask data loss\",\"body\":\"The retry module is a new 200+ line addition that wraps all remote GLM API calls. If the retry logic treats transient HTTP errors the same as permanent failures (e.g., 400/Bad Request, 403/Forbidden), it will burn through retry budget on unrecoverable errors and then return a misleading timeout/error instead of the real cause. Conversely, if it retries non-idempotent mutations (POST creating jobs), partial success on retry could cause duplicate job submissions. The lack of idempotency-key handling or retry-after header parsing in a generic retry wrapper is a systemic risk. Without seeing the implementation guard against retrying non-idempotent operations, this is a material gap.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.72,\"recommendation\":\"Audit retry.mjs to confirm: (1) only idempotent HTTP methods are retried, or idempotency keys are attached, (2) 4xx errors are NOT retried (except 429), (3) the original error cause is preserved through the retry chain so callers can distinguish timeout from permanent failure, (4) add explicit tests for non-idempotent retry scenarios.\"},{\"severity\":\"high\",\"title\":\"tracked-jobs.mjs and state.mjs have no concurrency or atomicity guarantees on shared state file\",\"body\":\"tracked-jobs.mjs (78 lines changed) and state.mjs (32 lines changed) both manage persisted job/state data. If two GLM companion processes run concurrently (e.g., two terminals or a background + foreground job), both will read-modify-write the same state file with no locking, no atomic rename, and no conflict detection. This can cause silent job loss (one process overwrites the other's additions) or corrupt JSON (truncated writes from concurrent processes). This is a real scenario given the new --background/--wait flags from v0.4.5.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.78,\"recommendation\":\"Add atomic file writes (write to temp file, rename) for state mutations. Add a PID or lockfile mechanism, or at minimum detect concurrent modification via file mtime comparison before overwrite. Test concurrent read-modify-write scenarios explicitly.\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors.mjs error dispatch may silently fall through on unknown error shapes\",\"body\":\"The new 168-line bigmodel-errors.mjs module is responsible for classifying BigModel API errors and determining retry eligibility. If the error dispatch uses a pattern-match or instanceof chain that doesn't cover all possible error shapes from the HTTP client (network errors, timeout errors, JSON parse errors on non-JSON responses, DNS errors), the unhandled error type will silently drop through without retry classification, potentially causing the caller to treat a transient network failure as permanent. This is a classic silent-failure pattern in error dispatch modules.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.7,\"recommendation\":\"Ensure the error dispatch has an exhaustive default/fallthrough case that (1) logs the unrecognized error shape at warn level, (2) defaults to retryable=true with a capped retry count, or (3) wraps the unknown error in a classified wrapper with the original cause attached. Add tests for unexpected error shapes (null message, undefined code, non-Error thrown values).\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs changes lack evidence of timeout and streaming-partial-failure handling\",\"body\":\"The GLM client (155 lines changed) wraps remote API calls with the new retry and error dispatch modules. If the client uses streaming responses and the stream breaks mid-transfer, the retry logic may re-request, but any partial output already written to the caller's stream/sink is lost or duplicated. There is no indication of checkpoint/resume or deduplication for partial streaming results. Under real network instability, this manifests as garbled or duplicated output to the user.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.65,\"recommendation\":\"Verify that streaming response paths handle mid-stream failures gracefully—either buffer the full response before returning, or implement a deduplication/resume mechanism. Add integration tests that simulate network interruption during streaming response delivery.\"},{\"severity\":\"medium\",\"title\":\"process.mjs deleted (67 lines removed) — migration completeness unknown\",\"body\":\"scripts/lib/process.mjs was entirely deleted (67 lines removed). If any other module or downstream consumer still imports from process.mjs (dynamically, via string interpolation, or in untested code paths), it will throw a runtime module-not-found error. The check-imports.mjs script was modified (5 lines changed) but there is no evidence it validates runtime dynamic imports or re-exports.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":67,\"confidence\":0.68,\"recommendation\":\"Grep the entire codebase for any remaining references to 'process.mjs' or 'lib/process' in imports, dynamic imports, require, or string-based module resolution. Run the full test suite and the check-imports.mjs script to confirm no dangling references. If the module was inlined elsewhere, verify all original functionality is preserved.\"}],\"next_steps\":[\"Inspect retry.mjs implementation for idempotency guards and non-retriable status code handling\",\"Audit tracked-jobs.mjs and state.mjs for atomic write and concurrency safety patterns\",\"Review bigmodel-errors.mjs dispatch exhaustiveness with focus on fallthrough behavior\",\"Verify no remaining imports reference the deleted process.mjs module\",\"Run the full test suite to confirm no runtime import failures from the process.mjs deletion\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:32:53.941Z"
+}

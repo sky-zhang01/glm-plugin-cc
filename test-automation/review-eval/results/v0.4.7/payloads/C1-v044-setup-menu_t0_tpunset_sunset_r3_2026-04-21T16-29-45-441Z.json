@@ -1,0 +1,33 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 7909,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "approve",
+    "summary": "This commit adds an interactive menu to the /glm:setup command when already configured and renames the npm scope. Changes are limited to markdown documentation (commands/setup.md, CHANGELOG.md, release_card.md) and metadata files (package.json, .claude-plugin/*.json). No executable code, authentication logic, data mutation, or runtime behavior is modified. The change is documentation and configuration only — no material adversarial surface is exposed.",
+    "findings": [],
+    "next_steps": []
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"approve\",\n  \"summary\": \"This commit adds an interactive menu to the /glm:setup command when already configured and renames the npm scope. Changes are limited to markdown documentation (commands/setup.md, CHANGELOG.md, release_card.md) and metadata files (package.json, .claude-plugin/*.json). No executable code, authentication logic, data mutation, or runtime behavior is modified. The change is documentation and configuration only — no material adversarial surface is exposed.\",\n  \"findings\": [],\n  \"next_steps\": []\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:29:45.441Z"
+}

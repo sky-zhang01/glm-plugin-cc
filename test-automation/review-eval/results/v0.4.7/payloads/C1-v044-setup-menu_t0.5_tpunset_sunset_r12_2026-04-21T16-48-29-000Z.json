@@ -1,0 +1,59 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 12
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 2,
+    "citation_accuracy": 0.5,
+    "citation_false_file_hits": 0,
+    "latency_ms": 71618,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The npm scope rename in package.json is a breaking change for any existing consumers who installed the previous scope. The setup command adds an interactive menu for already-configured states, but without visible guardrails for partial or corrupt configuration states, this risks user confusion or config loss. Both changes ship together without a migration path documented in the diff.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change with no migration path",
+        "body": "The commit message explicitly renames the npm scope. package.json shows 4 lines changed. Any existing installation referencing the old scope (e.g., in user configs, lockfiles, CI pipelines, or other plugins depending on this one) will break on update. There is no indication of an npm alias, deprecation notice on the old package, or migration guide. The CHANGELOG adds 21 lines but whether it documents the breaking scope change and required user action is unclear. This can cause silent failures where users think they're on the latest version but are actually pinned to the old, unmaintained scope.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 10,
+        "confidence": 0.82,
+        "recommendation": "Before shipping: (1) verify the old scope package is either republished as an alias pointing to the new scope, or a deprecation notice is posted; (2) confirm the CHANGELOG explicitly documents the breaking rename and required user migration steps; (3) check marketplace.json and plugin.json references are fully consistent with the new scope."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive menu on re-setup may overwrite or discard existing configuration",
+        "body": "commands/setup.md adds an interactive menu when the system is 'already configured.' The detection of 'already configured' is a single boolean check in markdown-based instructions to Claude. If the check produces a false negative (e.g., partial config, corrupted state, version skew from a prior release), the menu may not appear and setup could silently overwrite existing valid config. If it produces a false positive, users get an unnecessary menu and may accidentally select a destructive option. The diff shows 19 lines changed but no visible safeguards for partial states or rollback.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.6,
+        "recommendation": "Review the actual menu logic: (1) define what 'already configured' means concretely and handle partial states explicitly; (2) ensure any destructive option in the menu requires explicit confirmation; (3) consider backing up existing config before any overwrite path."
+      }
+    ],
+    "next_steps": [
+      "Inspect the actual diff of package.json to confirm the old scope name and verify no stray references to the old scope remain in any file.",
+      "Read commands/setup.md in full to verify the interactive menu has explicit handling for partial, corrupt, or version-mismatched configuration states.",
+      "Confirm that CHANGELOG.md documents the scope rename as a breaking change with migration instructions for existing users.",
+      "Verify marketplace.json and plugin.json are internally consistent with the new scope name and that the marketplace listing will update correctly."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The npm scope rename in package.json is a breaking change for any existing consumers who installed the previous scope. The setup command adds an interactive menu for already-configured states, but without visible guardrails for partial or corrupt configuration states, this risks user confusion or config loss. Both changes ship together without a migration path documented in the diff.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename is a breaking change with no migration path\",\n      \"body\": \"The commit message explicitly renames the npm scope. package.json shows 4 lines changed. Any existing installation referencing the old scope (e.g., in user configs, lockfiles, CI pipelines, or other plugins depending on this one) will break on update. There is no indication of an npm alias, deprecation notice on the old package, or migration guide. The CHANGELOG adds 21 lines but whether it documents the breaking scope change and required user action is unclear. This can cause silent failures where users think they're on the latest version but are actually pinned to the old, unmaintained scope.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 10,\n      \"confidence\": 0.82,\n      \"recommendation\": \"Before shipping: (1) verify the old scope package is either republished as an alias pointing to the new scope, or a deprecation notice is posted; (2) confirm the CHANGELOG explicitly documents the breaking rename and required user migration steps; (3) check marketplace.json and plugin.json references are fully consistent with the new scope.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Interactive menu on re-setup may overwrite or discard existing configuration\",\n      \"body\": \"commands/setup.md adds an interactive menu when the system is 'already configured.' The detection of 'already configured' is a single boolean check in markdown-based instructions to Claude. If the check produces a false negative (e.g., partial config, corrupted state, version skew from a prior release), the menu may not appear and setup could silently overwrite existing valid config. If it produces a false positive, users get an unnecessary menu and may accidentally select a destructive option. The diff shows 19 lines changed but no visible safeguards for partial states or rollback.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Review the actual menu logic: (1) define what 'already configured' means concretely and handle partial states explicitly; (2) ensure any destructive option in the menu requires explicit confirmation; (3) consider backing up existing config before any overwrite path.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect the actual diff of package.json to confirm the old scope name and verify no stray references to the old scope remain in any file.\",\n    \"Read commands/setup.md in full to verify the interactive menu has explicit handling for partial, corrupt, or version-mismatched configuration states.\",\n    \"Confirm that CHANGELOG.md documents the scope rename as a breaking change with migration instructions for existing users.\",\n    \"Verify marketplace.json and plugin.json are internally consistent with the new scope name and that the marketplace listing will update correctly.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:48:29.016Z"
+}

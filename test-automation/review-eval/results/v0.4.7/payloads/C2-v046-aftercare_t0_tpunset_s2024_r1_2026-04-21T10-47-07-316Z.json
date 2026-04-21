@@ -1,0 +1,79 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 0,
+    "topP": null,
+    "seed": 2024,
+    "thinking": "on",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 57343,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The change introduces retry/backoff and BigModel error dispatch infrastructure. While well-structured overall, there are several material defects: the retry module's jittered exponential backoff has a ceiling-bias bug in its jitter calculation, the GLM client has a silent fallback path that can swallow retryable errors, and the pre-push hook runs an unvalidated CI script that can fail open. These are the kind of subtle issues that pass happy-path testing but cause degraded or silently-wrong behavior under real load.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry jitter uses Math.ceil producing biased (higher) delays",
+        "body": "In `scripts/lib/retry.mjs`, the jittered delay calculation uses `Math.ceil(Math.random() * jitterRange) + minDelay`. `Math.random()` returns [0,1), so `Math.ceil(0)` = 0, meaning the first bucket is under-represented while all other integer buckets get one hit each. This is a well-known ceiling-bias bug. More critically, the maximum delay can exceed `maxDelay` because jitter is added on top of the exponential backoff without clamping: `Math.min(baseDelay * Math.pow(2, attempt), maxDelay)` computes the base, then `jitterRange + minDelay` is added on top, potentially exceeding `maxDelay`.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.75,
+        "recommendation": "Clamp the final computed delay to maxDelay after jitter is applied: `return Math.min(jitteredDelay, maxDelay)`. Use `Math.floor` instead of `Math.ceil` for uniform integer distribution, or use the standard formula `minDelay + Math.random() * (maxDelay - minDelay)` for a simpler and correct bounded jitter."
+      },
+      {
+        "severity": "medium",
+        "title": "GLM client error classification can silently swallow retryable errors",
+        "body": "In `scripts/lib/glm-client.mjs`, the error handling path catches exceptions and classifies them via `classifyError`. If `classifyError` returns a non-retryable classification for what is actually a transient error (e.g., a new error code or an unexpected response shape), the retry logic is bypassed and the error surfaces as a permanent failure. The classification function in `bigmodel-errors.mjs` may not cover all BigModel error codes, meaning any unrecognized error code defaults to non-retryable — a silent fail-closed behavior under version skew or API changes.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 99,
+        "confidence": 0.7,
+        "recommendation": "Add an explicit 'unknown error' classification that defaults to retryable with a lower max-attempts cap, or add logging/metrics for unclassified errors so they're observable. Ensure the default case in classifyError is explicitly documented and reviewed."
+      },
+      {
+        "severity": "medium",
+        "title": "Pre-push hook runs CI check script without exit-code guard on partial failure",
+        "body": "The pre-push hook at `scripts/hooks/pre-push` invokes `scripts/ci/check-release-ready.sh`. If that script exits non-zero due to a transient issue (e.g., missing tool, network timeout fetching version info), the push is blocked. But if the script itself has a bash error (unset variable, missing command) and `set -e` is not consistently applied, the hook could exit 0 and let a bad push through. The fail-open risk is that the hook silently passes when it shouldn't.",
+        "file": "scripts/hooks/pre-push",
+        "line_start": 1,
+        "line_end": 22,
+        "confidence": 0.65,
+        "recommendation": "Add `set -euo pipefail` at the top of the pre-push hook. Ensure the invoked CI script also uses strict mode. Add an explicit `exit 1` fallback if the script is not found or fails unexpectedly."
+      },
+      {
+        "severity": "low",
+        "title": "No tests for GLM client retry integration path",
+        "body": "While `retry.mjs` and `bigmodel-errors.mjs` have dedicated test files, the GLM client's integration of retry + error classification is not tested. The unit tests cover retry logic and error classification in isolation, but the critical path — where glm-client catches an error, classifies it, and decides whether to retry — has no automated coverage. This is the path that will be exercised in production.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 99,
+        "confidence": 0.8,
+        "recommendation": "Add integration tests for glm-client that exercise the retry loop with mocked HTTP errors, covering: retryable errors that succeed on retry, non-retryable errors that fail immediately, and exhaustion of retry attempts."
+      }
+    ],
+    "next_steps": [
+      "Review the exact jitter calculation in retry.mjs and add a clamping guard to ensure delays never exceed maxDelay.",
+      "Audit the default/fallback classification in bigmodel-errors.mjs — ensure unrecognized error codes are logged and the default retry behavior is intentional (retryable vs. fail-closed).",
+      "Add `set -euo pipefail` to the pre-push hook and verify check-release-ready.sh has the same.",
+      "Add at least one integration test covering glm-client retry behavior with a mocked failing response before shipping."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The change introduces retry/backoff and BigModel error dispatch infrastructure. While well-structured overall, there are several material defects: the retry module's jittered exponential backoff has a ceiling-bias bug in its jitter calculation, the GLM client has a silent fallback path that can swallow retryable errors, and the pre-push hook runs an unvalidated CI script that can fail open. These are the kind of subtle issues that pass happy-path testing but cause degraded or silently-wrong behavior under real load.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Retry jitter uses Math.ceil producing biased (higher) delays\",\n      \"body\": \"In `scripts/lib/retry.mjs`, the jittered delay calculation uses `Math.ceil(Math.random() * jitterRange) + minDelay`. `Math.random()` returns [0,1), so `Math.ceil(0)` = 0, meaning the first bucket is under-represented while all other integer buckets get one hit each. This is a well-known ceiling-bias bug. More critically, the maximum delay can exceed `maxDelay` because jitter is added on top of the exponential backoff without clamping: `Math.min(baseDelay * Math.pow(2, attempt), maxDelay)` computes the base, then `jitterRange + minDelay` is added on top, potentially exceeding `maxDelay`.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Clamp the final computed delay to maxDelay after jitter is applied: `return Math.min(jitteredDelay, maxDelay)`. Use `Math.floor` instead of `Math.ceil` for uniform integer distribution, or use the standard formula `minDelay + Math.random() * (maxDelay - minDelay)` for a simpler and correct bounded jitter.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"GLM client error classification can silently swallow retryable errors\",\n      \"body\": \"In `scripts/lib/glm-client.mjs`, the error handling path catches exceptions and classifies them via `classifyError`. If `classifyError` returns a non-retryable classification for what is actually a transient error (e.g., a new error code or an unexpected response shape), the retry logic is bypassed and the error surfaces as a permanent failure. The classification function in `bigmodel-errors.mjs` may not cover all BigModel error codes, meaning any unrecognized error code defaults to non-retryable — a silent fail-closed behavior under version skew or API changes.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 99,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Add an explicit 'unknown error' classification that defaults to retryable with a lower max-attempts cap, or add logging/metrics for unclassified errors so they're observable. Ensure the default case in classifyError is explicitly documented and reviewed.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Pre-push hook runs CI check script without exit-code guard on partial failure\",\n      \"body\": \"The pre-push hook at `scripts/hooks/pre-push` invokes `scripts/ci/check-release-ready.sh`. If that script exits non-zero due to a transient issue (e.g., missing tool, network timeout fetching version info), the push is blocked. But if the script itself has a bash error (unset variable, missing command) and `set -e` is not consistently applied, the hook could exit 0 and let a bad push through. The fail-open risk is that the hook silently passes when it shouldn't.\",\n      \"file\": \"scripts/hooks/pre-push\",\n      \"line_start\": 1,\n      \"line_end\": 22,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Add `set -euo pipefail` at the top of the pre-push hook. Ensure the invoked CI script also uses strict mode. Add an explicit `exit 1` fallback if the script is not found or fails unexpectedly.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"No tests for GLM client retry integration path\",\n      \"body\": \"While `retry.mjs` and `bigmodel-errors.mjs` have dedicated test files, the GLM client's integration of retry + error classification is not tested. The unit tests cover retry logic and error classification in isolation, but the critical path — where glm-client catches an error, classifies it, and decides whether to retry — has no automated coverage. This is the path that will be exercised in production.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 99,\n      \"confidence\": 0.8,\n      \"recommendation\": \"Add integration tests for glm-client that exercise the retry loop with mocked HTTP errors, covering: retryable errors that succeed on retry, non-retryable errors that fail immediately, and exhaustion of retry attempts.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Review the exact jitter calculation in retry.mjs and add a clamping guard to ensure delays never exceed maxDelay.\",\n    \"Audit the default/fallback classification in bigmodel-errors.mjs — ensure unrecognized error codes are logged and the default retry behavior is intentional (retryable vs. fail-closed).\",\n    \"Add `set -euo pipefail` to the pre-push hook and verify check-release-ready.sh has the same.\",\n    \"Add at least one integration test covering glm-client retry behavior with a mocked failing response before shipping.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:47:07.350Z"
+}

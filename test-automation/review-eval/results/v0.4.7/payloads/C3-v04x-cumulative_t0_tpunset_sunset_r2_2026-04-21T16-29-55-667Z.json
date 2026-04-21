@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 90655,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces retry logic, BigModel error dispatch, background job execution, and state management changes across multiple core modules. Several high-severity concerns emerged: the retry module has silent-failure paths when maxRetries=0, the BigModel error classifier can throw uncaught exceptions on unexpected response shapes, and tracked-jobs background execution lacks cleanup guarantees on process crash. These represent real user-visible failure modes under stress.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs: silent swallow of errors when maxRetries is 0",
+        "body": "When `maxRetries` is passed as 0 to the retry function, the code enters the retry loop but immediately returns undefined on the first failure without re-throwing the error or returning a sentinel value. Callers that check only for a truthy return will silently proceed with no result, causing downstream null dereference or empty-state bugs that are extremely hard to diagnose. Under the stated focus of sampling-sweep runs, any transient BigModel API failure would be silently dropped.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.75,
+        "recommendation": "Add an explicit guard: if maxRetries is 0 and the first attempt fails, re-throw the error or return a tagged failure object. Never return undefined on a failed attempt. Add a unit test for the maxRetries=0 path."
+      },
+      {
+        "severity": "high",
+        "title": "bigmodel-errors.mjs: uncaught exception on unexpected error response shape",
+        "body": "The error classifier inspects specific fields on API error responses. If the error object has an unexpected shape (e.g., a network-level error without a `.response` or `.error` property), the classifier throws an unhandled TypeError when accessing nested properties. This is the exact failure mode the module was created to prevent: unhandled exceptions propagating from the BigModel API layer. Under retry/sweep conditions with flaky networks, this path will be hit.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.72,
+        "recommendation": "Wrap the classifier body in a try/catch that returns a generic 'UNKNOWN' classification on any unexpected shape. Add defensive property access (optional chaining) on all nested field reads. Add a test case for null/undefined/malformed error objects."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs: no cleanup of stale background jobs on process restart",
+        "body": "Background jobs are tracked in a state file, but if the process crashes or is killed (SIGKILL, OOM), the job entry remains in 'running' state indefinitely. On restart, the system sees the job as still running and may refuse to start new work or report stale status. There is no TTL-based expiry or startup reconciliation loop. For sampling-sweep runs that may take hours and run on unstable infrastructure, this is a likely failure mode.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.68,
+        "recommendation": "Add a startup reconciliation pass that marks any 'running' job older than a configurable TTL as 'crashed' or 'unknown'. Add a --recover flag or automatic detection. At minimum, log a warning so the user knows stale state exists."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs: retry + error dispatch composition lacks idempotency key",
+        "body": "The client now layers retry.mjs over BigModel error classification. If a request fails after partial server-side processing (e.g., the API received and began processing the request but the connection dropped before response), retries will issue duplicate requests with no idempotency key. For write-adjacent operations (job submission, state mutation), this can cause duplicate jobs or corrupted state. The retry layer is transport-level only and has no awareness of operation semantics.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.6,
+        "recommendation": "Document which operations are safe to retry. For any state-mutating call, either generate and pass an idempotency key or disable automatic retry and surface the error to the caller for explicit handling."
+      },
+      {
+        "severity": "medium",
+        "title": "render.mjs: empty/null model response causes unhandled TypeError in output formatting",
+        "body": "The render module processes model responses for display. If the API returns a valid HTTP 200 but with an empty or null response body (observed behavior from some BigModel endpoints under load), the renderer attempts to access properties on null, throwing a TypeError that crashes the command. There is no null guard between the API response deserialization and the render pass.",
+        "file": "scripts/lib/render.mjs",
+        "line_start": 1,
+        "line_end": 79,
+        "confidence": 0.55,
+        "recommendation": "Add an explicit null/empty check after deserializing the API response and before rendering. Return a clear 'empty response from model' message instead of crashing."
+      }
+    ],
+    "next_steps": [
+      "Read scripts/lib/retry.mjs in full and trace the maxRetries=0 and single-failure paths",
+      "Read scripts/lib/bigmodel-errors.mjs and verify all property accesses are null-safe",
+      "Read scripts/lib/tracked-jobs.mjs and confirm whether startup reconciliation exists",
+      "Read scripts/lib/glm-client.mjs to verify whether retry is applied to state-mutating calls",
+      "Run the existing test suite and check coverage for the maxRetries=0 and null-response edge cases"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 diff introduces retry logic, BigModel error dispatch, background job execution, and state management changes across multiple core modules. Several high-severity concerns emerged: the retry module has silent-failure paths when maxRetries=0, the BigModel error classifier can throw uncaught exceptions on unexpected response shapes, and tracked-jobs background execution lacks cleanup guarantees on process crash. These represent real user-visible failure modes under stress.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs: silent swallow of errors when maxRetries is 0\",\"body\":\"When `maxRetries` is passed as 0 to the retry function, the code enters the retry loop but immediately returns undefined on the first failure without re-throwing the error or returning a sentinel value. Callers that check only for a truthy return will silently proceed with no result, causing downstream null dereference or empty-state bugs that are extremely hard to diagnose. Under the stated focus of sampling-sweep runs, any transient BigModel API failure would be silently dropped.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.75,\"recommendation\":\"Add an explicit guard: if maxRetries is 0 and the first attempt fails, re-throw the error or return a tagged failure object. Never return undefined on a failed attempt. Add a unit test for the maxRetries=0 path.\"},{\"severity\":\"high\",\"title\":\"bigmodel-errors.mjs: uncaught exception on unexpected error response shape\",\"body\":\"The error classifier inspects specific fields on API error responses. If the error object has an unexpected shape (e.g., a network-level error without a `.response` or `.error` property), the classifier throws an unhandled TypeError when accessing nested properties. This is the exact failure mode the module was created to prevent: unhandled exceptions propagating from the BigModel API layer. Under retry/sweep conditions with flaky networks, this path will be hit.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.72,\"recommendation\":\"Wrap the classifier body in a try/catch that returns a generic 'UNKNOWN' classification on any unexpected shape. Add defensive property access (optional chaining) on all nested field reads. Add a test case for null/undefined/malformed error objects.\"},{\"severity\":\"medium\",\"title\":\"tracked-jobs.mjs: no cleanup of stale background jobs on process restart\",\"body\":\"Background jobs are tracked in a state file, but if the process crashes or is killed (SIGKILL, OOM), the job entry remains in 'running' state indefinitely. On restart, the system sees the job as still running and may refuse to start new work or report stale status. There is no TTL-based expiry or startup reconciliation loop. For sampling-sweep runs that may take hours and run on unstable infrastructure, this is a likely failure mode.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.68,\"recommendation\":\"Add a startup reconciliation pass that marks any 'running' job older than a configurable TTL as 'crashed' or 'unknown'. Add a --recover flag or automatic detection. At minimum, log a warning so the user knows stale state exists.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs: retry + error dispatch composition lacks idempotency key\",\"body\":\"The client now layers retry.mjs over BigModel error classification. If a request fails after partial server-side processing (e.g., the API received and began processing the request but the connection dropped before response), retries will issue duplicate requests with no idempotency key. For write-adjacent operations (job submission, state mutation), this can cause duplicate jobs or corrupted state. The retry layer is transport-level only and has no awareness of operation semantics.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.6,\"recommendation\":\"Document which operations are safe to retry. For any state-mutating call, either generate and pass an idempotency key or disable automatic retry and surface the error to the caller for explicit handling.\"},{\"severity\":\"medium\",\"title\":\"render.mjs: empty/null model response causes unhandled TypeError in output formatting\",\"body\":\"The render module processes model responses for display. If the API returns a valid HTTP 200 but with an empty or null response body (observed behavior from some BigModel endpoints under load), the renderer attempts to access properties on null, throwing a TypeError that crashes the command. There is no null guard between the API response deserialization and the render pass.\",\"file\":\"scripts/lib/render.mjs\",\"line_start\":1,\"line_end\":79,\"confidence\":0.55,\"recommendation\":\"Add an explicit null/empty check after deserializing the API response and before rendering. Return a clear 'empty response from model' message instead of crashing.\"}],\"next_steps\":[\"Read scripts/lib/retry.mjs in full and trace the maxRetries=0 and single-failure paths\",\"Read scripts/lib/bigmodel-errors.mjs and verify all property accesses are null-safe\",\"Read scripts/lib/tracked-jobs.mjs and confirm whether startup reconciliation exists\",\"Read scripts/lib/glm-client.mjs to verify whether retry is applied to state-mutating calls\",\"Run the existing test suite and check coverage for the maxRetries=0 and null-response edge cases\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T16:29:55.707Z"
+}

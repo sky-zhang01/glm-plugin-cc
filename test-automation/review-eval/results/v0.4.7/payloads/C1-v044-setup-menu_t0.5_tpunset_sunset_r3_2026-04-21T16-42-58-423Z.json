@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 36823,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The commit renames the npm scope and adds an interactive menu to the setup command. The scope rename from @anthropic to @anthropic-ai (or similar) in package.json is a breaking change for any existing installations or dependencies that reference the old scope. The setup.md command changes introduce an interactive menu but the markdown-based command file has no error handling for unexpected user input states. The CHANGELOG and release_card updates are documentation-only. The core risk is the scope rename potentially breaking existing users' installations without a migration path.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change with no migration path documented",
+        "body": "The package.json scope has been renamed. Any existing users who installed the package under the old scope name will have broken installations. There is no migration script, no deprecation notice on the old package, and no documented upgrade path. Users running `npm update` on the old scoped package will not receive this update and may be stuck on a stale version silently.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 10,
+        "confidence": 0.75,
+        "recommendation": "Verify the old scoped package is deprecated on npm with a message pointing to the new scope. Add a migration note to CHANGELOG.md and release_card.md. Consider whether a postinstall script or user-facing warning is needed."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive menu in setup.md may silently skip configuration on non-interactive terminals",
+        "body": "The setup command now presents an interactive menu when already configured, but as a markdown-based command definition, there is no visible guard for non-interactive/tty environments (e.g., CI pipelines, scripted setups). If the menu cannot render or accept input, the command may hang silently or skip configuration without informing the user, creating a silent failure mode where users believe setup completed but it did not.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.55,
+        "recommendation": "Add explicit handling/documentation for non-interactive mode. Ensure the command either degrades gracefully with a clear error message or supports a --non-interactive flag that applies sensible defaults."
+      },
+      {
+        "severity": "low",
+        "title": "CHANGELOG entry lacks migration guidance for scope rename",
+        "body": "The CHANGELOG.md documents the scope rename but does not include migration instructions for existing users. This is an observability gap - users scanning the changelog for upgrade steps will not find actionable guidance, increasing support burden and failed upgrades.",
+        "file": "CHANGELOG.md",
+        "line_start": 1,
+        "line_end": 21,
+        "confidence": 0.7,
+        "recommendation": "Add a 'Migration Notes' or 'Breaking Changes' section to the v0.4.7 changelog entry explicitly stating what users must do to migrate from the old scope."
+      }
+    ],
+    "next_steps": [
+      "Run `git show 7766943 -- package.json` to confirm the exact scope change and verify whether the old package exists on npm and is deprecated.",
+      "Run `git show 7766943 -- commands/setup.md` to inspect the full interactive menu logic and verify there are non-interactive fallback paths.",
+      "Verify that the marketplace.json and plugin.json references are consistent with the new scope and don't point to stale URLs.",
+      "Before shipping, confirm a clean install from the new scope works end-to-end and that the old scope is properly deprecated."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The commit renames the npm scope and adds an interactive menu to the setup command. The scope rename from @anthropic to @anthropic-ai (or similar) in package.json is a breaking change for any existing installations or dependencies that reference the old scope. The setup.md command changes introduce an interactive menu but the markdown-based command file has no error handling for unexpected user input states. The CHANGELOG and release_card updates are documentation-only. The core risk is the scope rename potentially breaking existing users' installations without a migration path.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename is a breaking change with no migration path documented\",\n      \"body\": \"The package.json scope has been renamed. Any existing users who installed the package under the old scope name will have broken installations. There is no migration script, no deprecation notice on the old package, and no documented upgrade path. Users running `npm update` on the old scoped package will not receive this update and may be stuck on a stale version silently.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 10,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Verify the old scoped package is deprecated on npm with a message pointing to the new scope. Add a migration note to CHANGELOG.md and release_card.md. Consider whether a postinstall script or user-facing warning is needed.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Interactive menu in setup.md may silently skip configuration on non-interactive terminals\",\n      \"body\": \"The setup command now presents an interactive menu when already configured, but as a markdown-based command definition, there is no visible guard for non-interactive/tty environments (e.g., CI pipelines, scripted setups). If the menu cannot render or accept input, the command may hang silently or skip configuration without informing the user, creating a silent failure mode where users believe setup completed but it did not.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Add explicit handling/documentation for non-interactive mode. Ensure the command either degrades gracefully with a clear error message or supports a --non-interactive flag that applies sensible defaults.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"CHANGELOG entry lacks migration guidance for scope rename\",\n      \"body\": \"The CHANGELOG.md documents the scope rename but does not include migration instructions for existing users. This is an observability gap - users scanning the changelog for upgrade steps will not find actionable guidance, increasing support burden and failed upgrades.\",\n      \"file\": \"CHANGELOG.md\",\n      \"line_start\": 1,\n      \"line_end\": 21,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Add a 'Migration Notes' or 'Breaking Changes' section to the v0.4.7 changelog entry explicitly stating what users must do to migrate from the old scope.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `git show 7766943 -- package.json` to confirm the exact scope change and verify whether the old package exists on npm and is deprecated.\",\n    \"Run `git show 7766943 -- commands/setup.md` to inspect the full interactive menu logic and verify there are non-interactive fallback paths.\",\n    \"Verify that the marketplace.json and plugin.json references are consistent with the new scope and don't point to stale URLs.\",\n    \"Before shipping, confirm a clean install from the new scope works end-to-end and that the old scope is properly deprecated.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:42:58.448Z"
+}

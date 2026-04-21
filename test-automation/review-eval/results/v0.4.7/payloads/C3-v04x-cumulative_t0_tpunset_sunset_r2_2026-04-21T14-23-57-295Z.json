@@ -1,0 +1,101 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 6,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 91547,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces significant new surface area (retry, bigmodel-errors, job tracking, state management) with several material defects: a retry helper that can silently swallow user data on malformed retry-after headers, error-classification logic with uncovered edge cases around network-level failures, and tracked-jobs/state modules that have TOCTOU races on concurrent access to a shared JSON file. These are the kind of silent-failure bugs that pass UAT but bite in production under stress.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs parses Retry-After header without validation — NaN delay allows instant re-request storms or infinite loop on non-retryable errors",
+        "body": "The retry module reads the Retry-After header and uses it directly as a delay. If the header contains a non-numeric value (e.g. a malformed HTTP date that fails Date.parse), the computed delay becomes NaN. setTimeout(NaN) fires immediately (treated as 0), causing an instant retry loop against the API. Combined with a max-attempts guard that only counts iterations, this can hammer the endpoint dozens of times per second until maxAttempts is exhausted — or worse, if a non-retryable error is misclassified, the loop terminates silently having never surfaced the original error to the caller. The tests cover numeric and missing headers but not the malformed-string case.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 50,
+        "confidence": 0.82,
+        "recommendation": "Validate the parsed delay: if it is NaN or not a finite positive number, fall back to the exponential backoff default. Add a floor (e.g. 1000ms) to prevent sub-second retries even on valid-but-tiny values."
+      },
+      {
+        "severity": "high",
+        "title": "Tracked jobs use non-atomic file read-modify-write — concurrent glm-client processes corrupt state.json",
+        "body": "tracked-jobs.mjs and state.mjs both read a shared JSON file, parse it, mutate in memory, then write back. If two concurrent `glm` invocations (e.g. two terminal tabs or a background + foreground run) read the file before either writes, the second write overwrites the first's mutations — silently losing tracked jobs or state updates. There is no file locking, no atomic rename, and no merge-on-conflict logic. The test suite only tests single-process scenarios.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.88,
+        "recommendation": "Write to a temp file in the same directory then atomically rename. For stronger guarantees, use lockfile-based mutual exclusion or adopt an append-only log format with compaction. At minimum, document that concurrent invocations are unsupported."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs classify() can return undefined for unrecognized status codes — caller assumes a valid classification object",
+        "body": "The error classifier maps known HTTP status codes to structured objects with retry/backoff hints. If a new or uncommon status code arrives (e.g. 408, 418, 429 without Retry-After, 504 from a downstream proxy that wraps differently), the function returns undefined. The caller in glm-client.mjs destructures properties from the return value without a null guard, producing a TypeError that masks the original API error entirely. The user sees 'Cannot read properties of undefined' instead of the actual failure reason.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 50,
+        "confidence": 0.78,
+        "recommendation": "Add a default/fallback classification for any unrecognised status code that returns a non-retryable error with the raw status preserved. Add a guard at the call site so that even if classification returns undefined, the original error propagates with full context."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs has no request timeout — hung TCP connections block the caller indefinitely",
+        "body": "The HTTP client in glm-client.mjs creates requests without setting an overall timeout or per-socket idle timeout. If the BigModel API accepts the connection but never sends a response (TCP half-open, server-side goroutine leak, overloaded load balancer), the Promise never settles. The retry layer cannot engage because no error is emitted. The calling command (review, rescue, etc.) hangs silently with no output and no indication of which request is stuck. The v0.4.6 changelog mentions auto-retry but there is no corresponding timeout guard to ensure retries actually trigger.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 60,
+        "confidence": 0.85,
+        "recommendation": "Add an AbortController with a configurable timeout (default e.g. 120s) to every fetch call. Ensure the timeout error is classified as retryable by bigmodel-errors so the retry layer can engage."
+      },
+      {
+        "severity": "medium",
+        "title": "process.mjs deleted but still referenced — potential runtime import error for any code path that lazy-imports it",
+        "body": "The diff stat shows scripts/lib/process.mjs was deleted (67 lines removed). If any code path — including the companion entry point, hooks, or CI scripts — still has a dynamic or static import for this module, it will throw ERR_MODULE_NOT_FOUND at runtime. Static imports would fail immediately at load time, but dynamic imports (common in plugin/command dispatch) would fail only when the specific code path is exercised, making this a latent bug invisible in unit tests that don't cover that path.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.72,
+        "recommendation": "Grep the entire codebase (including markdown command files, CI scripts, and hook definitions) for any remaining reference to process.mjs. If the module was intentionally removed, verify no import paths resolve to it. If it was replaced, confirm the replacement is wired in everywhere."
+      },
+      {
+        "severity": "low",
+        "title": "configure-gitea-protection.sh runs external commands without validating prereqs — silent partial application on missing tools",
+        "body": "The setup script configures Gitea branch protection via curl and jq. If either tool is missing, curl fails silently (returning non-zero but the script continues with set -e potentially not covering subshells) or jq fails to parse, and the script may report success having only applied a subset of protections. There is no preflight check for required tools and no verification step after API calls.",
+        "file": "scripts/setup/configure-gitea-protection.sh",
+        "line_start": 1,
+        "line_end": 30,
+        "confidence": 0.65,
+        "recommendation": "Add a preflight check for curl and jq at the top of the script with clear error messages. After each API call, verify the response status code and body contain the expected values before continuing."
+      }
+    ],
+    "next_steps": [
+      "Inspect retry.mjs classifyRetryAfter / delay calculation for NaN path with malformed header values",
+      "Audit tracked-jobs.mjs and state.mjs for atomicity guarantees under concurrent writes",
+      "Add default classification case in bigmodel-errors.mjs for unrecognized status codes and guard at call site",
+      "Add AbortController timeout to all fetch calls in glm-client.mjs",
+      "Grep codebase for remaining references to deleted process.mjs",
+      "Verify configure-gitea-protection.sh has tool prereq checks and API response validation"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 cumulative diff introduces significant new surface area (retry, bigmodel-errors, job tracking, state management) with several material defects: a retry helper that can silently swallow user data on malformed retry-after headers, error-classification logic with uncovered edge cases around network-level failures, and tracked-jobs/state modules that have TOCTOU races on concurrent access to a shared JSON file. These are the kind of silent-failure bugs that pass UAT but bite in production under stress.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs parses Retry-After header without validation — NaN delay allows instant re-request storms or infinite loop on non-retryable errors\",\"body\":\"The retry module reads the Retry-After header and uses it directly as a delay. If the header contains a non-numeric value (e.g. a malformed HTTP date that fails Date.parse), the computed delay becomes NaN. setTimeout(NaN) fires immediately (treated as 0), causing an instant retry loop against the API. Combined with a max-attempts guard that only counts iterations, this can hammer the endpoint dozens of times per second until maxAttempts is exhausted — or worse, if a non-retryable error is misclassified, the loop terminates silently having never surfaced the original error to the caller. The tests cover numeric and missing headers but not the malformed-string case.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":50,\"confidence\":0.82,\"recommendation\":\"Validate the parsed delay: if it is NaN or not a finite positive number, fall back to the exponential backoff default. Add a floor (e.g. 1000ms) to prevent sub-second retries even on valid-but-tiny values.\"},{\"severity\":\"high\",\"title\":\"Tracked jobs use non-atomic file read-modify-write — concurrent glm-client processes corrupt state.json\",\"body\":\"tracked-jobs.mjs and state.mjs both read a shared JSON file, parse it, mutate in memory, then write back. If two concurrent `glm` invocations (e.g. two terminal tabs or a background + foreground run) read the file before either writes, the second write overwrites the first's mutations — silently losing tracked jobs or state updates. There is no file locking, no atomic rename, and no merge-on-conflict logic. The test suite only tests single-process scenarios.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.88,\"recommendation\":\"Write to a temp file in the same directory then atomically rename. For stronger guarantees, use lockfile-based mutual exclusion or adopt an append-only log format with compaction. At minimum, document that concurrent invocations are unsupported.\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors.mjs classify() can return undefined for unrecognized status codes — caller assumes a valid classification object\",\"body\":\"The error classifier maps known HTTP status codes to structured objects with retry/backoff hints. If a new or uncommon status code arrives (e.g. 408, 418, 429 without Retry-After, 504 from a downstream proxy that wraps differently), the function returns undefined. The caller in glm-client.mjs destructures properties from the return value without a null guard, producing a TypeError that masks the original API error entirely. The user sees 'Cannot read properties of undefined' instead of the actual failure reason.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":50,\"confidence\":0.78,\"recommendation\":\"Add a default/fallback classification for any unrecognised status code that returns a non-retryable error with the raw status preserved. Add a guard at the call site so that even if classification returns undefined, the original error propagates with full context.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs has no request timeout — hung TCP connections block the caller indefinitely\",\"body\":\"The HTTP client in glm-client.mjs creates requests without setting an overall timeout or per-socket idle timeout. If the BigModel API accepts the connection but never sends a response (TCP half-open, server-side goroutine leak, overloaded load balancer), the Promise never settles. The retry layer cannot engage because no error is emitted. The calling command (review, rescue, etc.) hangs silently with no output and no indication of which request is stuck. The v0.4.6 changelog mentions auto-retry but there is no corresponding timeout guard to ensure retries actually trigger.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":60,\"confidence\":0.85,\"recommendation\":\"Add an AbortController with a configurable timeout (default e.g. 120s) to every fetch call. Ensure the timeout error is classified as retryable by bigmodel-errors so the retry layer can engage.\"},{\"severity\":\"medium\",\"title\":\"process.mjs deleted but still referenced — potential runtime import error for any code path that lazy-imports it\",\"body\":\"The diff stat shows scripts/lib/process.mjs was deleted (67 lines removed). If any code path — including the companion entry point, hooks, or CI scripts — still has a dynamic or static import for this module, it will throw ERR_MODULE_NOT_FOUND at runtime. Static imports would fail immediately at load time, but dynamic imports (common in plugin/command dispatch) would fail only when the specific code path is exercised, making this a latent bug invisible in unit tests that don't cover that path.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":1,\"confidence\":0.72,\"recommendation\":\"Grep the entire codebase (including markdown command files, CI scripts, and hook definitions) for any remaining reference to process.mjs. If the module was intentionally removed, verify no import paths resolve to it. If it was replaced, confirm the replacement is wired in everywhere.\"},{\"severity\":\"low\",\"title\":\"configure-gitea-protection.sh runs external commands without validating prereqs — silent partial application on missing tools\",\"body\":\"The setup script configures Gitea branch protection via curl and jq. If either tool is missing, curl fails silently (returning non-zero but the script continues with set -e potentially not covering subshells) or jq fails to parse, and the script may report success having only applied a subset of protections. There is no preflight check for required tools and no verification step after API calls.\",\"file\":\"scripts/setup/configure-gitea-protection.sh\",\"line_start\":1,\"line_end\":30,\"confidence\":0.65,\"recommendation\":\"Add a preflight check for curl and jq at the top of the script with clear error messages. After each API call, verify the response status code and body contain the expected values before continuing.\"}],\"next_steps\":[\"Inspect retry.mjs classifyRetryAfter / delay calculation for NaN path with malformed header values\",\"Audit tracked-jobs.mjs and state.mjs for atomicity guarantees under concurrent writes\",\"Add default classification case in bigmodel-errors.mjs for unrecognized status codes and guard at call site\",\"Add AbortController timeout to all fetch calls in glm-client.mjs\",\"Grep codebase for remaining references to deleted process.mjs\",\"Verify configure-gitea-protection.sh has tool prereq checks and API response validation\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:23:57.341Z"
+}

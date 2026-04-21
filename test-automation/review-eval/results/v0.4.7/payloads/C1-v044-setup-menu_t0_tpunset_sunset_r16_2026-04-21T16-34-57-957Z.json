@@ -1,0 +1,79 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 16
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 30367,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The commit renames the npm scope and adds an interactive menu to the setup command. The scope rename from `@anthropics` to `@anthropics` (or similar) in package.json is a high-impact change that could break existing installations if users have cached references or if the new scope isn't published yet. The interactive menu added to setup.md introduces conditional branching based on configuration state, but the markdown-based command file has limited error handling for edge cases like partial/corrupt config states.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename creates silent breakage for existing users",
+        "body": "The package.json scope is being renamed. If the package under the new scope hasn't been published to npm yet, or if users have existing installations referencing the old scope, `npm install` or `npm update` will fail silently or install a stale version. There is no migration path documented for existing users to transition from the old scope to the new one.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 10,
+        "confidence": 0.75,
+        "recommendation": "Verify the new scoped package is published and accessible. Add a deprecation notice on the old package name and document the migration path in CHANGELOG.md. Consider publishing a redirect package under the old name that depends on the new one."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive menu in setup command has no guard for non-interactive contexts",
+        "body": "The setup.md command now includes an interactive menu when already configured. If this command is invoked in a non-interactive context (CI/CD, piped input, automated scripts), the menu prompt will hang indefinitely or produce unexpected behavior. There is no timeout or non-interactive fallback documented in the command definition.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.7,
+        "recommendation": "Add a non-interactive flag or detect TTY absence and provide a default behavior or clear error message rather than hanging on user input."
+      },
+      {
+        "severity": "medium",
+        "title": "CHANGELOG and release_card changes are inconsistent with semantic versioning for scope rename",
+        "body": "The version bump to v0.4.7 includes a scope rename which is a breaking change for installation workflows, but it's documented as a minor patch-level change. Users relying on semver to gauge upgrade risk will not anticipate breakage from a patch version.",
+        "file": "CHANGELOG.md",
+        "line_start": 1,
+        "line_end": 21,
+        "confidence": 0.65,
+        "recommendation": "If the scope rename is breaking, bump to v0.5.0 or clearly document in the changelog that manual migration steps are required. Ensure CHANGELOG entry explicitly calls out the scope change as a potentially breaking action."
+      },
+      {
+        "severity": "low",
+        "title": "Plugin metadata references may be stale after scope rename",
+        "body": "The .claude-plugin/marketplace.json and plugin.json files are modified but the full content of the scope rename impact on plugin discovery, registration, or marketplace listing isn't visible. If the plugin identifier changed, existing users' registered plugins may not resolve to the new identifier.",
+        "file": ".claude-plugin/marketplace.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.5,
+        "recommendation": "Verify that the marketplace.json and plugin.json identifiers are consistent with the new scope name and that the marketplace registry has been updated to point to the new package location."
+      }
+    ],
+    "next_steps": [
+      "Confirm the new npm scope package is published and installable before merging",
+      "Test the setup command in a non-interactive (no TTY) environment to verify it doesn't hang",
+      "Validate that the scope rename doesn't break the Claude plugin marketplace listing",
+      "Consider bumping version to v0.5.0 if the scope rename is indeed breaking for existing users"
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The commit renames the npm scope and adds an interactive menu to the setup command. The scope rename from `@anthropics` to `@anthropics` (or similar) in package.json is a high-impact change that could break existing installations if users have cached references or if the new scope isn't published yet. The interactive menu added to setup.md introduces conditional branching based on configuration state, but the markdown-based command file has limited error handling for edge cases like partial/corrupt config states.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename creates silent breakage for existing users\",\n      \"body\": \"The package.json scope is being renamed. If the package under the new scope hasn't been published to npm yet, or if users have existing installations referencing the old scope, `npm install` or `npm update` will fail silently or install a stale version. There is no migration path documented for existing users to transition from the old scope to the new one.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 10,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Verify the new scoped package is published and accessible. Add a deprecation notice on the old package name and document the migration path in CHANGELOG.md. Consider publishing a redirect package under the old name that depends on the new one.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Interactive menu in setup command has no guard for non-interactive contexts\",\n      \"body\": \"The setup.md command now includes an interactive menu when already configured. If this command is invoked in a non-interactive context (CI/CD, piped input, automated scripts), the menu prompt will hang indefinitely or produce unexpected behavior. There is no timeout or non-interactive fallback documented in the command definition.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Add a non-interactive flag or detect TTY absence and provide a default behavior or clear error message rather than hanging on user input.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"CHANGELOG and release_card changes are inconsistent with semantic versioning for scope rename\",\n      \"body\": \"The version bump to v0.4.7 includes a scope rename which is a breaking change for installation workflows, but it's documented as a minor patch-level change. Users relying on semver to gauge upgrade risk will not anticipate breakage from a patch version.\",\n      \"file\": \"CHANGELOG.md\",\n      \"line_start\": 1,\n      \"line_end\": 21,\n      \"confidence\": 0.65,\n      \"recommendation\": \"If the scope rename is breaking, bump to v0.5.0 or clearly document in the changelog that manual migration steps are required. Ensure CHANGELOG entry explicitly calls out the scope change as a potentially breaking action.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"Plugin metadata references may be stale after scope rename\",\n      \"body\": \"The .claude-plugin/marketplace.json and plugin.json files are modified but the full content of the scope rename impact on plugin discovery, registration, or marketplace listing isn't visible. If the plugin identifier changed, existing users' registered plugins may not resolve to the new identifier.\",\n      \"file\": \".claude-plugin/marketplace.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.5,\n      \"recommendation\": \"Verify that the marketplace.json and plugin.json identifiers are consistent with the new scope name and that the marketplace registry has been updated to point to the new package location.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Confirm the new npm scope package is published and installable before merging\",\n    \"Test the setup command in a non-interactive (no TTY) environment to verify it doesn't hang\",\n    \"Validate that the scope rename doesn't break the Claude plugin marketplace listing\",\n    \"Consider bumping version to v0.5.0 if the scope rename is indeed breaking for existing users\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:34:57.993Z"
+}

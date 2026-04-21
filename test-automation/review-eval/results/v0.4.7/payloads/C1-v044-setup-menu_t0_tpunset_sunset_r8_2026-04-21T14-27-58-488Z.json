@@ -1,0 +1,58 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 8
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 2,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 36013,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The commit adds an interactive menu to the setup command and renames the npm scope. The changes are primarily configuration/marketing files and a markdown command definition. The risk profile is low since no executable code or business logic is modified — only declarative configs and documentation. However, the npm scope rename and plugin ID changes carry a compatibility risk for existing installations.",
+    "findings": [
+      {
+        "severity": "medium",
+        "title": "npm scope rename may break existing installations or references",
+        "body": "The package name and plugin references were renamed from one scope to another (package.json, plugin.json, marketplace.json). Existing users who installed the previous scope will have stale references. If the old scoped package isn't deprecated or aliased, users on the previous version won't receive updates and may encounter conflicts or confusion when the new-scoped package is published. There is no evidence of a migration path, deprecation notice, or backward-compatible alias.",
+        "file": "package.json",
+        "line_start": 2,
+        "line_end": 5,
+        "confidence": 0.7,
+        "recommendation": "Verify that the old scoped package is either deprecated on npm with a pointer to the new name, or that a postinstall/README migration note exists. If this is a fresh rename without a deprecation strategy, add one before shipping."
+      },
+      {
+        "severity": "low",
+        "title": "Interactive setup menu added to markdown but no validation of menu path completeness",
+        "body": "commands/setup.md introduces an interactive menu flow for when the tool is already configured. The menu is defined in markdown and depends on the runtime interpreter handling conditional branching. If any menu option references a command or sub-flow that doesn't exist or is misconfigured, the user hits a silent dead-end with no error recovery documented. The diff shows the menu structure but no error handling guidance within the markdown.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.5,
+        "recommendation": "Add explicit fallback/error guidance in the setup.md for cases where a menu selection cannot proceed (e.g., missing dependencies, partial state). At minimum, include a 'cancel' or 'back' option in the menu."
+      }
+    ],
+    "next_steps": [
+      "Confirm the old npm scope package is deprecated or redirected before publishing under the new name.",
+      "Smoke-test the interactive setup menu on a fresh install AND an already-configured install to verify all branches resolve.",
+      "Verify that marketplace.json and plugin.json identifier changes don't break Claude Plugin registry lookups for existing users."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The commit adds an interactive menu to the setup command and renames the npm scope. The changes are primarily configuration/marketing files and a markdown command definition. The risk profile is low since no executable code or business logic is modified — only declarative configs and documentation. However, the npm scope rename and plugin ID changes carry a compatibility risk for existing installations.\",\n  \"findings\": [\n    {\n      \"severity\": \"medium\",\n      \"title\": \"npm scope rename may break existing installations or references\",\n      \"body\": \"The package name and plugin references were renamed from one scope to another (package.json, plugin.json, marketplace.json). Existing users who installed the previous scope will have stale references. If the old scoped package isn't deprecated or aliased, users on the previous version won't receive updates and may encounter conflicts or confusion when the new-scoped package is published. There is no evidence of a migration path, deprecation notice, or backward-compatible alias.\",\n      \"file\": \"package.json\",\n      \"line_start\": 2,\n      \"line_end\": 5,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Verify that the old scoped package is either deprecated on npm with a pointer to the new name, or that a postinstall/README migration note exists. If this is a fresh rename without a deprecation strategy, add one before shipping.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"Interactive setup menu added to markdown but no validation of menu path completeness\",\n      \"body\": \"commands/setup.md introduces an interactive menu flow for when the tool is already configured. The menu is defined in markdown and depends on the runtime interpreter handling conditional branching. If any menu option references a command or sub-flow that doesn't exist or is misconfigured, the user hits a silent dead-end with no error recovery documented. The diff shows the menu structure but no error handling guidance within the markdown.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.5,\n      \"recommendation\": \"Add explicit fallback/error guidance in the setup.md for cases where a menu selection cannot proceed (e.g., missing dependencies, partial state). At minimum, include a 'cancel' or 'back' option in the menu.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Confirm the old npm scope package is deprecated or redirected before publishing under the new name.\",\n    \"Smoke-test the interactive setup menu on a fresh install AND an already-configured install to verify all branches resolve.\",\n    \"Verify that marketplace.json and plugin.json identifier changes don't break Claude Plugin registry lookups for existing users.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:27:58.503Z"
+}

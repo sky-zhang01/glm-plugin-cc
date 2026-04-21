@@ -1,0 +1,101 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 6,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 60054,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 hardening aftercare adds retry/backoff logic and BigModel error dispatch without adequate protection against several failure modes. The retry module has parameter validation gaps, the error classifier can return undefined classifications leading to silent misrouting, and the GLM client integration silently swallows context on retries. These are material risks for a library that wraps an LLM API client.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs accepts nonsensical maxAttempts without guard, risking infinite or zero-retry silent failures",
+        "body": "The retry() function does not validate that `maxAttempts` is a positive integer >= 1. If a caller passes `maxAttempts: 0`, the for-loop never executes and the function returns `undefined` silently — no error thrown, no log emitted. If a caller passes a negative or non-integer value, behavior is similarly undefined. In an LLM client wrapper, this means a misconfiguration could cause every API call to silently return undefined with zero indication, corrupting downstream data flows. The function also lacks an upper bound guard, so `maxAttempts: Infinity` would retry forever.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 60,
+        "confidence": 0.85,
+        "recommendation": "Add input validation at the top of retry(): throw if maxAttempts is not a positive finite integer >= 1, and consider capping at a reasonable upper bound (e.g., 20). Add a guard for non-finite maxAttempts."
+      },
+      {
+        "severity": "high",
+        "title": "classifyError can return undefined, causing silent fallthrough in retry decision logic",
+        "body": "The error classification chain in bigmodel-errors.mjs uses a series of `if` checks against error patterns. If none of the patterns match (e.g., an unexpected error shape, a new API error code, or a malformed response), `classifyError` returns `undefined`. Callers that check `result.retryable` without first checking for a null/undefined classification will get a silent false-y value, meaning unclassified errors default to non-retryable — even if they are transient. This hides real failures from observability and could cause data loss in pipelines that assume retries cover transient faults.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 80,
+        "confidence": 0.82,
+        "recommendation": "Add a final catch-all classification that returns a known 'unknown' category with explicit `retryable: false` but with a loud warning log. Ensure classifyError never returns undefined."
+      },
+      {
+        "severity": "medium",
+        "title": "GLM client retry integration may silently drop conversation context on partial failures",
+        "body": "The glm-client.mjs integrates retry around the API call but if the API returns a partial or malformed response (e.g., truncated JSON due to token limit or network interruption), the retry logic sees a successful HTTP response and does not retry. However, the response parsing could still fail or produce incomplete data. There is no validation that the parsed response contains expected fields before returning to the caller. This is a silent data corruption path — the caller gets a valid-looking but incomplete result.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 99,
+        "confidence": 0.72,
+        "recommendation": "Add response shape validation after parsing. Verify required fields exist and are non-empty before returning. If validation fails, either retry (if the response looks truncated) or throw a classified error."
+      },
+      {
+        "severity": "medium",
+        "title": "pre-push hook exits 0 on failure to find script, silently bypassing CI checks",
+        "body": "The pre-push hook attempts to run check-release-ready.sh but if the script is not found or not executable, the hook silently exits 0 (success). This means a misconfigured clone or CI environment where the script is missing will pass the push hook without actually running checks, defeating the safety gate. A missing safety script should be a blocking failure, not a silent pass.",
+        "file": "scripts/hooks/pre-push",
+        "line_start": 1,
+        "line_end": 22,
+        "confidence": 0.88,
+        "recommendation": "If the script file does not exist or is not executable, exit with a non-zero code and print an error. Do not silently pass."
+      },
+      {
+        "severity": "medium",
+        "title": "check-release-ready.sh lacks set -euo pipefail, masking command failures",
+        "body": "The release readiness check script does not set strict error handling (`set -euo pipefail`). If any individual check command fails mid-script, execution continues to the next check, and the script may exit 0 even though critical checks failed. In a CI gate, this means a broken release could be certified as ready.",
+        "file": "scripts/ci/check-release-ready.sh",
+        "line_start": 1,
+        "line_end": 84,
+        "confidence": 0.9,
+        "recommendation": "Add `set -euo pipefail` at the top of the script, or explicitly check the exit code of each command and exit non-zero on failure."
+      },
+      {
+        "severity": "low",
+        "title": "Retry backoff uses Math.random() without jitter bounds documentation, risking thundering herd",
+        "body": "The backoff calculation uses Math.random() for jitter but the jitter range and strategy (full jitter, equal jitter, decorrelated) is not documented and the implementation is not tested against edge cases where Math.random() returns 0 or 1. While not immediately dangerous, in high-concurrency scenarios (many automated clients retrying simultaneously), a poorly tuned jitter can cause request spikes. The test coverage does not validate backoff timing bounds under extreme random values.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 60,
+        "confidence": 0.55,
+        "recommendation": "Document the jitter strategy, add a guard ensuring the jittered delay stays within [baseDelay, maxDelay], and add a test that mocks Math.random to 0 and 1 to verify bounds."
+      }
+    ],
+    "next_steps": [
+      "Add input validation to retry() for maxAttempts and other parameters",
+      "Ensure classifyError has a catch-all that never returns undefined",
+      "Add response shape validation in glm-client.mjs after parsing",
+      "Fix pre-push hook to fail loudly if the script is missing",
+      "Add set -euo pipefail to check-release-ready.sh",
+      "Run the existing test suite to confirm retry edge cases are covered"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.6 hardening aftercare adds retry/backoff logic and BigModel error dispatch without adequate protection against several failure modes. The retry module has parameter validation gaps, the error classifier can return undefined classifications leading to silent misrouting, and the GLM client integration silently swallows context on retries. These are material risks for a library that wraps an LLM API client.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs accepts nonsensical maxAttempts without guard, risking infinite or zero-retry silent failures\",\"body\":\"The retry() function does not validate that `maxAttempts` is a positive integer >= 1. If a caller passes `maxAttempts: 0`, the for-loop never executes and the function returns `undefined` silently — no error thrown, no log emitted. If a caller passes a negative or non-integer value, behavior is similarly undefined. In an LLM client wrapper, this means a misconfiguration could cause every API call to silently return undefined with zero indication, corrupting downstream data flows. The function also lacks an upper bound guard, so `maxAttempts: Infinity` would retry forever.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":60,\"confidence\":0.85,\"recommendation\":\"Add input validation at the top of retry(): throw if maxAttempts is not a positive finite integer >= 1, and consider capping at a reasonable upper bound (e.g., 20). Add a guard for non-finite maxAttempts.\"},{\"severity\":\"high\",\"title\":\"classifyError can return undefined, causing silent fallthrough in retry decision logic\",\"body\":\"The error classification chain in bigmodel-errors.mjs uses a series of `if` checks against error patterns. If none of the patterns match (e.g., an unexpected error shape, a new API error code, or a malformed response), `classifyError` returns `undefined`. Callers that check `result.retryable` without first checking for a null/undefined classification will get a silent false-y value, meaning unclassified errors default to non-retryable — even if they are transient. This hides real failures from observability and could cause data loss in pipelines that assume retries cover transient faults.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":80,\"confidence\":0.82,\"recommendation\":\"Add a final catch-all classification that returns a known 'unknown' category with explicit `retryable: false` but with a loud warning log. Ensure classifyError never returns undefined.\"},{\"severity\":\"medium\",\"title\":\"GLM client retry integration may silently drop conversation context on partial failures\",\"body\":\"The glm-client.mjs integrates retry around the API call but if the API returns a partial or malformed response (e.g., truncated JSON due to token limit or network interruption), the retry logic sees a successful HTTP response and does not retry. However, the response parsing could still fail or produce incomplete data. There is no validation that the parsed response contains expected fields before returning to the caller. This is a silent data corruption path — the caller gets a valid-looking but incomplete result.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":99,\"confidence\":0.72,\"recommendation\":\"Add response shape validation after parsing. Verify required fields exist and are non-empty before returning. If validation fails, either retry (if the response looks truncated) or throw a classified error.\"},{\"severity\":\"medium\",\"title\":\"pre-push hook exits 0 on failure to find script, silently bypassing CI checks\",\"body\":\"The pre-push hook attempts to run check-release-ready.sh but if the script is not found or not executable, the hook silently exits 0 (success). This means a misconfigured clone or CI environment where the script is missing will pass the push hook without actually running checks, defeating the safety gate. A missing safety script should be a blocking failure, not a silent pass.\",\"file\":\"scripts/hooks/pre-push\",\"line_start\":1,\"line_end\":22,\"confidence\":0.88,\"recommendation\":\"If the script file does not exist or is not executable, exit with a non-zero code and print an error. Do not silently pass.\"},{\"severity\":\"medium\",\"title\":\"check-release-ready.sh lacks set -euo pipefail, masking command failures\",\"body\":\"The release readiness check script does not set strict error handling (`set -euo pipefail`). If any individual check command fails mid-script, execution continues to the next check, and the script may exit 0 even though critical checks failed. In a CI gate, this means a broken release could be certified as ready.\",\"file\":\"scripts/ci/check-release-ready.sh\",\"line_start\":1,\"line_end\":84,\"confidence\":0.9,\"recommendation\":\"Add `set -euo pipefail` at the top of the script, or explicitly check the exit code of each command and exit non-zero on failure.\"},{\"severity\":\"low\",\"title\":\"Retry backoff uses Math.random() without jitter bounds documentation, risking thundering herd\",\"body\":\"The backoff calculation uses Math.random() for jitter but the jitter range and strategy (full jitter, equal jitter, decorrelated) is not documented and the implementation is not tested against edge cases where Math.random() returns 0 or 1. While not immediately dangerous, in high-concurrency scenarios (many automated clients retrying simultaneously), a poorly tuned jitter can cause request spikes. The test coverage does not validate backoff timing bounds under extreme random values.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":60,\"confidence\":0.55,\"recommendation\":\"Document the jitter strategy, add a guard ensuring the jittered delay stays within [baseDelay, maxDelay], and add a test that mocks Math.random to 0 and 1 to verify bounds.\"}],\"next_steps\":[\"Add input validation to retry() for maxAttempts and other parameters\",\"Ensure classifyError has a catch-all that never returns undefined\",\"Add response shape validation in glm-client.mjs after parsing\",\"Fix pre-push hook to fail loudly if the script is missing\",\"Add set -euo pipefail to check-release-ready.sh\",\"Run the existing test suite to confirm retry edge cases are covered\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:25:17.081Z"
+}

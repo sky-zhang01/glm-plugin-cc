@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 7
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.333,
+    "citation_false_file_hits": 0,
+    "latency_ms": 35027,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit adds an interactive menu to /glm:setup when already configured and renames the npm scope. The changes are primarily in documentation, configuration, and markdown files. While the risk surface is limited since no runtime application code is modified, there are concerns about consistency between renamed scope identifiers across configuration files and potential user-facing confusion from incomplete or mismatched references.",
+    "findings": [
+      {
+        "severity": "medium",
+        "title": "Inconsistent scope rename between marketplace.json and package.json/plugin.json",
+        "body": "The commit renames the npm scope, but the scope identifiers across marketplace.json, plugin.json, and package.json may not be fully consistent. If the scope name in marketplace.json doesn't match what's in plugin.json or package.json, users installing or referencing the plugin could encounter broken links, failed installations, or mismatched metadata. This is a silent failure — the plugin might appear to work locally but fail when published or installed from the marketplace.",
+        "file": ".claude-plugin/marketplace.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.55,
+        "recommendation": "Verify that all scope references (package name, plugin identifier, marketplace listing) are fully consistent after the rename. Check for any remaining references to the old scope name in all files including CHANGELOG.md, release_card.md, and commands/setup.md. Run a grep for the old scope name across the entire repository."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive menu in setup.md lacks error handling guidance for invalid user input",
+        "body": "The commands/setup.md now includes an interactive menu for when the system is already configured. If a user provides unexpected or invalid input during this interactive flow, the behavior is undefined in the documentation. For a setup/configuration command, invalid input handling is critical — a wrong choice could overwrite existing valid configuration or leave the system in an inconsistent state. The markdown does not document fallback behavior or how to recover from a bad selection.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.5,
+        "recommendation": "Add explicit documentation or guard clauses in the setup command for: (1) what happens on invalid menu selection, (2) whether the existing configuration is backed up before reconfiguration, and (3) how to abort/cancel without side effects. Ensure the interactive menu has a safe default or no-op option."
+      },
+      {
+        "severity": "low",
+        "title": "CHANGELOG.md references may not align with actual version in package.json",
+        "body": "The CHANGELOG.md is updated with new entries and the package.json version is bumped, but the CHANGELOG entry references 'v0.4.7' while the user focus mentions 'v0.4.4 setup-menu'. If the changelog documents fixes or features not actually present in this commit, users relying on the changelog for release notes will be misled. This is an observability and trust issue.",
+        "file": "CHANGELOG.md",
+        "line_start": 1,
+        "line_end": 21,
+        "confidence": 0.4,
+        "recommendation": "Verify that the CHANGELOG entry accurately reflects only the changes in this commit and that the version number in package.json matches the CHANGELOG heading. Cross-reference with the actual diff to ensure no claimed fixes are missing."
+      }
+    ],
+    "next_steps": [
+      "Run `git diff 7766943^..7766943` to inspect the full diff and verify scope name consistency across all config files",
+      "Search the entire repository for any remaining references to the old npm scope name that were not updated",
+      "Test the interactive setup menu with invalid/empty input to verify graceful handling",
+      "Confirm the CHANGELOG version matches package.json and accurately describes only this commit's changes"
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"This commit adds an interactive menu to /glm:setup when already configured and renames the npm scope. The changes are primarily in documentation, configuration, and markdown files. While the risk surface is limited since no runtime application code is modified, there are concerns about consistency between renamed scope identifiers across configuration files and potential user-facing confusion from incomplete or mismatched references.\",\n  \"findings\": [\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Inconsistent scope rename between marketplace.json and package.json/plugin.json\",\n      \"body\": \"The commit renames the npm scope, but the scope identifiers across marketplace.json, plugin.json, and package.json may not be fully consistent. If the scope name in marketplace.json doesn't match what's in plugin.json or package.json, users installing or referencing the plugin could encounter broken links, failed installations, or mismatched metadata. This is a silent failure — the plugin might appear to work locally but fail when published or installed from the marketplace.\",\n      \"file\": \".claude-plugin/marketplace.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Verify that all scope references (package name, plugin identifier, marketplace listing) are fully consistent after the rename. Check for any remaining references to the old scope name in all files including CHANGELOG.md, release_card.md, and commands/setup.md. Run a grep for the old scope name across the entire repository.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Interactive menu in setup.md lacks error handling guidance for invalid user input\",\n      \"body\": \"The commands/setup.md now includes an interactive menu for when the system is already configured. If a user provides unexpected or invalid input during this interactive flow, the behavior is undefined in the documentation. For a setup/configuration command, invalid input handling is critical — a wrong choice could overwrite existing valid configuration or leave the system in an inconsistent state. The markdown does not document fallback behavior or how to recover from a bad selection.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.5,\n      \"recommendation\": \"Add explicit documentation or guard clauses in the setup command for: (1) what happens on invalid menu selection, (2) whether the existing configuration is backed up before reconfiguration, and (3) how to abort/cancel without side effects. Ensure the interactive menu has a safe default or no-op option.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"CHANGELOG.md references may not align with actual version in package.json\",\n      \"body\": \"The CHANGELOG.md is updated with new entries and the package.json version is bumped, but the CHANGELOG entry references 'v0.4.7' while the user focus mentions 'v0.4.4 setup-menu'. If the changelog documents fixes or features not actually present in this commit, users relying on the changelog for release notes will be misled. This is an observability and trust issue.\",\n      \"file\": \"CHANGELOG.md\",\n      \"line_start\": 1,\n      \"line_end\": 21,\n      \"confidence\": 0.4,\n      \"recommendation\": \"Verify that the CHANGELOG entry accurately reflects only the changes in this commit and that the version number in package.json matches the CHANGELOG heading. Cross-reference with the actual diff to ensure no claimed fixes are missing.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `git diff 7766943^..7766943` to inspect the full diff and verify scope name consistency across all config files\",\n    \"Search the entire repository for any remaining references to the old npm scope name that were not updated\",\n    \"Test the interactive setup menu with invalid/empty input to verify graceful handling\",\n    \"Confirm the CHANGELOG version matches package.json and accurately describes only this commit's changes\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:30:46.345Z"
+}

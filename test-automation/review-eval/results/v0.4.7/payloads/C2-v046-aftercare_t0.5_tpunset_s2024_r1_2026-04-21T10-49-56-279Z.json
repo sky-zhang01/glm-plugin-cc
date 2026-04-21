@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": 2024,
+    "thinking": "on",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 56735,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 release introduces retry infrastructure (scripts/lib/retry.mjs), BigModel error classification (scripts/lib/bigmodel-errors.mjs), and modifications to glm-client.mjs. Multiple material concerns exist: the retry logic has edge cases around jitter calculation and abort-signal handling, error classification may silently misclassify unknown errors, and the glm-client changes couple retry behavior to API calls without adequate guards against double-execution on non-idempotent operations. The pre-push hook and CI script additions are operational but the overall change warrants scrutiny before tagging v0.4.7.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry logic may produce NaN or negative delay when baseDelay or jitter calculation receives zero/undefined inputs",
+        "body": "scripts/lib/retry.mjs implements exponential backoff with jitter. If the caller passes baseDelay=0 or undefined, or if Math.random() produces edge-case values, the computed delay can become NaN or negative. A NaN delay passed to setTimeout silently resolves immediately (treated as 0), causing a tight retry loop that can overwhelm the API. There is no guard validating that the computed delay is a finite positive number before use.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.75,
+        "recommendation": "Add a guard after delay calculation: `if (!Number.isFinite(delay) || delay < 0) delay = baseDelay;` and validate inputs at function entry. Add explicit unit tests for baseDelay=0, undefined, and NaN inputs."
+      },
+      {
+        "severity": "high",
+        "title": "AbortSignal race condition: retry loop checks signal only before sleep, not before executing the retried operation",
+        "body": "If an AbortSignal is aborted during the async operation (not during the sleep/wait phase), the current in-flight operation completes and its result may be used before abort is noticed. The retry loop checks `signal?.aborted` at the top of each iteration but not after the operation completes. This means an aborted request can still produce side effects from a stale invocation, which is especially dangerous if the wrapped operation is non-idempotent (e.g., writing to a conversation).",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.7,
+        "recommendation": "Check `signal?.aborted` immediately after the operation promise resolves, before accepting the result. Document whether retryWithBackoff is safe only for idempotent operations."
+      },
+      {
+        "severity": "medium",
+        "title": "BigModel error classifier silently treats unmatched errors as non-retryable without logging or classification metadata",
+        "body": "scripts/lib/bigmodel-errors.mjs classifies errors into retryable/non-retryable categories. When an error doesn't match any known pattern, it falls through to a default that marks it as non-retryable. This means any new or unexpected error from the BigModel API (e.g., a new rate limit header format, a new 4xx status code, or a changed error response schema) will be silently classified as non-retryable. The caller will give up immediately with no indication that the error was unclassified rather than intentionally non-retryable. This creates a blind spot where transient but unrecognized errors cause permanent failures.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.8,
+        "recommendation": "Add an `unclassified: true` flag to the return value for errors that don't match any known pattern. Log a warning when an unclassified error is encountered so it can be identified and classified in a future release. Consider retrying unclassified 5xx errors by default."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs retry integration may double-invoke non-idempotent API calls on network-level timeouts",
+        "body": "The modifications to scripts/lib/glm-client.mjs integrate retry logic into API calls. If a request reaches the BigModel server successfully but the response is lost (network timeout, connection reset), the retry logic will issue a second request. For any API endpoint that is not idempotent (e.g., conversation message creation), this produces duplicate messages. The code does not distinguish between idempotent and non-idempotent operations when deciding whether to retry.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 99,
+        "confidence": 0.65,
+        "recommendation": "Add an `idempotent` parameter to the retry configuration and default to false for mutating operations. Only retry read-only or explicitly idempotent endpoints. For non-idempotent calls, surface the ambiguity to the caller rather than silently retrying."
+      },
+      {
+        "severity": "medium",
+        "title": "pre-push hook runs CI check script but does not handle exit codes from subshells reliably across platforms",
+        "body": "scripts/hooks/pre-push invokes scripts/ci/check-release-ready.sh. If the script fails due to a missing dependency (e.g., node not in PATH, missing npm packages), the error message may be swallowed and the push could either proceed or block depending on shell behavior. The hook uses `exec` or direct invocation without explicit error trapping for environment issues, which means developers on different OS configurations may get inconsistent push blocking behavior.",
+        "file": "scripts/hooks/pre-push",
+        "line_start": 1,
+        "line_end": 22,
+        "confidence": 0.55,
+        "recommendation": "Add explicit error trapping at the top of the pre-push hook: check that node/npm are available and that the CI script exists before executing. Use `set -euo pipefail` and ensure the hook exits with a clear error message on environment failures."
+      }
+    ],
+    "next_steps": [
+      "Read scripts/lib/retry.mjs in full and trace the delay calculation for baseDelay=0, undefined, and very large attempt numbers to confirm NaN/negative edge cases.",
+      "Read scripts/lib/bigmodel-errors.mjs and verify the default/fallthrough branch for unrecognized errors — confirm whether unclassified errors are logged or silently dropped.",
+      "Read scripts/lib/glm-client.mjs and confirm whether retry is applied only to idempotent read operations or broadly to all API calls including message creation.",
+      "Run the test suite (tests/retry.test.mjs, tests/bigmodel-errors.test.mjs) and verify coverage for abort-signal mid-operation scenarios and unclassified error patterns.",
+      "Verify that the pre-push hook works correctly on macOS, Linux, and Windows (Git Bash) with missing node in PATH."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.6 release introduces retry infrastructure (scripts/lib/retry.mjs), BigModel error classification (scripts/lib/bigmodel-errors.mjs), and modifications to glm-client.mjs. Multiple material concerns exist: the retry logic has edge cases around jitter calculation and abort-signal handling, error classification may silently misclassify unknown errors, and the glm-client changes couple retry behavior to API calls without adequate guards against double-execution on non-idempotent operations. The pre-push hook and CI script additions are operational but the overall change warrants scrutiny before tagging v0.4.7.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Retry logic may produce NaN or negative delay when baseDelay or jitter calculation receives zero/undefined inputs\",\n      \"body\": \"scripts/lib/retry.mjs implements exponential backoff with jitter. If the caller passes baseDelay=0 or undefined, or if Math.random() produces edge-case values, the computed delay can become NaN or negative. A NaN delay passed to setTimeout silently resolves immediately (treated as 0), causing a tight retry loop that can overwhelm the API. There is no guard validating that the computed delay is a finite positive number before use.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Add a guard after delay calculation: `if (!Number.isFinite(delay) || delay < 0) delay = baseDelay;` and validate inputs at function entry. Add explicit unit tests for baseDelay=0, undefined, and NaN inputs.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"AbortSignal race condition: retry loop checks signal only before sleep, not before executing the retried operation\",\n      \"body\": \"If an AbortSignal is aborted during the async operation (not during the sleep/wait phase), the current in-flight operation completes and its result may be used before abort is noticed. The retry loop checks `signal?.aborted` at the top of each iteration but not after the operation completes. This means an aborted request can still produce side effects from a stale invocation, which is especially dangerous if the wrapped operation is non-idempotent (e.g., writing to a conversation).\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Check `signal?.aborted` immediately after the operation promise resolves, before accepting the result. Document whether retryWithBackoff is safe only for idempotent operations.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"BigModel error classifier silently treats unmatched errors as non-retryable without logging or classification metadata\",\n      \"body\": \"scripts/lib/bigmodel-errors.mjs classifies errors into retryable/non-retryable categories. When an error doesn't match any known pattern, it falls through to a default that marks it as non-retryable. This means any new or unexpected error from the BigModel API (e.g., a new rate limit header format, a new 4xx status code, or a changed error response schema) will be silently classified as non-retryable. The caller will give up immediately with no indication that the error was unclassified rather than intentionally non-retryable. This creates a blind spot where transient but unrecognized errors cause permanent failures.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.8,\n      \"recommendation\": \"Add an `unclassified: true` flag to the return value for errors that don't match any known pattern. Log a warning when an unclassified error is encountered so it can be identified and classified in a future release. Consider retrying unclassified 5xx errors by default.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client.mjs retry integration may double-invoke non-idempotent API calls on network-level timeouts\",\n      \"body\": \"The modifications to scripts/lib/glm-client.mjs integrate retry logic into API calls. If a request reaches the BigModel server successfully but the response is lost (network timeout, connection reset), the retry logic will issue a second request. For any API endpoint that is not idempotent (e.g., conversation message creation), this produces duplicate messages. The code does not distinguish between idempotent and non-idempotent operations when deciding whether to retry.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 99,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Add an `idempotent` parameter to the retry configuration and default to false for mutating operations. Only retry read-only or explicitly idempotent endpoints. For non-idempotent calls, surface the ambiguity to the caller rather than silently retrying.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"pre-push hook runs CI check script but does not handle exit codes from subshells reliably across platforms\",\n      \"body\": \"scripts/hooks/pre-push invokes scripts/ci/check-release-ready.sh. If the script fails due to a missing dependency (e.g., node not in PATH, missing npm packages), the error message may be swallowed and the push could either proceed or block depending on shell behavior. The hook uses `exec` or direct invocation without explicit error trapping for environment issues, which means developers on different OS configurations may get inconsistent push blocking behavior.\",\n      \"file\": \"scripts/hooks/pre-push\",\n      \"line_start\": 1,\n      \"line_end\": 22,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Add explicit error trapping at the top of the pre-push hook: check that node/npm are available and that the CI script exists before executing. Use `set -euo pipefail` and ensure the hook exits with a clear error message on environment failures.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Read scripts/lib/retry.mjs in full and trace the delay calculation for baseDelay=0, undefined, and very large attempt numbers to confirm NaN/negative edge cases.\",\n    \"Read scripts/lib/bigmodel-errors.mjs and verify the default/fallthrough branch for unrecognized errors — confirm whether unclassified errors are logged or silently dropped.\",\n    \"Read scripts/lib/glm-client.mjs and confirm whether retry is applied only to idempotent read operations or broadly to all API calls including message creation.\",\n    \"Run the test suite (tests/retry.test.mjs, tests/bigmodel-errors.test.mjs) and verify coverage for abort-signal mid-operation scenarios and unclassified error patterns.\",\n    \"Verify that the pre-push hook works correctly on macOS, Linux, and Windows (Git Bash) with missing node in PATH.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:49:56.317Z"
+}

@@ -1,0 +1,58 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 25
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 2,
+    "citation_accuracy": 0.5,
+    "citation_false_file_hits": 0,
+    "latency_ms": 22251,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The commit primarily renames the npm scope and adds an interactive menu to the setup command documentation. The changes are mostly metadata and documentation — plugin.json, marketplace.json, package.json, CHANGELOG.md, commands/setup.md, and release_card.md. The substantive risk is minimal since no runtime code is modified, but the scope rename in package.json could break existing installations if not coordinated with npm publishing, and the setup command changes introduce user-facing behavior that needs verification.",
+    "findings": [
+      {
+        "severity": "medium",
+        "title": "npm scope rename may orphan existing installations",
+        "body": "The package.json name changes from one scope to another (based on the diff stat showing 4 lines changed). If users have the old scoped package installed globally or as a dependency, a scope rename effectively creates a new package. The old package won't receive updates and there's no redirect mechanism. Combined with no visible migration guidance in the diff, existing users may be stranded on the old package name.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.6,
+        "recommendation": "Verify that the old scoped package is either deprecated on npm with a pointer to the new one, or that a migration step is documented. If this is purely internal and not yet published publicly, this is lower risk."
+      },
+      {
+        "severity": "low",
+        "title": "Setup command interactive menu changes lack versioned migration path",
+        "body": "The commands/setup.md file is modified to add an interactive menu when already configured. If the menu logic relies on detecting prior configuration state, any mismatch between what the markdown-based command expects and the actual stored configuration could lead to confusing behavior or silent overwrites of existing settings.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.35,
+        "recommendation": "Verify that the interactive menu correctly handles all existing configuration states and that re-running setup doesn't silently clobber prior configuration without explicit user confirmation."
+      }
+    ],
+    "next_steps": [
+      "Confirm the old npm scoped package is deprecated or unpublished to avoid package fragmentation",
+      "Verify the interactive setup menu handles edge cases: corrupt config, partial config, config from older versions",
+      "Test a fresh install and an upgrade path from the previous version to catch any breakage from the scope rename"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The commit primarily renames the npm scope and adds an interactive menu to the setup command documentation. The changes are mostly metadata and documentation — plugin.json, marketplace.json, package.json, CHANGELOG.md, commands/setup.md, and release_card.md. The substantive risk is minimal since no runtime code is modified, but the scope rename in package.json could break existing installations if not coordinated with npm publishing, and the setup command changes introduce user-facing behavior that needs verification.\",\"findings\":[{\"severity\":\"medium\",\"title\":\"npm scope rename may orphan existing installations\",\"body\":\"The package.json name changes from one scope to another (based on the diff stat showing 4 lines changed). If users have the old scoped package installed globally or as a dependency, a scope rename effectively creates a new package. The old package won't receive updates and there's no redirect mechanism. Combined with no visible migration guidance in the diff, existing users may be stranded on the old package name.\",\"file\":\"package.json\",\"line_start\":1,\"line_end\":4,\"confidence\":0.6,\"recommendation\":\"Verify that the old scoped package is either deprecated on npm with a pointer to the new one, or that a migration step is documented. If this is purely internal and not yet published publicly, this is lower risk.\"},{\"severity\":\"low\",\"title\":\"Setup command interactive menu changes lack versioned migration path\",\"body\":\"The commands/setup.md file is modified to add an interactive menu when already configured. If the menu logic relies on detecting prior configuration state, any mismatch between what the markdown-based command expects and the actual stored configuration could lead to confusing behavior or silent overwrites of existing settings.\",\"file\":\"commands/setup.md\",\"line_start\":1,\"line_end\":19,\"confidence\":0.35,\"recommendation\":\"Verify that the interactive menu correctly handles all existing configuration states and that re-running setup doesn't silently clobber prior configuration without explicit user confirmation.\"}],\"next_steps\":[\"Confirm the old npm scoped package is deprecated or unpublished to avoid package fragmentation\",\"Verify the interactive setup menu handles edge cases: corrupt config, partial config, config from older versions\",\"Test a fresh install and an upgrade path from the previous version to catch any breakage from the scope rename\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:56:20.932Z"
+}

@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 28
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 160303,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "Three critical modules — glm-client (API communication), tracked-jobs (state persistence), and job-control (lifecycle management) — have significant changes with no direct test coverage. A deleted module (process.mjs) risks latent import breakage. New retry+backoff logic feeds into the API client without verifiable idempotency guarantees for the underlying operations. These are exactly the failure modes that survive review but break in production under concurrency, network instability, or crash-recovery scenarios.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "glm-client.mjs heavily modified with zero direct test coverage",
+        "body": "glm-client.mjs shows 155 lines changed — integrating the new retry module, error dispatch, and wait/background execution modes. This is the module that directly communicates with the external BigModel API, making it the most fault-sensitive component in the system. There is no tests/glm-client.test.mjs in the test file list. Error-handling paths, retry integration, authentication edge cases, timeout behavior, and the new wait/background branching are all untested by any direct unit test. The existing result-propagation.test.mjs may exercise some surface area but is not a substitute for direct client testing.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.88,
+        "recommendation": "Add tests/glm-client.test.mjs covering at minimum: (1) retry integration with each classified error type from bigmodel-errors.mjs, (2) wait vs background mode branching, (3) authentication failure propagation, (4) network timeout mid-response, (5) malformed response body handling."
+      },
+      {
+        "severity": "high",
+        "title": "tracked-jobs.mjs modified with no test coverage — job state corruption risk",
+        "body": "tracked-jobs.mjs has 78 lines changed but no tests/tracked-jobs.test.mjs exists. This module persists job state to disk — if state is corrupted or lost, users cannot monitor, cancel, or recover background jobs. Concurrent writes from overlapping invocations, partial writes during a process crash, and stale-state cleanup after unclean shutdowns are all plausible failure modes with zero test evidence. The rapid iteration history (5 bug-fix releases since v0.4.0) makes untested state mutations especially risky.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.82,
+        "recommendation": "Add tests/tracked-jobs.test.mjs covering: concurrent job registration, crash-recovery state consistency (simulate partial JSON write), stale job cleanup, and malformed state file handling."
+      },
+      {
+        "severity": "medium",
+        "title": "process.mjs deleted — latent import breakage not verified",
+        "body": "scripts/lib/process.mjs (67 lines) was deleted in this diff range. If any surviving module still contains `import ... from './process.mjs'` or `from './lib/process'`, the import will fail at runtime with a ModuleNotFoundError. This is a classic review blind spot: the import path may only be exercised under specific subcommands or error conditions, passing basic smoke tests but failing in production. The check-imports.mjs script was also modified (5 lines changed), suggesting import validation exists but its scope is unclear.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.72,
+        "recommendation": "Grep the entire codebase for 'process\\.mjs' and 'lib/process' import references. Verify check-imports.mjs validates that all import targets resolve. Add an explicit CI step that fails if any module imports a non-existent file."
+      },
+      {
+        "severity": "medium",
+        "title": "Retry logic applied to API calls without idempotency verification",
+        "body": "The new retry.mjs (203 lines) and bigmodel-errors.mjs (168 lines) implement automatic retry with exponential backoff for BigModel API errors. If any retried API operation is non-idempotent — e.g., a POST that creates a new job resource — a retried request could produce duplicate jobs, duplicate resource allocation, or duplicate billing events. The retry.test.mjs file (352 lines) tests the retry mechanism in isolation, and bigmodel-errors.test.mjs (189 lines) tests error classification, but there is no integration test verifying that the actual API calls wrapped with retry are safe to replay. This is a pattern-level defect that unit tests of the retry module itself cannot catch.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.65,
+        "recommendation": "Audit each glm-client.mjs API call that uses the retry wrapper. For non-idempotent operations (POST creating resources), either add idempotency keys, make the call conditional on prior state, or exclude from automatic retry. Document the idempotency contract per endpoint."
+      }
+    ],
+    "next_steps": [
+      "Add tests/glm-client.test.mjs with retry integration, error dispatch, and wait/background mode coverage before release.",
+      "Add tests/tracked-jobs.test.mjs covering concurrent access, crash recovery, and malformed state files.",
+      "Grep codebase for any remaining imports of deleted scripts/lib/process.mjs — block merge if references found.",
+      "Audit each glm-client.mjs API call using retry for idempotency; document or add idempotency keys for non-idempotent endpoints.",
+      "Run a manual integration test simulating: network timeout mid-request, API rate-limit response, and SIGKILL during background job execution to verify state recovery."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"Three critical modules — glm-client (API communication), tracked-jobs (state persistence), and job-control (lifecycle management) — have significant changes with no direct test coverage. A deleted module (process.mjs) risks latent import breakage. New retry+backoff logic feeds into the API client without verifiable idempotency guarantees for the underlying operations. These are exactly the failure modes that survive review but break in production under concurrency, network instability, or crash-recovery scenarios.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"glm-client.mjs heavily modified with zero direct test coverage\",\n      \"body\": \"glm-client.mjs shows 155 lines changed — integrating the new retry module, error dispatch, and wait/background execution modes. This is the module that directly communicates with the external BigModel API, making it the most fault-sensitive component in the system. There is no tests/glm-client.test.mjs in the test file list. Error-handling paths, retry integration, authentication edge cases, timeout behavior, and the new wait/background branching are all untested by any direct unit test. The existing result-propagation.test.mjs may exercise some surface area but is not a substitute for direct client testing.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.88,\n      \"recommendation\": \"Add tests/glm-client.test.mjs covering at minimum: (1) retry integration with each classified error type from bigmodel-errors.mjs, (2) wait vs background mode branching, (3) authentication failure propagation, (4) network timeout mid-response, (5) malformed response body handling.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"tracked-jobs.mjs modified with no test coverage — job state corruption risk\",\n      \"body\": \"tracked-jobs.mjs has 78 lines changed but no tests/tracked-jobs.test.mjs exists. This module persists job state to disk — if state is corrupted or lost, users cannot monitor, cancel, or recover background jobs. Concurrent writes from overlapping invocations, partial writes during a process crash, and stale-state cleanup after unclean shutdowns are all plausible failure modes with zero test evidence. The rapid iteration history (5 bug-fix releases since v0.4.0) makes untested state mutations especially risky.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.82,\n      \"recommendation\": \"Add tests/tracked-jobs.test.mjs covering: concurrent job registration, crash-recovery state consistency (simulate partial JSON write), stale job cleanup, and malformed state file handling.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"process.mjs deleted — latent import breakage not verified\",\n      \"body\": \"scripts/lib/process.mjs (67 lines) was deleted in this diff range. If any surviving module still contains `import ... from './process.mjs'` or `from './lib/process'`, the import will fail at runtime with a ModuleNotFoundError. This is a classic review blind spot: the import path may only be exercised under specific subcommands or error conditions, passing basic smoke tests but failing in production. The check-imports.mjs script was also modified (5 lines changed), suggesting import validation exists but its scope is unclear.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Grep the entire codebase for 'process\\\\.mjs' and 'lib/process' import references. Verify check-imports.mjs validates that all import targets resolve. Add an explicit CI step that fails if any module imports a non-existent file.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Retry logic applied to API calls without idempotency verification\",\n      \"body\": \"The new retry.mjs (203 lines) and bigmodel-errors.mjs (168 lines) implement automatic retry with exponential backoff for BigModel API errors. If any retried API operation is non-idempotent — e.g., a POST that creates a new job resource — a retried request could produce duplicate jobs, duplicate resource allocation, or duplicate billing events. The retry.test.mjs file (352 lines) tests the retry mechanism in isolation, and bigmodel-errors.test.mjs (189 lines) tests error classification, but there is no integration test verifying that the actual API calls wrapped with retry are safe to replay. This is a pattern-level defect that unit tests of the retry module itself cannot catch.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Audit each glm-client.mjs API call that uses the retry wrapper. For non-idempotent operations (POST creating resources), either add idempotency keys, make the call conditional on prior state, or exclude from automatic retry. Document the idempotency contract per endpoint.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Add tests/glm-client.test.mjs with retry integration, error dispatch, and wait/background mode coverage before release.\",\n    \"Add tests/tracked-jobs.test.mjs covering concurrent access, crash recovery, and malformed state files.\",\n    \"Grep codebase for any remaining imports of deleted scripts/lib/process.mjs — block merge if references found.\",\n    \"Audit each glm-client.mjs API call using retry for idempotency; document or add idempotency keys for non-idempotent endpoints.\",\n    \"Run a manual integration test simulating: network timeout mid-request, API rate-limit response, and SIGKILL during background job execution to verify state recovery.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T17:02:01.155Z"
+}

@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 23
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 125795,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff removes a library module (`process.mjs`), adds 371 lines of new retry/error infrastructure, and modifies state management — all without the reviewer being able to verify that no dangling imports, misclassified errors, or non-atomic state writes exist. The deleted module is the most concrete ship-blocker; the retry and state changes are high-regression surface areas that need targeted verification.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Deleted `scripts/lib/process.mjs` may leave dangling runtime imports",
+        "body": "The diff removes `scripts/lib/process.mjs` (67 lines) entirely. The commit message 'Bundle F — ReferenceError + full thread/resume scaffolding purge' suggests intentional cleanup, but `scripts/check-imports.mjs` was only modified by 5 lines — which may have relaxed the import lint rather than confirmed all consumers were migrated. If any runtime path, hook script, or test still does a static or dynamic import of `./lib/process` or `./lib/process.mjs`, the module will crash at load time with MODULE_NOT_FOUND. This class of failure is silent in CI if no test exercises the affected import path.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.68,
+        "recommendation": "Grep the entire codebase for any remaining reference to 'process.mjs' (import, require, dynamic import, or string literal). Verify that check-imports.mjs changes didn't simply exclude the deleted file from validation. Add an explicit test that confirms no import resolves to the deleted path."
+      },
+      {
+        "severity": "high",
+        "title": "New retry infrastructure (203 lines) may retry non-idempotent operations",
+        "body": "`scripts/lib/retry.mjs` adds 203 lines of retry/backoff logic. It is consumed by `glm-client.mjs` (155 lines changed). LLM API calls that create resources — e.g., submitting reviews, creating jobs — may not be idempotent. If the retry layer wraps such calls without deduplication keys or idempotency tokens, a transient timeout followed by a retry could result in duplicate submissions. The test file (`tests/retry.test.mjs`, 352 lines) likely tests the retry mechanism itself but may not cover the integration with non-idempotent glm-client call sites.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.6,
+        "recommendation": "Audit every call site in glm-client.mjs where retry is applied. Classify each as idempotent (GET/status) vs non-idempotent (POST/create). For non-idempotent calls, either add idempotency keys, make the operation safe to replay, or exclude it from automatic retry and surface the error to the user instead."
+      },
+      {
+        "severity": "medium",
+        "title": "BigModel error dispatch may silently misclassify unknown error codes",
+        "body": "`scripts/lib/bigmodel-errors.mjs` (168 new lines) introduces error classification for BigModel API responses. If the classifier uses a whitelist of known error codes and falls through to a default that either silently retries non-retryable errors or gives up on retryable ones, the behavior is wrong but not obviously so — it would manifest as either wasted API calls or dropped work. The 189-line test file likely covers known codes but may not exercise the unknown-code fallback path.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.55,
+        "recommendation": "Verify the default/fallback branch in the error classifier explicitly logs the unrecognized error code and treats it as non-retryable (fail-safe). Add a test case for an unrecognized error code to confirm it does not silently retry or swallow the error."
+      },
+      {
+        "severity": "medium",
+        "title": "State and tracked-jobs file writes may not be atomic under concurrency",
+        "body": "`scripts/lib/state.mjs` (32 lines changed), `scripts/lib/tracked-jobs.mjs` (78 lines changed), and `scripts/lib/fs.mjs` (44 lines changed) all touch persistent state. If background jobs (--background flag added in v0.4.5) run concurrently with foreground operations, two processes may read-modify-write the same state file simultaneously. Without file locking or atomic rename patterns, this can corrupt the state file or silently lose job entries. The diff adds a --background mode which directly increases concurrent-access probability.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.5,
+        "recommendation": "Verify that all state mutations in state.mjs and tracked-jobs.mjs use an atomic write pattern (write to temp file, then rename). Consider adding advisory file locking (flock/lockfile) for --background mode where concurrent access is expected. Add a test that simulates concurrent state mutations."
+      }
+    ],
+    "next_steps": [
+      "Run `grep -r 'process\\.mjs\\|process\\.js\\|lib/process' scripts/ tests/ commands/` to confirm no dangling imports to the deleted module.",
+      "Audit each glm-client.mjs call site wrapped by retry for idempotency; document which are safe to retry and which are not.",
+      "Add a test for unknown/unrecognized BigModel error codes to bigmodel-errors.test.mjs confirming fail-safe behavior.",
+      "Verify atomic write semantics in state.mjs and tracked-jobs.mjs — check for write-then-rename or equivalent patterns.",
+      "Run the full test suite (`scripts/ci/check-all.sh` or equivalent) against the cumulative diff before merge."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff removes a library module (`process.mjs`), adds 371 lines of new retry/error infrastructure, and modifies state management — all without the reviewer being able to verify that no dangling imports, misclassified errors, or non-atomic state writes exist. The deleted module is the most concrete ship-blocker; the retry and state changes are high-regression surface areas that need targeted verification.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Deleted `scripts/lib/process.mjs` may leave dangling runtime imports\",\n      \"body\": \"The diff removes `scripts/lib/process.mjs` (67 lines) entirely. The commit message 'Bundle F — ReferenceError + full thread/resume scaffolding purge' suggests intentional cleanup, but `scripts/check-imports.mjs` was only modified by 5 lines — which may have relaxed the import lint rather than confirmed all consumers were migrated. If any runtime path, hook script, or test still does a static or dynamic import of `./lib/process` or `./lib/process.mjs`, the module will crash at load time with MODULE_NOT_FOUND. This class of failure is silent in CI if no test exercises the affected import path.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Grep the entire codebase for any remaining reference to 'process.mjs' (import, require, dynamic import, or string literal). Verify that check-imports.mjs changes didn't simply exclude the deleted file from validation. Add an explicit test that confirms no import resolves to the deleted path.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"New retry infrastructure (203 lines) may retry non-idempotent operations\",\n      \"body\": \"`scripts/lib/retry.mjs` adds 203 lines of retry/backoff logic. It is consumed by `glm-client.mjs` (155 lines changed). LLM API calls that create resources — e.g., submitting reviews, creating jobs — may not be idempotent. If the retry layer wraps such calls without deduplication keys or idempotency tokens, a transient timeout followed by a retry could result in duplicate submissions. The test file (`tests/retry.test.mjs`, 352 lines) likely tests the retry mechanism itself but may not cover the integration with non-idempotent glm-client call sites.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Audit every call site in glm-client.mjs where retry is applied. Classify each as idempotent (GET/status) vs non-idempotent (POST/create). For non-idempotent calls, either add idempotency keys, make the operation safe to replay, or exclude it from automatic retry and surface the error to the user instead.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"BigModel error dispatch may silently misclassify unknown error codes\",\n      \"body\": \"`scripts/lib/bigmodel-errors.mjs` (168 new lines) introduces error classification for BigModel API responses. If the classifier uses a whitelist of known error codes and falls through to a default that either silently retries non-retryable errors or gives up on retryable ones, the behavior is wrong but not obviously so — it would manifest as either wasted API calls or dropped work. The 189-line test file likely covers known codes but may not exercise the unknown-code fallback path.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Verify the default/fallback branch in the error classifier explicitly logs the unrecognized error code and treats it as non-retryable (fail-safe). Add a test case for an unrecognized error code to confirm it does not silently retry or swallow the error.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"State and tracked-jobs file writes may not be atomic under concurrency\",\n      \"body\": \"`scripts/lib/state.mjs` (32 lines changed), `scripts/lib/tracked-jobs.mjs` (78 lines changed), and `scripts/lib/fs.mjs` (44 lines changed) all touch persistent state. If background jobs (--background flag added in v0.4.5) run concurrently with foreground operations, two processes may read-modify-write the same state file simultaneously. Without file locking or atomic rename patterns, this can corrupt the state file or silently lose job entries. The diff adds a --background mode which directly increases concurrent-access probability.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.5,\n      \"recommendation\": \"Verify that all state mutations in state.mjs and tracked-jobs.mjs use an atomic write pattern (write to temp file, then rename). Consider adding advisory file locking (flock/lockfile) for --background mode where concurrent access is expected. Add a test that simulates concurrent state mutations.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `grep -r 'process\\\\.mjs\\\\|process\\\\.js\\\\|lib/process' scripts/ tests/ commands/` to confirm no dangling imports to the deleted module.\",\n    \"Audit each glm-client.mjs call site wrapped by retry for idempotency; document which are safe to retry and which are not.\",\n    \"Add a test for unknown/unrecognized BigModel error codes to bigmodel-errors.test.mjs confirming fail-safe behavior.\",\n    \"Verify atomic write semantics in state.mjs and tracked-jobs.mjs — check for write-then-rename or equivalent patterns.\",\n    \"Run the full test suite (`scripts/ci/check-all.sh` or equivalent) against the cumulative diff before merge.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T16:54:42.390Z"
+}

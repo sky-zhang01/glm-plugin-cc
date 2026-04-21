@@ -1,0 +1,68 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 29095,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit primarily renames the npm scope and adds an interactive menu to the setup command. The changes are mostly documentation and configuration. However, the setup.md command changes introduce a user-facing interactive menu flow that lacks error handling for edge cases around user input and configuration state detection. The scope rename also creates a forward-compatibility concern for existing users.",
+    "findings": [
+      {
+        "severity": "medium",
+        "title": "Setup command menu relies on LLM-interpreted branching without fallback for invalid/unexpected user choices",
+        "body": "The setup.md command file adds an interactive menu with choices (1-4) when the system is already configured. This menu is a markdown instruction to an LLM, not a traditional programmatic menu. If the LLM misinterprets user input (e.g., partial text, ambiguous responses, or non-numeric input), there is no guardrail specifying what the LLM should do. The instruction says 'Wait for the user to choose' but does not define behavior for invalid choices. This could lead to the LLM proceeding with destructive actions (like 'Reset everything') on ambiguous input.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 50,
+        "confidence": 0.6,
+        "recommendation": "Add explicit instructions in the setup.md template for handling invalid or ambiguous user input, such as: 'If the user response does not clearly match one of the numbered options, re-display the menu and ask again. Do not proceed with any action unless the user explicitly confirms the numbered choice.'"
+      },
+      {
+        "severity": "medium",
+        "title": "npm scope rename creates a breaking change for existing installations without documented migration path",
+        "body": "The package.json scope is being renamed (the name field changes). Existing users who installed the previous scope will not receive updates automatically. Neither CHANGELOG.md nor release_card.md provides a clear migration instruction for users on the old scope. The CHANGELOG mentions 'renamed npm scope' but does not explain the impact on existing users or what action they must take.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 5,
+        "confidence": 0.55,
+        "recommendation": "Add a prominent migration note to CHANGELOG.md and release_card.md specifying the old scope name, the new scope name, and the exact steps existing users must take to migrate (e.g., uninstall old, install new, re-run setup)."
+      },
+      {
+        "severity": "low",
+        "title": "marketplace.json references may be stale or inconsistent after scope rename",
+        "body": "The .claude-plugin/marketplace.json file was modified alongside the scope rename. If any URLs, package references, or identifiers within marketplace.json still reference the old scope, the plugin listing could break silently. Without seeing the full diff content, the consistency between the new scope in package.json and all references in marketplace.json cannot be fully verified.",
+        "file": ".claude-plugin/marketplace.json",
+        "line_start": 1,
+        "line_end": 20,
+        "confidence": 0.4,
+        "recommendation": "Verify that every field in marketplace.json (download URL, package identifier, documentation links) references the new scope consistently and that no stale references to the old scope remain."
+      }
+    ],
+    "next_steps": [
+      "Add defensive instructions to commands/setup.md for handling ambiguous or invalid menu choices",
+      "Document the explicit migration path for users on the old npm scope name in CHANGELOG.md",
+      "Verify all URLs and package references in marketplace.json and plugin.json are updated to match the new scope"
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"This commit primarily renames the npm scope and adds an interactive menu to the setup command. The changes are mostly documentation and configuration. However, the setup.md command changes introduce a user-facing interactive menu flow that lacks error handling for edge cases around user input and configuration state detection. The scope rename also creates a forward-compatibility concern for existing users.\",\n  \"findings\": [\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Setup command menu relies on LLM-interpreted branching without fallback for invalid/unexpected user choices\",\n      \"body\": \"The setup.md command file adds an interactive menu with choices (1-4) when the system is already configured. This menu is a markdown instruction to an LLM, not a traditional programmatic menu. If the LLM misinterprets user input (e.g., partial text, ambiguous responses, or non-numeric input), there is no guardrail specifying what the LLM should do. The instruction says 'Wait for the user to choose' but does not define behavior for invalid choices. This could lead to the LLM proceeding with destructive actions (like 'Reset everything') on ambiguous input.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 50,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Add explicit instructions in the setup.md template for handling invalid or ambiguous user input, such as: 'If the user response does not clearly match one of the numbered options, re-display the menu and ask again. Do not proceed with any action unless the user explicitly confirms the numbered choice.'\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"npm scope rename creates a breaking change for existing installations without documented migration path\",\n      \"body\": \"The package.json scope is being renamed (the name field changes). Existing users who installed the previous scope will not receive updates automatically. Neither CHANGELOG.md nor release_card.md provides a clear migration instruction for users on the old scope. The CHANGELOG mentions 'renamed npm scope' but does not explain the impact on existing users or what action they must take.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 5,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Add a prominent migration note to CHANGELOG.md and release_card.md specifying the old scope name, the new scope name, and the exact steps existing users must take to migrate (e.g., uninstall old, install new, re-run setup).\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"marketplace.json references may be stale or inconsistent after scope rename\",\n      \"body\": \"The .claude-plugin/marketplace.json file was modified alongside the scope rename. If any URLs, package references, or identifiers within marketplace.json still reference the old scope, the plugin listing could break silently. Without seeing the full diff content, the consistency between the new scope in package.json and all references in marketplace.json cannot be fully verified.\",\n      \"file\": \".claude-plugin/marketplace.json\",\n      \"line_start\": 1,\n      \"line_end\": 20,\n      \"confidence\": 0.4,\n      \"recommendation\": \"Verify that every field in marketplace.json (download URL, package identifier, documentation links) references the new scope consistently and that no stale references to the old scope remain.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Add defensive instructions to commands/setup.md for handling ambiguous or invalid menu choices\",\n    \"Document the explicit migration path for users on the old npm scope name in CHANGELOG.md\",\n    \"Verify all URLs and package references in marketplace.json and plugin.json are updated to match the new scope\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:58:39.482Z"
+}

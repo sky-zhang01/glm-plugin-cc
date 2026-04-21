@@ -1,0 +1,33 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 5
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 7971,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "approve",
+    "summary": "This commit adds an interactive menu to the /glm:setup command when already configured, renames the npm scope, and updates release notes. The changes are confined to markdown documentation (commands/setup.md), metadata files (package.json, plugin configs), and changelog/release card documentation. No executable code, auth logic, data mutations, or runtime behavior is modified. No material defects, silent failures, or security concerns found.",
+    "findings": [],
+    "next_steps": []
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"approve\",\n  \"summary\": \"This commit adds an interactive menu to the /glm:setup command when already configured, renames the npm scope, and updates release notes. The changes are confined to markdown documentation (commands/setup.md), metadata files (package.json, plugin configs), and changelog/release card documentation. No executable code, auth logic, data mutations, or runtime behavior is modified. No material defects, silent failures, or security concerns found.\",\n  \"findings\": [],\n  \"next_steps\": []\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:30:00.848Z"
+}

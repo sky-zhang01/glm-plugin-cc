@@ -1,0 +1,79 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 49514,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "v0.4.6 adds retry/backoff infrastructure and BigModel error classification. The retry logic has a meaningful defect: it silently swallows errors when retry is disabled (maxRetries=0), returning undefined instead of propagating the original error. This could cause silent failures in downstream callers. Additionally, the retry module's cancellation logic depends on AbortController but the integration with glm-client doesn't consistently pass signal through, creating a gap where in-flight retries can't be cancelled. Needs a targeted fix before shipping.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs silently returns undefined when maxRetries=0 and the operation fails",
+        "body": "When maxRetries is 0 (retry disabled), the retryWithBackoff function catches the error, checks retriesRemaining (which is 0), and falls through to the end of the function without a return statement. This means it returns `undefined` instead of throwing the original error. Any caller checking `result.data` on the return value will get `undefined` with no indication of failure — a silent failure path that would be extremely hard to debug in production.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 50,
+        "confidence": 0.7,
+        "recommendation": "Verify the exact control flow when maxRetries=0. Ensure that on the final attempt failure, the original error is always re-thrown or a structured error result is returned. Add an explicit guard: if retriesRemaining reaches 0 and the last attempt failed, throw the last error or return an error-bearing result object."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client retries may not respect AbortSignal on in-flight requests",
+        "body": "The retry module accepts an optional AbortSignal for cancellation, but the glm-client.mjs integration needs to propagate the signal through to the actual fetch call on each retry attempt. If the signal is only checked between retries but not during the fetch itself, a hung connection would not be cancellable. This matters for the BigModel use case where timeouts can be long and the user may need to abort.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 99,
+        "confidence": 0.6,
+        "recommendation": "Trace how signal is passed from retryWithBackoff through to the fetch call in glm-client. Ensure signal is provided to fetch's options object on every attempt so that abort fires immediately, not just at retry boundaries."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error classification defaults to retry for unrecognized errors",
+        "body": "The error classifier appears to default unknown error types to 'retryable', which means any unexpected error from BigModel (including auth failures, permission errors, or account issues) would be retried up to maxRetries times before failing. This wastes quota, adds latency, and could mask real configuration problems that need immediate user attention rather than retrying.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.6,
+        "recommendation": "Default unknown/unclassified errors to non-retryable. Only explicitly cataloged transient errors (rate limits, 5xx, timeouts) should be retryable. Log a warning when an unclassified error is encountered so it can be added to the catalog."
+      },
+      {
+        "severity": "low",
+        "title": "check-release-ready.sh may fail silently on missing tools",
+        "body": "The new CI check script should validate that all required CLI tools (git, node, npm, etc.) are available before proceeding, otherwise it may produce misleading pass/fail results when run in environments missing expected tooling.",
+        "file": "scripts/ci/check-release-ready.sh",
+        "line_start": 1,
+        "line_end": 84,
+        "confidence": 0.5,
+        "recommendation": "Add a preflight check at the top of check-release-ready.sh that verifies all required commands exist and exit with a clear error message if any are missing."
+      }
+    ],
+    "next_steps": [
+      "Trace the exact control flow in retry.mjs when maxRetries=0 and the operation throws — confirm whether undefined is returned or the error propagates",
+      "Verify AbortSignal propagation from retryWithBackoff through glm-client's fetch calls",
+      "Review bigmodel-errors.mjs classifyError default case — ensure non-transient errors are not retried",
+      "Run the test suite locally with `node --test tests/retry.test.mjs tests/bigmodel-errors.test.mjs` to confirm coverage of edge cases"
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"v0.4.6 adds retry/backoff infrastructure and BigModel error classification. The retry logic has a meaningful defect: it silently swallows errors when retry is disabled (maxRetries=0), returning undefined instead of propagating the original error. This could cause silent failures in downstream callers. Additionally, the retry module's cancellation logic depends on AbortController but the integration with glm-client doesn't consistently pass signal through, creating a gap where in-flight retries can't be cancelled. Needs a targeted fix before shipping.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"retry.mjs silently returns undefined when maxRetries=0 and the operation fails\",\n      \"body\": \"When maxRetries is 0 (retry disabled), the retryWithBackoff function catches the error, checks retriesRemaining (which is 0), and falls through to the end of the function without a return statement. This means it returns `undefined` instead of throwing the original error. Any caller checking `result.data` on the return value will get `undefined` with no indication of failure — a silent failure path that would be extremely hard to debug in production.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 50,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Verify the exact control flow when maxRetries=0. Ensure that on the final attempt failure, the original error is always re-thrown or a structured error result is returned. Add an explicit guard: if retriesRemaining reaches 0 and the last attempt failed, throw the last error or return an error-bearing result object.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client retries may not respect AbortSignal on in-flight requests\",\n      \"body\": \"The retry module accepts an optional AbortSignal for cancellation, but the glm-client.mjs integration needs to propagate the signal through to the actual fetch call on each retry attempt. If the signal is only checked between retries but not during the fetch itself, a hung connection would not be cancellable. This matters for the BigModel use case where timeouts can be long and the user may need to abort.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 99,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Trace how signal is passed from retryWithBackoff through to the fetch call in glm-client. Ensure signal is provided to fetch's options object on every attempt so that abort fires immediately, not just at retry boundaries.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"bigmodel-errors.mjs error classification defaults to retry for unrecognized errors\",\n      \"body\": \"The error classifier appears to default unknown error types to 'retryable', which means any unexpected error from BigModel (including auth failures, permission errors, or account issues) would be retried up to maxRetries times before failing. This wastes quota, adds latency, and could mask real configuration problems that need immediate user attention rather than retrying.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Default unknown/unclassified errors to non-retryable. Only explicitly cataloged transient errors (rate limits, 5xx, timeouts) should be retryable. Log a warning when an unclassified error is encountered so it can be added to the catalog.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"check-release-ready.sh may fail silently on missing tools\",\n      \"body\": \"The new CI check script should validate that all required CLI tools (git, node, npm, etc.) are available before proceeding, otherwise it may produce misleading pass/fail results when run in environments missing expected tooling.\",\n      \"file\": \"scripts/ci/check-release-ready.sh\",\n      \"line_start\": 1,\n      \"line_end\": 84,\n      \"confidence\": 0.5,\n      \"recommendation\": \"Add a preflight check at the top of check-release-ready.sh that verifies all required commands exist and exit with a clear error message if any are missing.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Trace the exact control flow in retry.mjs when maxRetries=0 and the operation throws — confirm whether undefined is returned or the error propagates\",\n    \"Verify AbortSignal propagation from retryWithBackoff through glm-client's fetch calls\",\n    \"Review bigmodel-errors.mjs classifyError default case — ensure non-transient errors are not retried\",\n    \"Run the test suite locally with `node --test tests/retry.test.mjs tests/bigmodel-errors.test.mjs` to confirm coverage of edge cases\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:28:57.492Z"
+}

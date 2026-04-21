@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 9
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 119159,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.7 cumulative diff touches 84 files with 6600+ lines of new code. While test coverage exists for some new modules (retry, bigmodel-errors), two structural risks remain unresolvable without inspecting actual file contents: (1) the complete deletion of scripts/lib/process.mjs without confirmed verification that no live import path references it, and (2) significant changes to glm-client.mjs (155 lines changed) and tracked-jobs.mjs (78 lines changed) with no dedicated unit test files visible in the diff. The blast radius of a single 0.4.x minor version is unusually large, which increases integration risk.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Deleted module scripts/lib/process.mjs may leave dangling imports causing runtime crashes",
+        "body": "The diff stat shows scripts/lib/process.mjs was entirely removed (67 lines, 0 added). The commit log indicates this happened in 'Bundle F — ReferenceError + full thread/resume scaffolding purge' (225401a). If any surviving module still has an import from './process.mjs' or '../lib/process.mjs', the result is a MODULE_NOT_FOUND runtime error. This is exactly the class of failure that passes review but crashes in production because the import path is only exercised on a specific code branch (e.g., background job execution, error recovery). The file check-imports.mjs was modified (5 lines), which may validate this, but the check script itself could have its own gaps.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.65,
+        "recommendation": "Run `grep -r \"process\\.mjs\" scripts/` against the working tree at HEAD to confirm zero remaining references. Add a CI gate that fails if any import target does not exist on disk."
+      },
+      {
+        "severity": "high",
+        "title": "glm-client.mjs has 155 lines of changes with no dedicated test file",
+        "body": "scripts/lib/glm-client.mjs shows 155 lines changed (the largest delta among runtime modules after retry.mjs). This module presumably handles API communication, and the v0.4.6 commit explicitly mentions 'BigModel error dispatch + auto retry/backoff.' The test directory contains tests for bigmodel-errors and retry in isolation, but there is no glm-client.test.mjs or equivalent. Integration between the client, error dispatch, and retry is the exact layer where silent failures and wrong retry semantics (e.g., retrying non-idempotent mutations, swallowing auth errors) manifest. No test file for the client module appears in the diff.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.7,
+        "recommendation": "Add a glm-client.test.mjs covering: (a) retry is invoked only on retriable errors, (b) non-retriable errors (auth, 4xx) are not retried, (c) request body is not mutated across retries, (d) concurrent requests with overlapping retries do not corrupt shared state."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs and job-control.mjs changes lack dedicated test coverage",
+        "body": "scripts/lib/tracked-jobs.mjs (78 lines changed) and scripts/lib/job-control.mjs (20 lines changed) manage job lifecycle state. Neither has a dedicated test file in the tests/ directory. These modules are the most likely place for race conditions (concurrent job creation, stale job cleanup, orphaned state files). The state.mjs tests exist (81 lines) but may not cover the job-specific mutation paths.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.6,
+        "recommendation": "Add tracked-jobs.test.mjs covering: concurrent job creation, job state transitions under crash/restart, cleanup of stale jobs, and coherency when state file is corrupted or empty."
+      },
+      {
+        "severity": "medium",
+        "title": "Retry module (203 lines) risks non-idempotent operation duplication without caller-level guards",
+        "body": "scripts/lib/retry.mjs is a new 203-line module. The 352-line test file suggests solid unit coverage of the retry mechanism itself. However, the risk is not in the retry logic but in its callers: if glm-client.mjs retries operations that are not idempotent (e.g., POST to create a resource, job submission), duplicate side effects can occur. Without seeing the actual retry call sites, it is impossible to confirm that all retried operations are safe to repeat. The adversarial concern is that the retry layer is correct in isolation but dangerous at the integration boundary.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.55,
+        "recommendation": "Audit every call site that invokes the retry wrapper. Document which operations are idempotent and safe to retry. For non-idempotent operations, either use idempotency keys or exclude them from automatic retry."
+      }
+    ],
+    "next_steps": [
+      "Grep for all references to the deleted scripts/lib/process.mjs to confirm zero dangling imports",
+      "Read scripts/lib/glm-client.mjs to audit retry call sites for idempotency safety",
+      "Read scripts/lib/tracked-jobs.mjs for state mutation race conditions",
+      "Verify that the retry wrapper is never applied to non-idempotent HTTP methods (POST, PATCH) without guards",
+      "Confirm job state file corruption is handled gracefully on startup"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.7 cumulative diff touches 84 files with 6600+ lines of new code. While test coverage exists for some new modules (retry, bigmodel-errors), two structural risks remain unresolvable without inspecting actual file contents: (1) the complete deletion of scripts/lib/process.mjs without confirmed verification that no live import path references it, and (2) significant changes to glm-client.mjs (155 lines changed) and tracked-jobs.mjs (78 lines changed) with no dedicated unit test files visible in the diff. The blast radius of a single 0.4.x minor version is unusually large, which increases integration risk.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Deleted module scripts/lib/process.mjs may leave dangling imports causing runtime crashes\",\"body\":\"The diff stat shows scripts/lib/process.mjs was entirely removed (67 lines, 0 added). The commit log indicates this happened in 'Bundle F — ReferenceError + full thread/resume scaffolding purge' (225401a). If any surviving module still has an import from './process.mjs' or '../lib/process.mjs', the result is a MODULE_NOT_FOUND runtime error. This is exactly the class of failure that passes review but crashes in production because the import path is only exercised on a specific code branch (e.g., background job execution, error recovery). The file check-imports.mjs was modified (5 lines), which may validate this, but the check script itself could have its own gaps.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":1,\"confidence\":0.65,\"recommendation\":\"Run `grep -r \\\"process\\\\.mjs\\\" scripts/` against the working tree at HEAD to confirm zero remaining references. Add a CI gate that fails if any import target does not exist on disk.\"},{\"severity\":\"high\",\"title\":\"glm-client.mjs has 155 lines of changes with no dedicated test file\",\"body\":\"scripts/lib/glm-client.mjs shows 155 lines changed (the largest delta among runtime modules after retry.mjs). This module presumably handles API communication, and the v0.4.6 commit explicitly mentions 'BigModel error dispatch + auto retry/backoff.' The test directory contains tests for bigmodel-errors and retry in isolation, but there is no glm-client.test.mjs or equivalent. Integration between the client, error dispatch, and retry is the exact layer where silent failures and wrong retry semantics (e.g., retrying non-idempotent mutations, swallowing auth errors) manifest. No test file for the client module appears in the diff.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.7,\"recommendation\":\"Add a glm-client.test.mjs covering: (a) retry is invoked only on retriable errors, (b) non-retriable errors (auth, 4xx) are not retried, (c) request body is not mutated across retries, (d) concurrent requests with overlapping retries do not corrupt shared state.\"},{\"severity\":\"medium\",\"title\":\"tracked-jobs.mjs and job-control.mjs changes lack dedicated test coverage\",\"body\":\"scripts/lib/tracked-jobs.mjs (78 lines changed) and scripts/lib/job-control.mjs (20 lines changed) manage job lifecycle state. Neither has a dedicated test file in the tests/ directory. These modules are the most likely place for race conditions (concurrent job creation, stale job cleanup, orphaned state files). The state.mjs tests exist (81 lines) but may not cover the job-specific mutation paths.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.6,\"recommendation\":\"Add tracked-jobs.test.mjs covering: concurrent job creation, job state transitions under crash/restart, cleanup of stale jobs, and coherency when state file is corrupted or empty.\"},{\"severity\":\"medium\",\"title\":\"Retry module (203 lines) risks non-idempotent operation duplication without caller-level guards\",\"body\":\"scripts/lib/retry.mjs is a new 203-line module. The 352-line test file suggests solid unit coverage of the retry mechanism itself. However, the risk is not in the retry logic but in its callers: if glm-client.mjs retries operations that are not idempotent (e.g., POST to create a resource, job submission), duplicate side effects can occur. Without seeing the actual retry call sites, it is impossible to confirm that all retried operations are safe to repeat. The adversarial concern is that the retry layer is correct in isolation but dangerous at the integration boundary.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.55,\"recommendation\":\"Audit every call site that invokes the retry wrapper. Document which operations are idempotent and safe to retry. For non-idempotent operations, either use idempotency keys or exclude them from automatic retry.\"}],\"next_steps\":[\"Grep for all references to the deleted scripts/lib/process.mjs to confirm zero dangling imports\",\"Read scripts/lib/glm-client.mjs to audit retry call sites for idempotency safety\",\"Read scripts/lib/tracked-jobs.mjs for state mutation race conditions\",\"Verify that the retry wrapper is never applied to non-idempotent HTTP methods (POST, PATCH) without guards\",\"Confirm job state file corruption is handled gracefully on startup\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T15:17:41.900Z"
+}

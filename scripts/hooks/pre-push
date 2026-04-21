@@ -31,7 +31,11 @@ fi
 # whole push (correct behavior — partial pushes are worse than none).
 # Non-tag refs (branch pushes) fall through the if-guard unchanged.
 while read -r _local_ref _local_sha remote_ref _remote_sha; do
-  if [[ "$remote_ref" =~ ^refs/tags/(v[0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+  # Matches vX.Y.Z and SemVer-2.0 prereleases (vX.Y.Z-<prerelease>,
+  # e.g. v0.4.7-beta1, v1.0.0-rc.2). check-release-ready.sh applies
+  # the same release-readiness checks to both — prereleases still
+  # need a matching CHANGELOG section and a READY release_card.
+  if [[ "$remote_ref" =~ ^refs/tags/(v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?)$ ]]; then
     TAG="${BASH_REMATCH[1]}"
     echo ""
     echo "pre-push: release tag $TAG detected — running release-ready gate…"

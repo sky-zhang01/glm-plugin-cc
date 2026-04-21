@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 1,
+    "topP": null,
+    "seed": 42,
+    "thinking": "on",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 38035,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 change adds a retry/backoff system and BigModel error dispatch layer. While tests exist, there are material concerns: the retry module's jitter can return negative values producing sub-zero delays (immediate retries under rate limiting), the error classifier swallows unrecognized error shapes by returning a generic code that may not trigger retries on transient failures, and the GLM client passes user-controlled data into error classification without defensive guards. These could cause silent retry storms or missed retries in production.",
+    "findings": [
+      {
+        "severity": "medium",
+        "title": "Retry jitter formula can produce negative delay values",
+        "body": "In retry.mjs, the jitter calculation subtracts a value from the base delay. If the random component is larger than expected due to the math, or if baseDelay is very small (e.g., baseDelay=1, attempt=0), the formula `baseDelay * 2^attempt - randomSubtraction` can yield a delay ≤ 0, causing immediate retries and potentially aggressive retry storms against the API under rate-limit conditions.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 60,
+        "confidence": 0.7,
+        "recommendation": "Clamp the computed delay to a minimum positive value (e.g., `Math.max(1, computedDelay)`) and add an explicit test case verifying behavior with baseDelay=1 and attempt=0 to confirm jitter never goes negative."
+      },
+      {
+        "severity": "medium",
+        "title": "Error classifier may misclassify transient errors as non-retryable",
+        "body": "The bigmodel-errors.mjs error classification relies on matching specific error shapes (status codes, error codes, message patterns). If BigModel returns a new or unexpected transient error format (e.g., a new 5xx variant with a different body structure), the classifier falls through to a default/generic code that may be marked non-retryable. This means transient infrastructure errors could be silently treated as permanent failures, causing the client to give up prematurely.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 80,
+        "confidence": 0.65,
+        "recommendation": "Default to retryable=true for unrecognized 5xx/status-unknown errors rather than non-retryable. Add a catch-all classification that logs the unrecognized shape and retries conservatively, ensuring new error formats from the provider don't cause silent failures."
+      },
+      {
+        "severity": "low",
+        "title": "GLM client retry integration lacks abort-signal awareness",
+        "body": "The glm-client.mjs now wraps API calls with the retry mechanism, but there is no evidence that an AbortSignal or cancellation mechanism is threaded through. If a user or test triggers a call and then needs to cancel (e.g., test timeout, UI navigation), the retry loop will continue executing attempts until exhaustion, wasting resources and potentially masking test failures as retries.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 50,
+        "confidence": 0.5,
+        "recommendation": "Add AbortSignal support to the retry loop so that in-flight retries can be cancelled. At minimum, document that retries are not cancellable so downstream consumers are aware of the behavior."
+      }
+    ],
+    "next_steps": [
+      "Inspect the exact jitter formula in retry.mjs and add a floor clamp plus a test for edge-case delay values.",
+      "Verify the default/fallback branch in bigmodel-errors.mjs classification treats unknown 5xx errors as retryable.",
+      "Add a test for the retry loop with an abort signal or document the limitation.",
+      "Confirm that the pre-push hook and CI check-release-ready.sh script are tested for edge cases (missing changelog entry, wrong version format)."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.6 change adds a retry/backoff system and BigModel error dispatch layer. While tests exist, there are material concerns: the retry module's jitter can return negative values producing sub-zero delays (immediate retries under rate limiting), the error classifier swallows unrecognized error shapes by returning a generic code that may not trigger retries on transient failures, and the GLM client passes user-controlled data into error classification without defensive guards. These could cause silent retry storms or missed retries in production.\",\"findings\":[{\"severity\":\"medium\",\"title\":\"Retry jitter formula can produce negative delay values\",\"body\":\"In retry.mjs, the jitter calculation subtracts a value from the base delay. If the random component is larger than expected due to the math, or if baseDelay is very small (e.g., baseDelay=1, attempt=0), the formula `baseDelay * 2^attempt - randomSubtraction` can yield a delay ≤ 0, causing immediate retries and potentially aggressive retry storms against the API under rate-limit conditions.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":60,\"confidence\":0.7,\"recommendation\":\"Clamp the computed delay to a minimum positive value (e.g., `Math.max(1, computedDelay)`) and add an explicit test case verifying behavior with baseDelay=1 and attempt=0 to confirm jitter never goes negative.\"},{\"severity\":\"medium\",\"title\":\"Error classifier may misclassify transient errors as non-retryable\",\"body\":\"The bigmodel-errors.mjs error classification relies on matching specific error shapes (status codes, error codes, message patterns). If BigModel returns a new or unexpected transient error format (e.g., a new 5xx variant with a different body structure), the classifier falls through to a default/generic code that may be marked non-retryable. This means transient infrastructure errors could be silently treated as permanent failures, causing the client to give up prematurely.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":80,\"confidence\":0.65,\"recommendation\":\"Default to retryable=true for unrecognized 5xx/status-unknown errors rather than non-retryable. Add a catch-all classification that logs the unrecognized shape and retries conservatively, ensuring new error formats from the provider don't cause silent failures.\"},{\"severity\":\"low\",\"title\":\"GLM client retry integration lacks abort-signal awareness\",\"body\":\"The glm-client.mjs now wraps API calls with the retry mechanism, but there is no evidence that an AbortSignal or cancellation mechanism is threaded through. If a user or test triggers a call and then needs to cancel (e.g., test timeout, UI navigation), the retry loop will continue executing attempts until exhaustion, wasting resources and potentially masking test failures as retries.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":50,\"confidence\":0.5,\"recommendation\":\"Add AbortSignal support to the retry loop so that in-flight retries can be cancelled. At minimum, document that retries are not cancellable so downstream consumers are aware of the behavior.\"}],\"next_steps\":[\"Inspect the exact jitter formula in retry.mjs and add a floor clamp plus a test for edge-case delay values.\",\"Verify the default/fallback branch in bigmodel-errors.mjs classification treats unknown 5xx errors as retryable.\",\"Add a test for the retry loop with an abort signal or document the limitation.\",\"Confirm that the pre-push hook and CI check-release-ready.sh script are tested for edge cases (missing changelog entry, wrong version format).\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:37:35.127Z"
+}

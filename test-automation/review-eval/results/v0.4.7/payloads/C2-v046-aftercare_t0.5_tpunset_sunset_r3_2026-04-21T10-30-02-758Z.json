@@ -1,0 +1,99 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 6,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 65264,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 release introduces retry/backoff and BigModel error dispatch infrastructure that has several material gaps: retry logic silently swallows errors in edge cases, the client conflates retryable and non-retryable error paths in ways that can produce confusing diagnostics, and pre-push hooks + CI checks lack test coverage themselves. These are the exact components that fail silently under production stress.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry with maxAttempts=0 or negative values silently returns undefined",
+        "body": "In retry.mjs, if maxAttempts is set to 0 or a negative value (e.g. via misconfiguration), the retry loop never executes and the function returns undefined without throwing. Any caller that destructures or assumes a non-undefined return will get a silent failure. This is the kind of edge case that surfaces under config drift or env-var typos.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 60,
+        "confidence": 0.7,
+        "recommendation": "Add a guard at the top of the retry function: if maxAttempts < 1 throw a clear error or clamp to 1. Do not silently return undefined."
+      },
+      {
+        "severity": "high",
+        "title": "Retry result wrapper returns error object as 'result' on non-throwing failure paths",
+        "body": "When the retry loop exhausts all attempts and the last attempt returned an error object (not thrown), the function returns { ok: false, result: lastError }. Callers checking result.ok but then unconditionally using result.result will receive an error object where they expect a valid payload. If any downstream code treats result.result as a successful API response (e.g. accessing .data, .choices), it will produce confusing 'cannot read property of undefined' errors rather than a clear 'all retries exhausted' message.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 80,
+        "confidence": 0.75,
+        "recommendation": "Ensure the return type on the failure path is clearly documented and that callers explicitly check ok before accessing result. Consider throwing on exhaustion by default to avoid silent propagation of error-shaped objects."
+      },
+      {
+        "severity": "medium",
+        "title": "BigModel error dispatcher may return null/undefined for unrecognized error shapes",
+        "body": "If the API returns an error response with an unexpected structure (e.g. a new error code, or a response where error is not at the expected JSON path), the classify function may return undefined or a generic catch-all that downstream retry logic cannot act on correctly. This means new or changed API error formats will silently fall through without classification, potentially retrying non-retryable errors or vice-versa.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 100,
+        "confidence": 0.7,
+        "recommendation": "Add an explicit fallback classification for unrecognized error shapes that logs a warning and defaults to non-retryable, so new error formats fail loudly rather than silently."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client integrates retry but does not propagate retry exhaustion signal to callers",
+        "body": "The glm-client now wraps requests in retry logic, but if all retries are exhausted, the error/feedback to the calling code may be indistinguishable from a single transient failure. Downstream code (prompts, orchestration) cannot tell 'failed once' from 'failed N times, truly down' and may make incorrect decisions about whether to continue, abort, or queue for later.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 99,
+        "confidence": 0.7,
+        "recommendation": "Ensure that when retry is exhausted, the error thrown or returned includes a distinct marker (e.g. code='RETRY_EXHAUSTED', attemptCount) so callers can differentiate from single-shot failures."
+      },
+      {
+        "severity": "medium",
+        "title": "No tests for retry + error dispatch integration with actual glm-client call paths",
+        "body": "retry.test.mjs and bigmodel-errors.test.mjs test their respective modules in isolation. There are no integration tests that exercise the glm-client calling retry with real-ish error shapes classified by bigmodel-errors. This is the exact surface where silent failures hide: unit tests pass but the composed behavior under real API error responses is unverified.",
+        "file": "tests/retry.test.mjs",
+        "line_start": 1,
+        "line_end": 352,
+        "confidence": 0.65,
+        "recommendation": "Add at least one integration test that calls glm-client with a mocked fetch returning various BigModel error shapes, verifying that retry classification and backoff compose correctly end-to-end."
+      },
+      {
+        "severity": "low",
+        "title": "pre-push hook exits 0 on success but does not trap signal errors from subprocesses",
+        "body": "The pre-push hook runs check-release-ready.sh but if that script is killed by a signal (OOM, SIGKILL), the hook may not propagate the failure correctly, allowing a push with a dirty or unvalidated state.",
+        "file": "scripts/hooks/pre-push",
+        "line_start": 1,
+        "line_end": 22,
+        "confidence": 0.5,
+        "recommendation": "After running the subprocess, check for signal-based exit (exit code > 128) and explicitly exit 1 to block the push."
+      }
+    ],
+    "next_steps": [
+      "Read the full retry.mjs and classify the exact return paths for exhausted retries and edge-case inputs.",
+      "Read the full glm-client.mjs diff to confirm how retry results are consumed and whether exhaustion is distinguishable.",
+      "Read bigmodel-errors.mjs to verify the fallback behavior for unrecognized error shapes.",
+      "Add integration tests for the retry + error dispatch + client composition before shipping."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.6 release introduces retry/backoff and BigModel error dispatch infrastructure that has several material gaps: retry logic silently swallows errors in edge cases, the client conflates retryable and non-retryable error paths in ways that can produce confusing diagnostics, and pre-push hooks + CI checks lack test coverage themselves. These are the exact components that fail silently under production stress.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Retry with maxAttempts=0 or negative values silently returns undefined\",\"body\":\"In retry.mjs, if maxAttempts is set to 0 or a negative value (e.g. via misconfiguration), the retry loop never executes and the function returns undefined without throwing. Any caller that destructures or assumes a non-undefined return will get a silent failure. This is the kind of edge case that surfaces under config drift or env-var typos.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":60,\"confidence\":0.7,\"recommendation\":\"Add a guard at the top of the retry function: if maxAttempts < 1 throw a clear error or clamp to 1. Do not silently return undefined.\"},{\"severity\":\"high\",\"title\":\"Retry result wrapper returns error object as 'result' on non-throwing failure paths\",\"body\":\"When the retry loop exhausts all attempts and the last attempt returned an error object (not thrown), the function returns { ok: false, result: lastError }. Callers checking result.ok but then unconditionally using result.result will receive an error object where they expect a valid payload. If any downstream code treats result.result as a successful API response (e.g. accessing .data, .choices), it will produce confusing 'cannot read property of undefined' errors rather than a clear 'all retries exhausted' message.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":80,\"confidence\":0.75,\"recommendation\":\"Ensure the return type on the failure path is clearly documented and that callers explicitly check ok before accessing result. Consider throwing on exhaustion by default to avoid silent propagation of error-shaped objects.\"},{\"severity\":\"medium\",\"title\":\"BigModel error dispatcher may return null/undefined for unrecognized error shapes\",\"body\":\"If the API returns an error response with an unexpected structure (e.g. a new error code, or a response where error is not at the expected JSON path), the classify function may return undefined or a generic catch-all that downstream retry logic cannot act on correctly. This means new or changed API error formats will silently fall through without classification, potentially retrying non-retryable errors or vice-versa.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":100,\"confidence\":0.7,\"recommendation\":\"Add an explicit fallback classification for unrecognized error shapes that logs a warning and defaults to non-retryable, so new error formats fail loudly rather than silently.\"},{\"severity\":\"medium\",\"title\":\"glm-client integrates retry but does not propagate retry exhaustion signal to callers\",\"body\":\"The glm-client now wraps requests in retry logic, but if all retries are exhausted, the error/feedback to the calling code may be indistinguishable from a single transient failure. Downstream code (prompts, orchestration) cannot tell 'failed once' from 'failed N times, truly down' and may make incorrect decisions about whether to continue, abort, or queue for later.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":99,\"confidence\":0.7,\"recommendation\":\"Ensure that when retry is exhausted, the error thrown or returned includes a distinct marker (e.g. code='RETRY_EXHAUSTED', attemptCount) so callers can differentiate from single-shot failures.\"},{\"severity\":\"medium\",\"title\":\"No tests for retry + error dispatch integration with actual glm-client call paths\",\"body\":\"retry.test.mjs and bigmodel-errors.test.mjs test their respective modules in isolation. There are no integration tests that exercise the glm-client calling retry with real-ish error shapes classified by bigmodel-errors. This is the exact surface where silent failures hide: unit tests pass but the composed behavior under real API error responses is unverified.\",\"file\":\"tests/retry.test.mjs\",\"line_start\":1,\"line_end\":352,\"confidence\":0.65,\"recommendation\":\"Add at least one integration test that calls glm-client with a mocked fetch returning various BigModel error shapes, verifying that retry classification and backoff compose correctly end-to-end.\"},{\"severity\":\"low\",\"title\":\"pre-push hook exits 0 on success but does not trap signal errors from subprocesses\",\"body\":\"The pre-push hook runs check-release-ready.sh but if that script is killed by a signal (OOM, SIGKILL), the hook may not propagate the failure correctly, allowing a push with a dirty or unvalidated state.\",\"file\":\"scripts/hooks/pre-push\",\"line_start\":1,\"line_end\":22,\"confidence\":0.5,\"recommendation\":\"After running the subprocess, check for signal-based exit (exit code > 128) and explicitly exit 1 to block the push.\"}],\"next_steps\":[\"Read the full retry.mjs and classify the exact return paths for exhausted retries and edge-case inputs.\",\"Read the full glm-client.mjs diff to confirm how retry results are consumed and whether exhaustion is distinguishable.\",\"Read bigmodel-errors.mjs to verify the fallback behavior for unrecognized error shapes.\",\"Add integration tests for the retry + error dispatch + client composition before shipping.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:30:02.814Z"
+}

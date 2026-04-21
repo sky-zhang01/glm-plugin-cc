@@ -1,0 +1,33 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 24
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 11591,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "approve",
+    "summary": "This commit is a low-risk configuration/documentation change: it adds an interactive menu to the setup command when already configured, renames the npm scope from `@anthropics` to `@anthropic-ai`, updates changelog and release notes. No executable logic, auth boundaries, data mutations, or runtime code paths are present in the diff — only Markdown files, JSON metadata, and package.json. No material adversarial finding could be sustained.",
+    "findings": [],
+    "next_steps": []
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"approve\",\n  \"summary\": \"This commit is a low-risk configuration/documentation change: it adds an interactive menu to the setup command when already configured, renames the npm scope from `@anthropics` to `@anthropic-ai`, updates changelog and release notes. No executable logic, auth boundaries, data mutations, or runtime code paths are present in the diff — only Markdown files, JSON metadata, and package.json. No material adversarial finding could be sustained.\",\n  \"findings\": [],\n  \"next_steps\": []\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:39:40.877Z"
+}

@@ -1,0 +1,91 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 20
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 50673,
+    "error_code": ""
+  },
+  "parsed": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces critical retry/backoff logic in retry.mjs, BigModel error dispatch, and a companion client with job tracking. While test coverage is broad, several high-severity concerns remain: the retry module has no circuit-breaker or maximum-wall-time cap (only attempt counting), the job-control/tracked-jobs modules lack crash-safe persistence guarantees, and the new companion script expands the CLI attack surface without clear input sanitization. These represent real production risks under sustained failure or unclean shutdown.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs lacks maximum-wall-time / circuit-breaker guard",
+        "body": "The retry module (203 new lines) implements exponential backoff with jitter and a max-attempts ceiling, but there is no maximum elapsed wall-time cap. Under pathological conditions (e.g., a downstream API that takes 30s to return a retryable 429/503), the total elapsed time can grow unboundedly: 10 retries × 30s response + exponential backoff delays. This can stall CLI invocations indefinitely and hide failures from users. Tests cover attempt counting but there is no test for a wall-time ceiling because none exists. A sustained partial-outage scenario will cause user-visible hangs with no escape short of SIGKILL.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.82,
+        "recommendation": "Add an optional `maxElapsedMs` parameter to the retry config. Abort with a distinct error code when total elapsed time exceeds it. Default it to something sane (e.g., 5 minutes) so CLI callers always terminate. Add a test for the wall-time cap."
+      },
+      {
+        "severity": "high",
+        "title": "tracked-jobs.mjs state file can be corrupted on concurrent or crashed writes",
+        "body": "The tracked-jobs module (78 new/changed lines) appears to persist job state to disk for cross-process visibility. If two companion invocations write the state file concurrently (race condition on parallel CLI calls), or if the process is killed mid-write (unclean shutdown during Ctrl+C), the state file can be truncated or contain partial JSON. There is no evidence of atomic write (write-to-temp-then-rename) or file-locking in the diff. This can cause all subsequent job queries to fail with a parse error, effectively losing track of running jobs — a silent data-loss scenario.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.78,
+        "recommendation": "Use atomic file writes: write to a temporary file in the same directory, then rename over the target. Add a try/catch around state-file reads that handles malformed JSON by resetting to empty state (with a warning) rather than throwing. Add a concurrency test."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error classification may silently swallow unknown error shapes",
+        "body": "The new bigmodel-errors module (168 lines) classifies API errors into retryable vs non-retryable categories. If the upstream API changes its error response schema (version skew), errors that should be classified as retryable may fall through to a default 'non-retryable' classification, causing the retry layer to give up immediately. This is a silent failure — the user sees a generic error with no indication that the classification was wrong. The tests cover known error shapes but there is no logging or metrics emission when an unrecognized error structure is encountered.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.72,
+        "recommendation": "When an error response does not match any known classification pattern, log a warning with the full error payload (or a sanitized subset) so operators can detect schema drift. Consider defaulting unknown errors to retryable (with a low retry count) rather than non-retryable, to hedge against upstream changes."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs expanded without input path validation on API key / endpoint URLs",
+        "body": "The glm-client module (155 changed lines) handles outbound HTTP requests to the BigModel API. The diff expands request handling with retry integration. If GLM_API_KEY or the endpoint URL contains whitespace, null bytes, or shell-unsafe characters (e.g., from a misconfigured .env file), these are passed directly to fetch() without validation. A malformed URL could cause an unhandled exception that bypasses the retry layer entirely, producing a stack trace leak instead of a clean user-facing error.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.65,
+        "recommendation": "Add upfront validation of the API key and endpoint URL configuration at client construction time. Reject values containing control characters, whitespace, or obviously malformed URLs with a clear configuration error message before any HTTP request is attempted."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs file operations lack crash-safety — partial writes on SIGINT/SIGTERM",
+        "body": "The state module (32 changed lines) handles reading/writing persistent state. If the user hits Ctrl+C during a state write, the file can be left in a partially-written state. On next invocation, the corrupt state file will cause a JSON parse error, potentially blocking all future operations. The module does not register a signal handler to avoid mid-write interruption, nor does it use atomic writes.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.68,
+        "recommendation": "Adopt atomic write (write-to-temp, fsync, rename) for all state persistence operations. Ensure the read path handles corrupt/empty state files gracefully by resetting to defaults with a user-visible warning rather than crashing."
+      }
+    ],
+    "next_steps": [
+      "Add a maximum wall-time parameter to retry.mjs with a sensible default and test for it.",
+      "Audit tracked-jobs.mjs and state.mjs for atomic write patterns — implement write-to-temp-then-rename.",
+      "Add structured logging when bigmodel-errors.mjs encounters an unrecognized error shape.",
+      "Add input validation to glm-client.mjs for API key and endpoint URL at construction time.",
+      "Add a crash-recovery test: corrupt the state/jobs file on disk, then verify the CLI degrades gracefully instead of throwing an unhandled exception."
+    ]
+  },
+  "rawOutputHead": "{\n  \"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 diff introduces critical retry/backoff logic in retry.mjs, BigModel error dispatch, and a companion client with job tracking. While test coverage is broad, several high-severity concerns remain: the retry module has no circuit-breaker or maximum-wall-time cap (only attempt counting), the job-control/tracked-jobs modules lack crash-safe persistence guarantees, and the new companion script expands the CLI attack surface without clear input sanitization. These represent real production risks under sustained failure or unclean shutdown.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"retry.mjs lacks maximum-wall-time / circuit-breaker guard\",\n      \"body\": \"The retry module (203 new lines) implements exponential backoff with jitter and a max-attempts ceiling, but there is no maximum elapsed wall-time cap. Under pathological conditions (e.g., a downstream API that takes 30s to return a retryable 429/503), the total elapsed time can grow unboundedly: 10 retries × 30s response + exponential backoff delays. This can stall CLI invocations indefinitely and hide failures from users. Tests cover attempt counting but there is no test for a wall-time ceiling because none exists. A sustained partial-outage scenario will cause user-visible hangs with no escape short of SIGKILL.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.82,\n      \"recommendation\": \"Add an optional `maxElapsedMs` parameter to the retry config. Abort with a distinct error code when total elapsed time exceeds it. Default it to something sane (e.g., 5 minutes) so CLI callers always terminate. Add a test for the wall-time cap.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"tracked-jobs.mjs state file can be corrupted on concurrent or crashed writes\",\n      \"body\": \"The tracked-jobs module (78 new/changed lines) appears to persist job state to disk for cross-process visibility. If two companion invocations write the state file concurrently (race condition on parallel CLI calls), or if the process is killed mid-write (unclean shutdown during Ctrl+C), the state file can be truncated or contain partial JSON. There is no evidence of atomic write (write-to-temp-then-rename) or file-locking in the diff. This can cause all subsequent job queries to fail with a parse error, effectively losing track of running jobs — a silent data-loss scenario.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Use atomic file writes: write to a temporary file in the same directory, then rename over the target. Add a try/catch around state-file reads that handles malformed JSON by resetting to empty state (with a warning) rather than throwing. Add a concurrency test.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"bigmodel-errors.mjs error classification may silently swallow unknown error shapes\",\n      \"body\": \"The new bigmodel-errors module (168 lines) classifies API errors into retryable vs non-retryable categories. If the upstream API changes its error response schema (version skew), errors that should be classified as retryable may fall through to a default 'non-retryable' classification, causing the retry layer to give up immediately. This is a silent failure — the user sees a generic error with no indication that the classification was wrong. The tests cover known error shapes but there is no logging or metrics emission when an unrecognized error structure is encountered.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.72,\n      \"recommendation\": \"When an error response does not match any known classification pattern, log a warning with the full error payload (or a sanitized subset) so operators can detect schema drift. Consider defaulting unknown errors to retryable (with a low retry count) rather than non-retryable, to hedge against upstream changes.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client.mjs expanded without input path validation on API key / endpoint URLs\",\n      \"body\": \"The glm-client module (155 changed lines) handles outbound HTTP requests to the BigModel API. The diff expands request handling with retry integration. If GLM_API_KEY or the endpoint URL contains whitespace, null bytes, or shell-unsafe characters (e.g., from a misconfigured .env file), these are passed directly to fetch() without validation. A malformed URL could cause an unhandled exception that bypasses the retry layer entirely, producing a stack trace leak instead of a clean user-facing error.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Add upfront validation of the API key and endpoint URL configuration at client construction time. Reject values containing control characters, whitespace, or obviously malformed URLs with a clear configuration error message before any HTTP request is attempted.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"state.mjs file operations lack crash-safety — partial writes on SIGINT/SIGTERM\",\n      \"body\": \"The state module (32 changed lines) handles reading/writing persistent state. If the user hits Ctrl+C during a state write, the file can be left in a partially-written state. On next invocation, the corrupt state file will cause a JSON parse error, potentially blocking all future operations. The module does not register a signal handler to avoid mid-write interruption, nor does it use atomic writes.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Adopt atomic write (write-to-temp, fsync, rename) for all state persistence operations. Ensure the read path handles corrupt/empty state files gracefully by resetting to defaults with a user-visible warning rather than crashing.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Add a maximum wall-time parameter to retry.mjs with a sensible default and test for it.\",\n    \"Audit tracked-jobs.mjs and state.mjs for atomic write patterns — implement write-to-temp-then-rename.\",\n    \"Add structured logging when bigmodel-errors.mjs encounters an unrecognized error shape.\",\n    \"Add input validation to glm-client.mjs for API key and endpoint URL at construction time.\",\n    \"Add a crash-recovery test: corrupt the state/jobs file on disk, then verify the CLI degrades gracefully instead of throwing an unhandled exception.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:50:12.595Z"
+}

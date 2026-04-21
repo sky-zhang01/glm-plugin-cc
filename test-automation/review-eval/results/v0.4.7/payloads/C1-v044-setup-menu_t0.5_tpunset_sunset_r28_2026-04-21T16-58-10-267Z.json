@@ -1,0 +1,33 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 28
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 22649,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "approve",
+    "summary": "This commit adds an interactive re-configuration menu to the setup command and renames the npm scope from @anthropic to @anthropic-ai. Changes are limited to markdown commands, JSON metadata, changelog, and release card — all configuration/documentation files with no executable runtime code. No material safety, auth, data-loss, or state-management concerns apply to this change.",
+    "findings": [],
+    "next_steps": []
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"approve\",\n  \"summary\": \"This commit adds an interactive re-configuration menu to the setup command and renames the npm scope from @anthropic to @anthropic-ai. Changes are limited to markdown commands, JSON metadata, changelog, and release card — all configuration/documentation files with no executable runtime code. No material safety, auth, data-loss, or state-management concerns apply to this change.\",\n  \"findings\": [],\n  \"next_steps\": []\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:58:10.267Z"
+}

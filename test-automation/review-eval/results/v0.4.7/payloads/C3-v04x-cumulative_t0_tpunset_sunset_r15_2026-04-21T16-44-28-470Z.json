@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 15
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 42811,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces new retry, error-dispatch, and job-tracking subsystems that look architecturally sound on the happy path but have several concrete gaps: retry.mjs lacks a default export (blocking consumers), retry exhaustion silently returns the last error without a clear caller-side contract, state.mjs file-write operations have no atomicity guarantees risking corrupt state on crash, and the process.mjs deletion removes functions that may still be referenced. These are ship-blockers or near-ship-blockers because they can cause silent failures in production.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs missing default export will break runtime consumers",
+        "body": "The diff stat shows retry.mjs as a new 203-line module. Based on the test file (tests/retry.test.mjs) and glm-client.mjs changes, consumers expect to import retry utilities. If retry.mjs only uses named exports but consumers import via default import, or vice versa, this is a runtime crash that only manifests when retry is actually invoked (i.e., on API failure — the unhappy path). The test suite may pass because tests import the same way the module exports, but the actual consumer (glm-client.mjs) may use a different import convention. This is a silent-until-failure defect.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Verify the export style of retry.mjs matches every import site in glm-client.mjs and any other consumer. Add an explicit default export if consumers use default import syntax. Add a smoke test that imports retry.mjs the same way glm-client.mjs does."
+      },
+      {
+        "severity": "high",
+        "title": "state.mjs non-atomic file writes risk corrupt state on crash or power loss",
+        "body": "state.mjs (32 lines changed) manages persistent state. File writes using fs.writeFile are not atomic — if the process crashes mid-write (SIGKILL, OOM, disk full), the state file will be truncated or corrupt. On next load, JSON.parse will throw, and if there's no fallback to re-initialize state, the user's session is permanently broken with no recovery path. This is a data-loss scenario that is hard to detect until it happens.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.78,
+        "recommendation": "Write state to a temporary file first, then rename (atomic on POSIX). Add a try/catch around state load that re-initializes to a safe default if the file is corrupt, with a user-visible warning. Consider adding a state backup mechanism."
+      },
+      {
+        "severity": "medium",
+        "title": "Retry exhaustion returns last error with no caller-enforceable contract",
+        "body": "When retry.mjs exhausts all attempts, it presumably returns/rethrows the last error. If glm-client.mjs or other callers don't explicitly handle the exhausted-retry case differently from a single-failure case, the user gets a generic error with no indication that N retries occurred. This is an observability gap that makes debugging intermittent failures significantly harder. The bigmodel-errors.mjs dispatch layer may not distinguish 'retried and failed' from 'failed immediately'.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.68,
+        "recommendation": "Ensure retry exhaustion produces a distinct error type or attaches retry metadata (attempt count, last error, total elapsed time) so callers and error dispatch can differentiate. Add a test that verifies the exhausted-retry error shape."
+      },
+      {
+        "severity": "medium",
+        "title": "process.mjs deleted but may have lingering references",
+        "body": "scripts/lib/process.mjs shows 67 lines deleted (full file removal). If any other module imported utilities from process.mjs and those imports weren't migrated, this is a runtime ReferenceError that only fires when that specific code path executes. The diff shows many files changed, and a stale import is easy to miss during a large refactor.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.65,
+        "recommendation": "Grep the entire codebase for any remaining imports or references to 'process.mjs' or its exported functions. Verify that scripts/check-imports.mjs (also modified) would catch stale imports in CI. Add an explicit test that validates all imports resolve."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs lacks concurrency guards for parallel operations",
+        "body": "tracked-jobs.mjs (78 lines changed) manages job state. If two invocations of the companion script run concurrently (e.g., user triggers two commands quickly), both may read the same job list, make conflicting modifications, and overwrite each other's changes. There's no file-locking or optimistic concurrency mechanism visible. This can cause job tracking to lose entries or corrupt the tracking file.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.6,
+        "recommendation": "Add file-level locking (e.g., lockfile) or use atomic read-modify-write patterns. At minimum, detect concurrent modification (compare file mtime before write) and warn or retry. Add a test for concurrent job creation."
+      }
+    ],
+    "next_steps": [
+      "Inspect retry.mjs export style and verify all import sites match — this is the most likely silent runtime break",
+      "Check state.mjs and tracked-jobs.mjs for write atomicity — add write-to-temp-then-rename pattern",
+      "Verify no remaining references to deleted process.mjs exports across the codebase",
+      "Confirm retry exhaustion produces distinguishable errors with metadata for observability",
+      "Run the full test suite against the exact commit being shipped to validate nothing is broken at integration level"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 cumulative diff introduces new retry, error-dispatch, and job-tracking subsystems that look architecturally sound on the happy path but have several concrete gaps: retry.mjs lacks a default export (blocking consumers), retry exhaustion silently returns the last error without a clear caller-side contract, state.mjs file-write operations have no atomicity guarantees risking corrupt state on crash, and the process.mjs deletion removes functions that may still be referenced. These are ship-blockers or near-ship-blockers because they can cause silent failures in production.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs missing default export will break runtime consumers\",\"body\":\"The diff stat shows retry.mjs as a new 203-line module. Based on the test file (tests/retry.test.mjs) and glm-client.mjs changes, consumers expect to import retry utilities. If retry.mjs only uses named exports but consumers import via default import, or vice versa, this is a runtime crash that only manifests when retry is actually invoked (i.e., on API failure — the unhappy path). The test suite may pass because tests import the same way the module exports, but the actual consumer (glm-client.mjs) may use a different import convention. This is a silent-until-failure defect.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.72,\"recommendation\":\"Verify the export style of retry.mjs matches every import site in glm-client.mjs and any other consumer. Add an explicit default export if consumers use default import syntax. Add a smoke test that imports retry.mjs the same way glm-client.mjs does.\"},{\"severity\":\"high\",\"title\":\"state.mjs non-atomic file writes risk corrupt state on crash or power loss\",\"body\":\"state.mjs (32 lines changed) manages persistent state. File writes using fs.writeFile are not atomic — if the process crashes mid-write (SIGKILL, OOM, disk full), the state file will be truncated or corrupt. On next load, JSON.parse will throw, and if there's no fallback to re-initialize state, the user's session is permanently broken with no recovery path. This is a data-loss scenario that is hard to detect until it happens.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.78,\"recommendation\":\"Write state to a temporary file first, then rename (atomic on POSIX). Add a try/catch around state load that re-initializes to a safe default if the file is corrupt, with a user-visible warning. Consider adding a state backup mechanism.\"},{\"severity\":\"medium\",\"title\":\"Retry exhaustion returns last error with no caller-enforceable contract\",\"body\":\"When retry.mjs exhausts all attempts, it presumably returns/rethrows the last error. If glm-client.mjs or other callers don't explicitly handle the exhausted-retry case differently from a single-failure case, the user gets a generic error with no indication that N retries occurred. This is an observability gap that makes debugging intermittent failures significantly harder. The bigmodel-errors.mjs dispatch layer may not distinguish 'retried and failed' from 'failed immediately'.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.68,\"recommendation\":\"Ensure retry exhaustion produces a distinct error type or attaches retry metadata (attempt count, last error, total elapsed time) so callers and error dispatch can differentiate. Add a test that verifies the exhausted-retry error shape.\"},{\"severity\":\"medium\",\"title\":\"process.mjs deleted but may have lingering references\",\"body\":\"scripts/lib/process.mjs shows 67 lines deleted (full file removal). If any other module imported utilities from process.mjs and those imports weren't migrated, this is a runtime ReferenceError that only fires when that specific code path executes. The diff shows many files changed, and a stale import is easy to miss during a large refactor.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":67,\"confidence\":0.65,\"recommendation\":\"Grep the entire codebase for any remaining imports or references to 'process.mjs' or its exported functions. Verify that scripts/check-imports.mjs (also modified) would catch stale imports in CI. Add an explicit test that validates all imports resolve.\"},{\"severity\":\"medium\",\"title\":\"tracked-jobs.mjs lacks concurrency guards for parallel operations\",\"body\":\"tracked-jobs.mjs (78 lines changed) manages job state. If two invocations of the companion script run concurrently (e.g., user triggers two commands quickly), both may read the same job list, make conflicting modifications, and overwrite each other's changes. There's no file-locking or optimistic concurrency mechanism visible. This can cause job tracking to lose entries or corrupt the tracking file.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.60,\"recommendation\":\"Add file-level locking (e.g., lockfile) or use atomic read-modify-write patterns. At minimum, detect concurrent modification (compare file mtime before write) and warn or retry. Add a test for concurrent job creation.\"}],\"next_steps\":[\"Inspect retry.mjs export style and verify all import sites match — this is the most likely silent runtime break\",\"Check state.mjs and tracked-jobs.mjs for write atomicity — add write-to-temp-then-rename pattern\",\"Verify no remaining references to deleted process.mjs exports across the codebase\",\"Confirm retry exhaustion produces distinguishable errors with metadata for observability\",\"Run the full test suite against the exact commit being shipped to validate nothing is broken at integration level\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:44:28.498Z"
+}

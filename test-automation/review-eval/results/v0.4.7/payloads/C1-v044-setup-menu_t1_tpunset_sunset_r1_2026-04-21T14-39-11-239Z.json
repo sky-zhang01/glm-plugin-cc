@@ -1,0 +1,68 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 35167,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit renames the npm package scope and modifies the /glm:setup command to add an interactive menu for already-configured users. While the changes are mostly documentation/config, there are concerns around the npm scope rename potentially breaking existing installations and the new setup menu flow having unclear edge cases around configuration state detection.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change for existing installations with no migration path documented",
+        "body": "The package.json shows the package name changing from one scope to another. Existing users who installed the previous scoped package will not receive this update automatically. The CHANGELOG and release_card do not describe any migration steps, aliasing, or deprecation notice for the old scope. Users on the old package name will be silently stranded on the old version with no in-band notification.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 6,
+        "confidence": 0.7,
+        "recommendation": "Document the migration path explicitly in CHANGELOG.md and release_card.md. Consider publishing a deprecation notice under the old package name that points users to the new scope, or add a postinstall message on the old package."
+      },
+      {
+        "severity": "medium",
+        "title": "Setup menu markdown has no error handling guidance for invalid user selections or unexpected config states",
+        "body": "The commands/setup.md file now includes an interactive menu when the system is already configured. The menu is implemented as markdown instructions to the LLM, but there is no specified behavior for: (1) what happens if the config file is partially corrupted or unreadable, (2) what happens if the user provides an unexpected input, (3) how the flow recovers if a re-configuration step fails midway. Without these guards, the LLM-driven menu may produce inconsistent or confusing behavior on edge cases.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.6,
+        "recommendation": "Add explicit fallback instructions in the setup.md for invalid selections, partial config states, and failed re-configuration attempts. Define what 'already configured' detection looks like and how to handle ambiguous states."
+      },
+      {
+        "severity": "low",
+        "title": "CHANGELOG entry for v0.4.7 does not mention the npm scope rename as a breaking change",
+        "body": "The CHANGELOG.md entry for v0.4.7 describes new features and fixes but does not call out the npm scope rename as a potentially breaking change. This omission could cause confusion for users tracking changes via the changelog, especially if they have CI/CD pipelines pinning the old package name.",
+        "file": "CHANGELOG.md",
+        "line_start": 1,
+        "line_end": 21,
+        "confidence": 0.75,
+        "recommendation": "Add a 'BREAKING CHANGE' or 'Migration Note' section to the v0.4.7 changelog entry explicitly calling out the scope rename and required user action."
+      }
+    ],
+    "next_steps": [
+      "Verify what the old npm scope name was and confirm whether a deprecation stub has been published under it",
+      "Trace the exact config file path and format used by setup.md to detect 'already configured' state, and test what happens with a corrupt or empty config file",
+      "Add migration documentation for the npm scope rename before shipping"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"This commit renames the npm package scope and modifies the /glm:setup command to add an interactive menu for already-configured users. While the changes are mostly documentation/config, there are concerns around the npm scope rename potentially breaking existing installations and the new setup menu flow having unclear edge cases around configuration state detection.\",\"findings\":[{\"severity\":\"high\",\"title\":\"npm scope rename is a breaking change for existing installations with no migration path documented\",\"body\":\"The package.json shows the package name changing from one scope to another. Existing users who installed the previous scoped package will not receive this update automatically. The CHANGELOG and release_card do not describe any migration steps, aliasing, or deprecation notice for the old scope. Users on the old package name will be silently stranded on the old version with no in-band notification.\",\"file\":\"package.json\",\"line_start\":1,\"line_end\":6,\"confidence\":0.7,\"recommendation\":\"Document the migration path explicitly in CHANGELOG.md and release_card.md. Consider publishing a deprecation notice under the old package name that points users to the new scope, or add a postinstall message on the old package.\"},{\"severity\":\"medium\",\"title\":\"Setup menu markdown has no error handling guidance for invalid user selections or unexpected config states\",\"body\":\"The commands/setup.md file now includes an interactive menu when the system is already configured. The menu is implemented as markdown instructions to the LLM, but there is no specified behavior for: (1) what happens if the config file is partially corrupted or unreadable, (2) what happens if the user provides an unexpected input, (3) how the flow recovers if a re-configuration step fails midway. Without these guards, the LLM-driven menu may produce inconsistent or confusing behavior on edge cases.\",\"file\":\"commands/setup.md\",\"line_start\":1,\"line_end\":19,\"confidence\":0.6,\"recommendation\":\"Add explicit fallback instructions in the setup.md for invalid selections, partial config states, and failed re-configuration attempts. Define what 'already configured' detection looks like and how to handle ambiguous states.\"},{\"severity\":\"low\",\"title\":\"CHANGELOG entry for v0.4.7 does not mention the npm scope rename as a breaking change\",\"body\":\"The CHANGELOG.md entry for v0.4.7 describes new features and fixes but does not call out the npm scope rename as a potentially breaking change. This omission could cause confusion for users tracking changes via the changelog, especially if they have CI/CD pipelines pinning the old package name.\",\"file\":\"CHANGELOG.md\",\"line_start\":1,\"line_end\":21,\"confidence\":0.75,\"recommendation\":\"Add a 'BREAKING CHANGE' or 'Migration Note' section to the v0.4.7 changelog entry explicitly calling out the scope rename and required user action.\"}],\"next_steps\":[\"Verify what the old npm scope name was and confirm whether a deprecation stub has been published under it\",\"Trace the exact config file path and format used by setup.md to detect 'already configured' state, and test what happens with a corrupt or empty config file\",\"Add migration documentation for the npm scope rename before shipping\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:39:11.268Z"
+}

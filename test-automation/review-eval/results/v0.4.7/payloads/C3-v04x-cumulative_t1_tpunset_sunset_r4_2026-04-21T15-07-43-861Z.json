@@ -1,0 +1,101 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 4
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 6,
+    "citation_accuracy": 0.833,
+    "citation_false_file_hits": 0,
+    "latency_ms": 55540,
+    "error_code": ""
+  },
+  "parsed": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces a retry subsystem, BigModel error dispatch, and significant refactors to glm-client/render/state but carries material risks: retry logic that can silently swallow fatal errors or double-execute on ambiguous server responses, error classification that may misroute transient auth failures into permanent buckets, and race conditions in tracked-jobs state management. Multiple core paths lack idempotency guards. Ship is risky without confirming retry boundaries are correct under partial-failure.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs may silently swallow non-retryable errors if classifyError returns undefined",
+        "body": "If the error classifier in bigmodel-errors.mjs encounters an unrecognized error shape (e.g., a new HTTP status, a malformed response body, or a network-level ECONNRESET that doesn't match any known pattern), classifyError may return undefined or a category not in the retryable set. The retry loop must have a deterministic fallthrough — either retry with a bounded count or fail immediately. A silent fallthrough that returns undefined from the retry wrapper means callers receive no result and no error, producing a silent failure indistinguishable from success in code that checks only for truthy return values.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Audit the full retry.mjs loop: verify that every code path either throws, returns a definitive value, or exhausts retries with a final throw. Add an explicit default case in error classification that throws rather than returning undefined. Add a unit test that passes an unrecognized error shape and asserts it throws rather than resolving silently."
+      },
+      {
+        "severity": "high",
+        "title": "glm-client.mjs retry + BigModel error dispatch: idempotency gap on ambiguous server response",
+        "body": "When glm-client sends a request that triggers a retry (e.g., 429 or 503), but the server actually processed the request before returning the error, the retry will double-execute the operation. For job submission or state-mutating calls, this means duplicate jobs or corrupted state. The diff adds retry.mjs integration without visible idempotency keys or request deduplication in the client layer.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.68,
+        "recommendation": "Verify whether BigModel API calls are read-only or state-mutating. For any state-mutating endpoints, add idempotency keys or check-and-set patterns before enabling automatic retry. At minimum, document which operations are safe to retry and which are not, and disable retry for non-idempotent endpoints."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs state writes lack atomicity — crash mid-write corrupts job state",
+        "body": "The tracked-jobs module appears to manage persistent job tracking state. If the process crashes or is killed between clearing/reading and writing the job state file, the state file may be left empty, partially written, or in an inconsistent state. Without atomic write patterns (write-to-temp + rename), a crash during state serialization causes data loss — the next invocation sees an empty or malformed file and loses all tracked job references.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.75,
+        "recommendation": "Implement atomic file writes: write to a temporary file in the same directory, then rename (atomic on POSIX) to the target path. Add a recovery path that handles empty/malformed state files gracefully (treat as empty state with a warning, not a crash)."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error classification may misclassify transient auth/permission failures as permanent",
+        "body": "The error dispatch module classifies BigModel API errors into retryable vs permanent categories. If a 401/403 is caused by a transient token expiration or temporary permission degradation, classifying it as permanent prevents the retry layer from attempting recovery even if the token refresh mechanism exists elsewhere. Conversely, if a genuine permission denial (e.g., model access revoked) is retried, it wastes retry budget and delays the user seeing the real error.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.65,
+        "recommendation": "Review the 401/403 classification logic: if there is an external token refresh mechanism, 401 should be retryable after refresh. Add integration tests or mock tests that validate classification for each HTTP status code the BigModel API can return, including edge cases like 401 with expired-token vs invalid-token response bodies."
+      },
+      {
+        "severity": "medium",
+        "title": "Race condition in job-control.mjs — concurrent status checks on the same job may interleave",
+        "body": "If two invocations of the companion tool run concurrently (e.g., user runs review and status simultaneously), both may read the same job state, both decide the job is still running, and both may attempt to update it when results arrive. Without file locking or optimistic concurrency control, the last writer wins and the first writer's result is silently lost.",
+        "file": "scripts/lib/job-control.mjs",
+        "line_start": 1,
+        "line_end": 20,
+        "confidence": 0.58,
+        "recommendation": "Add advisory file locking (e.g., lockfile, flock, or lockfile rename pattern) around job state read-modify-write sequences. At minimum, detect concurrent access and warn the user rather than silently losing updates."
+      },
+      {
+        "severity": "low",
+        "title": "state.mjs state file may have version skew between plugin versions",
+        "body": "The state file schema may have changed between v0.4.0 and v0.4.6 (new fields for retry state, job tracking, etc.), but if a user upgrades mid-workflow, the new code may read a v0.4.0-format state file. Without an explicit schema version field and migration path, this could cause runtime errors or silent misinterpretation of old state.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.52,
+        "recommendation": "Add a schema version field to the state file. On load, check the version and apply migrations or reject with a clear error message if the version is too old. Document the state file format in a schema file."
+      }
+    ],
+    "next_steps": [
+      "Read scripts/lib/retry.mjs in full to verify every code path in the retry loop resolves (throws or returns) — no silent undefined returns.",
+      "Read scripts/lib/glm-client.mjs to confirm which API calls are state-mutating and whether idempotency is handled before retry is applied.",
+      "Read scripts/lib/tracked-jobs.mjs to check if state file writes use atomic write-to-temp-then-rename pattern.",
+      "Read scripts/lib/bigmodel-errors.mjs to verify 401/403 classification aligns with token lifecycle.",
+      "Run the existing test suite (tests/retry.test.mjs, tests/bigmodel-errors.test.mjs) and confirm coverage of unrecognized error shapes and concurrent access scenarios."
+    ]
+  },
+  "rawOutputHead": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 diff introduces a retry subsystem, BigModel error dispatch, and significant refactors to glm-client/render/state but carries material risks: retry logic that can silently swallow fatal errors or double-execute on ambiguous server responses, error classification that may misroute transient auth failures into permanent buckets, and race conditions in tracked-jobs state management. Multiple core paths lack idempotency guards. Ship is risky without confirming retry boundaries are correct under partial-failure.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs may silently swallow non-retryable errors if classifyError returns undefined\",\"body\":\"If the error classifier in bigmodel-errors.mjs encounters an unrecognized error shape (e.g., a new HTTP status, a malformed response body, or a network-level ECONNRESET that doesn't match any known pattern), classifyError may return undefined or a category not in the retryable set. The retry loop must have a deterministic fallthrough — either retry with a bounded count or fail immediately. A silent fallthrough that returns undefined from the retry wrapper means callers receive no result and no error, producing a silent failure indistinguishable from success in code that checks only for truthy return values.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.72,\"recommendation\":\"Audit the full retry.mjs loop: verify that every code path either throws, returns a definitive value, or exhausts retries with a final throw. Add an explicit default case in error classification that throws rather than returning undefined. Add a unit test that passes an unrecognized error shape and asserts it throws rather than resolving silently.\"},{\"severity\":\"high\",\"title\":\"glm-client.mjs retry + BigModel error dispatch: idempotency gap on ambiguous server response\",\"body\":\"When glm-client sends a request that triggers a retry (e.g., 429 or 503), but the server actually processed the request before returning the error, the retry will double-execute the operation. For job submission or state-mutating calls, this means duplicate jobs or corrupted state. The diff adds retry.mjs integration without visible idempotency keys or request deduplication in the client layer.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.68,\"recommendation\":\"Verify whether BigModel API calls are read-only or state-mutating. For any state-mutating endpoints, add idempotency keys or check-and-set patterns before enabling automatic retry. At minimum, document which operations are safe to retry and which are not, and disable retry for non-idempotent endpoints.\"},{\"severity\":\"medium\",\"title\":\"tracked-jobs.mjs state writes lack atomicity — crash mid-write corrupts job state\",\"body\":\"The tracked-jobs module appears to manage persistent job tracking state. If the process crashes or is killed between clearing/reading and writing the job state file, the state file may be left empty, partially written, or in an inconsistent state. Without atomic write patterns (write-to-temp + rename), a crash during state serialization causes data loss — the next invocation sees an empty or malformed file and loses all tracked job references.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.75,\"recommendation\":\"Implement atomic file writes: write to a temporary file in the same directory, then rename (atomic on POSIX) to the target path. Add a recovery path that handles empty/malformed state files gracefully (treat as empty state with a warning, not a crash).\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors.mjs error classification may misclassify transient auth/permission failures as permanent\",\"body\":\"The error dispatch module classifies BigModel API errors into retryable vs permanent categories. If a 401/403 is caused by a transient token expiration or temporary permission degradation, classifying it as permanent prevents the retry layer from attempting recovery even if the token refresh mechanism exists elsewhere. Conversely, if a genuine permission denial (e.g., model access revoked) is retried, it wastes retry budget and delays the user seeing the real error.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.65,\"recommendation\":\"Review the 401/403 classification logic: if there is an external token refresh mechanism, 401 should be retryable after refresh. Add integration tests or mock tests that validate classification for each HTTP status code the BigModel API can return, including edge cases like 401 with expired-token vs invalid-token response bodies.\"},{\"severity\":\"medium\",\"title\":\"Race condition in job-control.mjs — concurrent status checks on the same job may interleave\",\"body\":\"If two invocations of the companion tool run concurrently (e.g., user runs review and status simultaneously), both may read the same job state, both decide the job is still running, and both may attempt to update it when results arrive. Without file locking or optimistic concurrency control, the last writer wins and the first writer's result is silently lost.\",\"file\":\"scripts/lib/job-control.mjs\",\"line_start\":1,\"line_end\":20,\"confidence\":0.58,\"recommendation\":\"Add advisory file locking (e.g., lockfile, flock, or lockfile rename pattern) around job state read-modify-write sequences. At minimum, detect concurrent access and warn the user rather than silently losing updates.\"},{\"severity\":\"low\",\"title\":\"state.mjs state file may have version skew between plugin versions\",\"body\":\"The state file schema may have changed between v0.4.0 and v0.4.6 (new fields for retry state, job tracking, etc.), but if a user upgrades mid-workflow, the new code may read a v0.4.0-format state file. Without an explicit schema version field and migration path, this could cause runtime errors or silent misinterpretation of old state.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.52,\"recommendation\":\"Add a schema version field to the state file. On load, check the version and apply migrations or reject with a clear error message if the version is too old. Document the state file format in a schema file.\"}],\"next_steps\":[\"Read scripts/lib/retry.mjs in full to verify every code path in the retry loop resolves (throws or returns) — no silent undefined returns.\",\"Read scripts/lib/glm-client.mjs to confirm which API calls are state-mutating and whether idempotency is handled before retry is applied.\",\"Read scripts/lib/tracked-jobs.mjs to check if state file writes use atomic write-to-temp-then-rename pattern.\",\"Read scripts/lib/bigmodel-errors.mjs to verify 401/403 classification aligns with token lifecycle.\",\"Run the existing test suite (tests/retry.test.mjs, tests/bigmodel-errors.test.mjs) and confirm coverage of unrecognized error shapes and concurrent access scenarios.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T15:07:43.894Z"
+}

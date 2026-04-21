@@ -1,0 +1,33 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 8
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 8371,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "approve",
+    "summary": "This commit renames an npm scope and adds an interactive menu to /glm:setup when already configured. The changes are confined to documentation, markdown commands, and package metadata. No runtime code, authentication logic, data mutations, or state-changing operations are present. The risk surface is limited to user-facing docs and CLI prompts in a markdown-based command system. No material defects, silent failures, or safety hazards identified.",
+    "findings": [],
+    "next_steps": []
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"approve\",\n  \"summary\": \"This commit renames an npm scope and adds an interactive menu to /glm:setup when already configured. The changes are confined to documentation, markdown commands, and package metadata. No runtime code, authentication logic, data mutations, or state-changing operations are present. The risk surface is limited to user-facing docs and CLI prompts in a markdown-based command system. No material defects, silent failures, or safety hazards identified.\",\n  \"findings\": [],\n  \"next_steps\": []\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T17:02:31.146Z"
+}

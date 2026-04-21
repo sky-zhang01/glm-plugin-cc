@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 0,
+    "topP": null,
+    "seed": 1337,
+    "thinking": "on",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 78595,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 changeset introduces retry/backoff and BigModel error dispatch as new library modules (retry.mjs, bigmodel-errors.mjs) with substantial logic, but the reviewer must verify several concrete risks: (1) the retry module's jitter and backoff calculations can produce zero or negative delays under edge-case inputs, causing busy-loop retries; (2) the error classifier may silently swallow unrecognized error shapes, retrying non-retryable failures; (3) the GLM client integration may double-fire retries if the caller already has retry logic. These are the highest-signal concerns given the user's focus on sampling-sweep aftercare.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry delay can collapse to zero under edge-case multiplier/base values, enabling busy-loop retries on persistent failures",
+        "body": "The retry module computes delay as base * multiplier^attempt plus jitter. If the base delay is configured to a very small value (including 0), or if multiplier defaults are changed downstream, the formula can produce zero or sub-millisecond delays. Under a persistent failure scenario (e.g., API key revoked), this would result in rapid-fire retries that exhaust rate limits or consume resources without any effective backoff. The jitter calculation (typically random * delay) also collapses to zero when delay is zero, providing no dispersion. There is no floor/minimum-delay guard visible in the stat summary.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.7,
+        "recommendation": "Add a configurable minimum delay floor (e.g., `minDelay` defaulting to 100ms) and clamp the computed delay: `delay = Math.max(minDelay, computedDelay)`. Also add a guard that aborts retrying if delay rounds to zero to prevent busy loops."
+      },
+      {
+        "severity": "high",
+        "title": "BigModel error classifier may mis-classify or silently retry on unrecognized/unknown error shapes",
+        "body": "The bigmodel-errors.mjs module classifies API errors into retryable/non-retryable categories. If the upstream API returns an unexpected error format (new error code, changed response schema, or a network-level error with a different shape), the classifier's default/fallback path determines behavior. If the default is 'retryable', any unrecognized error will be retried — including errors that indicate client bugs, auth failures with new codes, or malformed requests. This wastes retry budget and delays surfacing the real problem. The test file (tests/bigmodel-errors.test.mjs, 189 lines) may not cover all unknown-shape paths.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.65,
+        "recommendation": "Ensure the default classification for unrecognized errors is 'non-retryable' (fail-closed). Add explicit test cases for null, undefined, empty-object, and novel-status-code error shapes. Log a warning when an unrecognised error shape is encountered so it is observable."
+      },
+      {
+        "severity": "medium",
+        "title": "Potential double-retry if GLM client callers also implement retry logic",
+        "body": "The glm-client.mjs changes integrate the new retry module, but if any downstream caller of the GLM client also wraps calls in retry logic (a common pattern), failures will be retried at both layers. This compounds retry counts, delays total failure time beyond user expectations, and can trigger rate limits faster. The diff stat shows +99 lines in glm-client.mjs, suggesting substantial integration work. Without a clear contract or opt-out mechanism, nested retries are likely.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 99,
+        "confidence": 0.6,
+        "recommendation": "Either (a) make retry opt-in at the client level so callers control retry strategy, or (b) document clearly that the client handles retries and callers should not add their own. Consider adding a `maxRetries: 0` option to disable client-level retry for callers that manage it themselves."
+      },
+      {
+        "severity": "medium",
+        "title": "No observable logging/metrics on retry attempts — failures are invisible in production",
+        "body": "The retry module (203 lines) and error dispatcher (168 lines) implement silent retry logic. If retries are firing in production due to a degraded dependency or misconfiguration, there is no structured logging or metric emission to detect this. Operators would only see increased latency or final failure, with no way to distinguish 'retried 5 times then succeeded' from 'succeeded first try'. This is a classic observability gap that hides partial failures.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.7,
+        "recommendation": "Add structured logging on each retry attempt (attempt number, delay, error classification, elapsed time). Emit a summary log on final success or final failure. If a metrics/telemetry hook exists, emit retry-count and latency metrics."
+      },
+      {
+        "severity": "low",
+        "title": "verify-release.yml workflow deleted without replacement verification in CI pipeline",
+        "body": "The diff removes .github/workflows/verify-release.yml (102 lines deleted). While scripts/ci/check-release-ready.sh is added as a local script, the CI enforcement of release readiness checks appears to have moved from a GitHub Action to a pre-push hook and local script. Pre-push hooks can be bypassed with --no-verify or by pushing via API. This weakens the release gate.",
+        "file": "scripts/ci/check-release-ready.sh",
+        "line_start": 1,
+        "line_end": 84,
+        "confidence": 0.55,
+        "recommendation": "Ensure the check-release-ready.sh logic is also called from a remaining CI workflow (not just pre-push hooks) so that bypassed hooks do not allow unverified releases to merge."
+      }
+    ],
+    "next_steps": [
+      "Inspect retry.mjs delay calculation for zero-delay edge cases and add a minimum-delay floor",
+      "Verify bigmodel-errors.mjs defaults to non-retryable for unrecognized errors (fail-closed)",
+      "Confirm glm-client.mjs retry integration does not double-retry when callers have their own retry layer",
+      "Add structured logging to retry attempts for production observability",
+      "Verify check-release-ready.sh is called from a CI workflow, not only bypassable pre-push hooks"
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.6 changeset introduces retry/backoff and BigModel error dispatch as new library modules (retry.mjs, bigmodel-errors.mjs) with substantial logic, but the reviewer must verify several concrete risks: (1) the retry module's jitter and backoff calculations can produce zero or negative delays under edge-case inputs, causing busy-loop retries; (2) the error classifier may silently swallow unrecognized error shapes, retrying non-retryable failures; (3) the GLM client integration may double-fire retries if the caller already has retry logic. These are the highest-signal concerns given the user's focus on sampling-sweep aftercare.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Retry delay can collapse to zero under edge-case multiplier/base values, enabling busy-loop retries on persistent failures\",\n      \"body\": \"The retry module computes delay as base * multiplier^attempt plus jitter. If the base delay is configured to a very small value (including 0), or if multiplier defaults are changed downstream, the formula can produce zero or sub-millisecond delays. Under a persistent failure scenario (e.g., API key revoked), this would result in rapid-fire retries that exhaust rate limits or consume resources without any effective backoff. The jitter calculation (typically random * delay) also collapses to zero when delay is zero, providing no dispersion. There is no floor/minimum-delay guard visible in the stat summary.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Add a configurable minimum delay floor (e.g., `minDelay` defaulting to 100ms) and clamp the computed delay: `delay = Math.max(minDelay, computedDelay)`. Also add a guard that aborts retrying if delay rounds to zero to prevent busy loops.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"BigModel error classifier may mis-classify or silently retry on unrecognized/unknown error shapes\",\n      \"body\": \"The bigmodel-errors.mjs module classifies API errors into retryable/non-retryable categories. If the upstream API returns an unexpected error format (new error code, changed response schema, or a network-level error with a different shape), the classifier's default/fallback path determines behavior. If the default is 'retryable', any unrecognized error will be retried — including errors that indicate client bugs, auth failures with new codes, or malformed requests. This wastes retry budget and delays surfacing the real problem. The test file (tests/bigmodel-errors.test.mjs, 189 lines) may not cover all unknown-shape paths.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Ensure the default classification for unrecognized errors is 'non-retryable' (fail-closed). Add explicit test cases for null, undefined, empty-object, and novel-status-code error shapes. Log a warning when an unrecognised error shape is encountered so it is observable.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Potential double-retry if GLM client callers also implement retry logic\",\n      \"body\": \"The glm-client.mjs changes integrate the new retry module, but if any downstream caller of the GLM client also wraps calls in retry logic (a common pattern), failures will be retried at both layers. This compounds retry counts, delays total failure time beyond user expectations, and can trigger rate limits faster. The diff stat shows +99 lines in glm-client.mjs, suggesting substantial integration work. Without a clear contract or opt-out mechanism, nested retries are likely.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 99,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Either (a) make retry opt-in at the client level so callers control retry strategy, or (b) document clearly that the client handles retries and callers should not add their own. Consider adding a `maxRetries: 0` option to disable client-level retry for callers that manage it themselves.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"No observable logging/metrics on retry attempts — failures are invisible in production\",\n      \"body\": \"The retry module (203 lines) and error dispatcher (168 lines) implement silent retry logic. If retries are firing in production due to a degraded dependency or misconfiguration, there is no structured logging or metric emission to detect this. Operators would only see increased latency or final failure, with no way to distinguish 'retried 5 times then succeeded' from 'succeeded first try'. This is a classic observability gap that hides partial failures.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Add structured logging on each retry attempt (attempt number, delay, error classification, elapsed time). Emit a summary log on final success or final failure. If a metrics/telemetry hook exists, emit retry-count and latency metrics.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"verify-release.yml workflow deleted without replacement verification in CI pipeline\",\n      \"body\": \"The diff removes .github/workflows/verify-release.yml (102 lines deleted). While scripts/ci/check-release-ready.sh is added as a local script, the CI enforcement of release readiness checks appears to have moved from a GitHub Action to a pre-push hook and local script. Pre-push hooks can be bypassed with --no-verify or by pushing via API. This weakens the release gate.\",\n      \"file\": \"scripts/ci/check-release-ready.sh\",\n      \"line_start\": 1,\n      \"line_end\": 84,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Ensure the check-release-ready.sh logic is also called from a remaining CI workflow (not just pre-push hooks) so that bypassed hooks do not allow unverified releases to merge.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect retry.mjs delay calculation for zero-delay edge cases and add a minimum-delay floor\",\n    \"Verify bigmodel-errors.mjs defaults to non-retryable for unrecognized errors (fail-closed)\",\n    \"Confirm glm-client.mjs retry integration does not double-retry when callers have their own retry layer\",\n    \"Add structured logging to retry attempts for production observability\",\n    \"Verify check-release-ready.sh is called from a CI workflow, not only bypassable pre-push hooks\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T13:25:38.819Z"
+}

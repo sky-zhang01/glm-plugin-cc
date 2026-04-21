@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 4
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 68182,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6+ diff introduces new retry/backoff logic (retry.mjs, bigmodel-errors.mjs), job tracking, and state management changes that have several material gaps: retry exhaustion can silently swallow errors without propagation, the BigModel error classifier has a catch-all that hides unknown errors, and job-control state transitions lack concurrency guards. These are the kinds of failures that are hard to detect in testing but bite in production under load or partial failure.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs retry-exhaustion silently returns undefined instead of throwing",
+        "body": "When all retry attempts are exhausted, the retry function returns `undefined` rather than throwing a descriptive error. This means callers that don't explicitly check for undefined will continue operating on a falsy/missing result, potentially causing downstream TypeError exceptions far from the actual failure point. In the context of GLM API calls (glm-client.mjs), a silently-undefined response could be interpreted as an empty successful response, hiding a real transient failure from the user.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.82,
+        "recommendation": "Ensure the retry exhaustion path throws a wrapped error (e.g., RetryExhaustedError) containing the last error and attempt count. Verify callers in glm-client.mjs handle this thrown error rather than assuming a return value."
+      },
+      {
+        "severity": "high",
+        "title": "bigmodel-errors.mjs unknown error classification masks root causes",
+        "body": "The BigModel error dispatcher maps known error codes to retry strategies, but unknown/unrecognized errors risk falling into a default branch that either silently retries (wasteful if the error is permanent) or returns a generic classification with no actionable context. If the upstream API introduces a new error code (e.g., 429 rate-limit variant, 451 legal block), the classifier will misclassify it, potentially retrying non-retryable errors infinitely or giving up on retryable ones. This is a silent degradation vector.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.78,
+        "recommendation": "Add explicit logging/warning when an unrecognized error code is encountered. Map unknown errors to a conservative 'no-retry' strategy rather than retry. Include the raw error in any re-thrown error so operators can diagnose new error codes without code changes."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs lacks concurrency guard for state file writes",
+        "body": "Job state is persisted to a state file, but there is no file-locking or atomic-write mechanism. If two concurrent GLM companion processes (e.g., user runs two terminals) write job state simultaneously, the JSON file can be corrupted by interleaved partial writes. This would make all job state unreadable until manually deleted, losing track of running/queued jobs.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.72,
+        "recommendation": "Use atomic file writes (write to temp file, then rename) for state persistence. Consider adding a PID lock or at minimum detecting corrupted JSON on read and failing cleanly rather than crashing."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs state file read has no corruption recovery",
+        "body": "state.mjs reads a JSON state file but if the file is empty, truncated, or contains malformed JSON (from a crashed write), the parse will throw and likely crash the entire companion process. There is no fallback to a default state or repair mechanism. This is a data-loss vector: a single corrupted state file prevents all state-dependent operations.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.75,
+        "recommendation": "Wrap JSON.parse in a try/catch that returns a safe default state when parsing fails, and log a warning. Optionally back up the corrupted file for forensic analysis before overwriting with the default."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs API error path may leak sensitive response details",
+        "body": "The GLM client wraps API errors but if the upstream API returns unexpected response shapes (e.g., HTML error pages from a proxy, stack traces in error messages), those details could be logged or surfaced to the user's terminal. Combined with the retry logic that logs attempt details, this could expose auth tokens in URLs or internal infrastructure details.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.6,
+        "recommendation": "Sanitize error messages before logging/display. Strip URL query parameters that may contain tokens. Ensure error objects passed to retry/logging never include raw Authorization headers."
+      }
+    ],
+    "next_steps": [
+      "Inspect retry.mjs exhaustion path and verify it throws rather than returns undefined",
+      "Audit bigmodel-errors.mjs default/unknown error branch for silent misclassification",
+      "Add atomic writes (write-then-rename) to tracked-jobs.mjs and state.mjs persistence",
+      "Add corrupted-state recovery in state.mjs with safe defaults",
+      "Verify glm-client.mjs sanitizes errors before logging in retry paths"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6+ diff introduces new retry/backoff logic (retry.mjs, bigmodel-errors.mjs), job tracking, and state management changes that have several material gaps: retry exhaustion can silently swallow errors without propagation, the BigModel error classifier has a catch-all that hides unknown errors, and job-control state transitions lack concurrency guards. These are the kinds of failures that are hard to detect in testing but bite in production under load or partial failure.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs retry-exhaustion silently returns undefined instead of throwing\",\"body\":\"When all retry attempts are exhausted, the retry function returns `undefined` rather than throwing a descriptive error. This means callers that don't explicitly check for undefined will continue operating on a falsy/missing result, potentially causing downstream TypeError exceptions far from the actual failure point. In the context of GLM API calls (glm-client.mjs), a silently-undefined response could be interpreted as an empty successful response, hiding a real transient failure from the user.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.82,\"recommendation\":\"Ensure the retry exhaustion path throws a wrapped error (e.g., RetryExhaustedError) containing the last error and attempt count. Verify callers in glm-client.mjs handle this thrown error rather than assuming a return value.\"},{\"severity\":\"high\",\"title\":\"bigmodel-errors.mjs unknown error classification masks root causes\",\"body\":\"The BigModel error dispatcher maps known error codes to retry strategies, but unknown/unrecognized errors risk falling into a default branch that either silently retries (wasteful if the error is permanent) or returns a generic classification with no actionable context. If the upstream API introduces a new error code (e.g., 429 rate-limit variant, 451 legal block), the classifier will misclassify it, potentially retrying non-retryable errors infinitely or giving up on retryable ones. This is a silent degradation vector.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.78,\"recommendation\":\"Add explicit logging/warning when an unrecognized error code is encountered. Map unknown errors to a conservative 'no-retry' strategy rather than retry. Include the raw error in any re-thrown error so operators can diagnose new error codes without code changes.\"},{\"severity\":\"medium\",\"title\":\"tracked-jobs.mjs lacks concurrency guard for state file writes\",\"body\":\"Job state is persisted to a state file, but there is no file-locking or atomic-write mechanism. If two concurrent GLM companion processes (e.g., user runs two terminals) write job state simultaneously, the JSON file can be corrupted by interleaved partial writes. This would make all job state unreadable until manually deleted, losing track of running/queued jobs.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.72,\"recommendation\":\"Use atomic file writes (write to temp file, then rename) for state persistence. Consider adding a PID lock or at minimum detecting corrupted JSON on read and failing cleanly rather than crashing.\"},{\"severity\":\"medium\",\"title\":\"state.mjs state file read has no corruption recovery\",\"body\":\"state.mjs reads a JSON state file but if the file is empty, truncated, or contains malformed JSON (from a crashed write), the parse will throw and likely crash the entire companion process. There is no fallback to a default state or repair mechanism. This is a data-loss vector: a single corrupted state file prevents all state-dependent operations.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.75,\"recommendation\":\"Wrap JSON.parse in a try/catch that returns a safe default state when parsing fails, and log a warning. Optionally back up the corrupted file for forensic analysis before overwriting with the default.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs API error path may leak sensitive response details\",\"body\":\"The GLM client wraps API errors but if the upstream API returns unexpected response shapes (e.g., HTML error pages from a proxy, stack traces in error messages), those details could be logged or surfaced to the user's terminal. Combined with the retry logic that logs attempt details, this could expose auth tokens in URLs or internal infrastructure details.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.6,\"recommendation\":\"Sanitize error messages before logging/display. Strip URL query parameters that may contain tokens. Ensure error objects passed to retry/logging never include raw Authorization headers.\"}],\"next_steps\":[\"Inspect retry.mjs exhaustion path and verify it throws rather than returns undefined\",\"Audit bigmodel-errors.mjs default/unknown error branch for silent misclassification\",\"Add atomic writes (write-then-rename) to tracked-jobs.mjs and state.mjs persistence\",\"Add corrupted-state recovery in state.mjs with safe defaults\",\"Verify glm-client.mjs sanitizes errors before logging in retry paths\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T13:54:11.687Z"
+}

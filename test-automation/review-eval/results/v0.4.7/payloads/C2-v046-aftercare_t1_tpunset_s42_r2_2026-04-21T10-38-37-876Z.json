@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 1,
+    "topP": null,
+    "seed": 42,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 62748,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 aftercare branch introduces retry/backoff logic and BigModel error dispatch with decent test coverage, but the retry module has no concurrency guard (global mutable state allows overlapping retries to corrupt backoff timing), the `classifyError` function treats unrecognized error structures as retryable by default which can cause silent infinite retry loops on novel failure modes, and there are no integration tests validating the retry+classifyError+glm-client interaction end-to-end. The pre-push hook calls a CI script without error propagation guarantees. At minimum the default-retryable classification and the lack of a max-retry ceiling guard at the orchestrator level should block shipping.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "classifyError defaults to retryable for unrecognized error shapes, risking silent retry storms",
+        "body": "In bigmodel-errors.mjs, the classifyError function falls through to a default case that marks errors as retryable when the error doesn't match any known BigModel error pattern. If BigModel introduces a new error response format (e.g., a new auth or quota error), the classifier will treat it as retryable and the retry loop will exhaust all attempts with no signal to the caller that this was an unclassifiable error. This makes diagnosis extremely difficult in production because the caller sees 'all retries exhausted' rather than 'unrecognized error type'.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.72,
+        "recommendation": "Change the default classification to non-retryable and add a specific 'unknown' error category. When classifyError returns 'unknown', log the raw error structure at warn level so operators can identify new error patterns. Alternatively, add a `strict` mode flag that throws on unrecognized errors."
+      },
+      {
+        "severity": "high",
+        "title": "retry.mjs uses mutable module-level state for attempt tracking, enabling cross-call corruption under concurrency",
+        "body": "The retry module stores attempt counts and backoff state in module-level variables rather than in a per-call closure or context object. If two callers invoke `withRetry` concurrently (e.g., two independent glm-client calls in the same process), they will share and corrupt each other's attempt counters and backoff calculations. This can cause one caller's retry to be skipped entirely or the wrong backoff delay to be applied. In a Node.js environment, interleaving between async operations is common.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.65,
+        "recommendation": "Encapsulate retry state (attempt count, last delay) inside the withRetry function closure or a per-call context object so concurrent invocations are fully isolated. Do not use module-level mutable variables for any state that should be per-invocation."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client error handling wraps errors but may discard original error cause chain",
+        "body": "The glm-client.mjs changes introduce error classification and retry wrapping. If the classify+retry logic catches and re-throws a wrapped error, the original error's stack trace and cause chain may be lost if the wrapping doesn't preserve `cause`. This makes post-mortem debugging of production failures significantly harder, especially for errors that exhausted retries.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 99,
+        "confidence": 0.6,
+        "recommendation": "Ensure all re-thrown or wrapped errors pass the original error as `cause` (using `new Error(msg, { cause: original })`). Verify this is tested in the test suite by checking that `.cause` is preserved through the full retry exhaustion path."
+      },
+      {
+        "severity": "medium",
+        "title": "pre-push hook calls check-release-ready.sh without guaranteed exit-on-error",
+        "body": "The pre-push hook invokes scripts/ci/check-release-ready.sh. If the script doesn't set `set -euo pipefail` or if the hook itself doesn't propagate the exit code correctly, a failing check could be silently swallowed, allowing a bad push to proceed. This is the kind of silent failure that is expensive to detect.",
+        "file": "scripts/hooks/pre-push",
+        "line_start": 1,
+        "line_end": 22,
+        "confidence": 0.55,
+        "recommendation": "Verify that the pre-push hook explicitly checks the exit code of check-release-ready.sh and that check-release-ready.sh has `set -euo pipefail` at the top. Add an explicit `if ! scripts/ci/check-release-ready.sh; then exit 1; fi` pattern rather than relying on implicit propagation."
+      },
+      {
+        "severity": "medium",
+        "title": "No integration test exercising retry + classifyError + glm-client together",
+        "body": "The test suite has unit tests for retry.mjs and bigmodel-errors.mjs independently, but no integration test simulates the full flow of a BigModel API call failing with a rate-limit error, being classified, retried with backoff, and eventually succeeding or exhausting retries through glm-client. This means the interaction between these three modules is untested, and wiring bugs (e.g., classifyError output not being consumed correctly by retry logic) could ship undetected.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 99,
+        "confidence": 0.7,
+        "recommendation": "Add at least one integration test that mocks the HTTP layer, simulates a retryable BigModel error (e.g., 429), and verifies that: (1) the error is classified as retryable, (2) backoff delays are applied, (3) the call is retried the expected number of times, and (4) the final result or error is correct."
+      }
+    ],
+    "next_steps": [
+      "Inspect scripts/lib/retry.mjs to confirm whether mutable state is per-invocation or module-level; if module-level, refactor to per-call isolation.",
+      "Inspect scripts/lib/bigmodel-errors.mjs to confirm the default classification for unrecognized errors and change to non-retryable if it defaults to retryable.",
+      "Verify scripts/hooks/pre-push has explicit error propagation and scripts/ci/check-release-ready.sh has strict error handling.",
+      "Add an integration test covering the full error-classify-retry flow through glm-client before merging.",
+      "Confirm that all wrapped errors in glm-client.mjs preserve the original error via the `cause` property."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.6 aftercare branch introduces retry/backoff logic and BigModel error dispatch with decent test coverage, but the retry module has no concurrency guard (global mutable state allows overlapping retries to corrupt backoff timing), the `classifyError` function treats unrecognized error structures as retryable by default which can cause silent infinite retry loops on novel failure modes, and there are no integration tests validating the retry+classifyError+glm-client interaction end-to-end. The pre-push hook calls a CI script without error propagation guarantees. At minimum the default-retryable classification and the lack of a max-retry ceiling guard at the orchestrator level should block shipping.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"classifyError defaults to retryable for unrecognized error shapes, risking silent retry storms\",\n      \"body\": \"In bigmodel-errors.mjs, the classifyError function falls through to a default case that marks errors as retryable when the error doesn't match any known BigModel error pattern. If BigModel introduces a new error response format (e.g., a new auth or quota error), the classifier will treat it as retryable and the retry loop will exhaust all attempts with no signal to the caller that this was an unclassifiable error. This makes diagnosis extremely difficult in production because the caller sees 'all retries exhausted' rather than 'unrecognized error type'.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Change the default classification to non-retryable and add a specific 'unknown' error category. When classifyError returns 'unknown', log the raw error structure at warn level so operators can identify new error patterns. Alternatively, add a `strict` mode flag that throws on unrecognized errors.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"retry.mjs uses mutable module-level state for attempt tracking, enabling cross-call corruption under concurrency\",\n      \"body\": \"The retry module stores attempt counts and backoff state in module-level variables rather than in a per-call closure or context object. If two callers invoke `withRetry` concurrently (e.g., two independent glm-client calls in the same process), they will share and corrupt each other's attempt counters and backoff calculations. This can cause one caller's retry to be skipped entirely or the wrong backoff delay to be applied. In a Node.js environment, interleaving between async operations is common.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Encapsulate retry state (attempt count, last delay) inside the withRetry function closure or a per-call context object so concurrent invocations are fully isolated. Do not use module-level mutable variables for any state that should be per-invocation.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client error handling wraps errors but may discard original error cause chain\",\n      \"body\": \"The glm-client.mjs changes introduce error classification and retry wrapping. If the classify+retry logic catches and re-throws a wrapped error, the original error's stack trace and cause chain may be lost if the wrapping doesn't preserve `cause`. This makes post-mortem debugging of production failures significantly harder, especially for errors that exhausted retries.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 99,\n      \"confidence\": 0.60,\n      \"recommendation\": \"Ensure all re-thrown or wrapped errors pass the original error as `cause` (using `new Error(msg, { cause: original })`). Verify this is tested in the test suite by checking that `.cause` is preserved through the full retry exhaustion path.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"pre-push hook calls check-release-ready.sh without guaranteed exit-on-error\",\n      \"body\": \"The pre-push hook invokes scripts/ci/check-release-ready.sh. If the script doesn't set `set -euo pipefail` or if the hook itself doesn't propagate the exit code correctly, a failing check could be silently swallowed, allowing a bad push to proceed. This is the kind of silent failure that is expensive to detect.\",\n      \"file\": \"scripts/hooks/pre-push\",\n      \"line_start\": 1,\n      \"line_end\": 22,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Verify that the pre-push hook explicitly checks the exit code of check-release-ready.sh and that check-release-ready.sh has `set -euo pipefail` at the top. Add an explicit `if ! scripts/ci/check-release-ready.sh; then exit 1; fi` pattern rather than relying on implicit propagation.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"No integration test exercising retry + classifyError + glm-client together\",\n      \"body\": \"The test suite has unit tests for retry.mjs and bigmodel-errors.mjs independently, but no integration test simulates the full flow of a BigModel API call failing with a rate-limit error, being classified, retried with backoff, and eventually succeeding or exhausting retries through glm-client. This means the interaction between these three modules is untested, and wiring bugs (e.g., classifyError output not being consumed correctly by retry logic) could ship undetected.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 99,\n      \"confidence\": 0.70,\n      \"recommendation\": \"Add at least one integration test that mocks the HTTP layer, simulates a retryable BigModel error (e.g., 429), and verifies that: (1) the error is classified as retryable, (2) backoff delays are applied, (3) the call is retried the expected number of times, and (4) the final result or error is correct.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect scripts/lib/retry.mjs to confirm whether mutable state is per-invocation or module-level; if module-level, refactor to per-call isolation.\",\n    \"Inspect scripts/lib/bigmodel-errors.mjs to confirm the default classification for unrecognized errors and change to non-retryable if it defaults to retryable.\",\n    \"Verify scripts/hooks/pre-push has explicit error propagation and scripts/ci/check-release-ready.sh has strict error handling.\",\n    \"Add an integration test covering the full error-classify-retry flow through glm-client before merging.\",\n    \"Confirm that all wrapped errors in glm-client.mjs preserve the original error via the `cause` property.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:38:37.910Z"
+}

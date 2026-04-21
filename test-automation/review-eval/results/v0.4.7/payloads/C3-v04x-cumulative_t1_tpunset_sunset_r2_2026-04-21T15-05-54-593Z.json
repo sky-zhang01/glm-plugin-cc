@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.6,
+    "citation_false_file_hits": 0,
+    "latency_ms": 118398,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This is a massive 6600+ line diff spanning 84 files (v0.4.0→v0.4.6) that touches every critical module: retry logic, error dispatch, the GLM client, state management, filesystem operations, and job tracking. The blast radius is enormous for a minor-version series, and several structural red flags—deleted modules, new retry/backoff machinery, rewritten client error handling—create real risk of silent failures or regressions that would be hard to diagnose in production.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Deleted `scripts/lib/process.mjs` may leave dangling imports",
+        "body": "The diff shows `scripts/lib/process.mjs` was entirely removed (67 lines deleted). If any surviving module still imports from it, the result is an immediate runtime crash (MODULE_NOT_FOUND) that only surfaces when that code path is exercised. The companion script, render module, and test files are all candidates for stale imports. Without a verified import graph, this is a latent breakage risk.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.7,
+        "recommendation": "Run `grep -r \"from.*process.mjs\" scripts/ tests/` (or equivalent) against the current tree to confirm no surviving import references exist. Add an automated check in CI that flags imports of deleted files."
+      },
+      {
+        "severity": "high",
+        "title": "New 203-line retry.mjs module introduces retry/backoff without visible guardrails",
+        "body": "A brand-new `scripts/lib/retry.mjs` module (203 lines) introduces retry and backoff logic for API calls. Retry machinery is a top-tier risk area: incorrect jitter can cause thundering-herd retries, missing retry ceilings can cause infinite loops, and retrying non-idempotent operations can cause duplication or data corruption. With no visibility into the implementation, the safe assumption is that at least one of these failure modes is unguarded.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.65,
+        "recommendation": "Verify that retry.mjs has: (1) a hard maximum retry ceiling, (2) exponential backoff with jitter, (3) error classification that only retries idempotent or safely retryable operations, (4) circuit-breaker or total-timeout budget. Ensure tests in `tests/retry.test.mjs` (352 lines) cover these edge cases explicitly."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs rewrite (155 lines changed) couples to bigmodel-errors.mjs dispatch without fallback",
+        "body": "`scripts/lib/glm-client.mjs` has 155 lines changed and a new dependency on the equally new `scripts/lib/bigmodel-errors.mjs` (168 lines). If the error dispatcher fails to classify an unexpected error shape from the API, the default behavior determines whether the error is silently swallowed, retried infinitely, or surfaced to the user. The coupling between two new/rewritten modules means neither has production seasoning.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.6,
+        "recommendation": "Ensure bigmodel-errors.mjs has an exhaustive default/catch-all branch that logs the unrecognized error shape and propagates a generic failure rather than dropping it. Add a test for 'unknown error shape' classification in `tests/bigmodel-errors.test.mjs`."
+      },
+      {
+        "severity": "medium",
+        "title": "No v0.4.6 UAT report — test coverage gap for latest release",
+        "body": "The test-automation directory contains UAT reports for v0.4.4 and v0.4.5 but not v0.4.6. The v0.4.6 release includes the new BigModel error dispatch, auto retry/backoff, and other hardening changes, yet there is no evidence of end-to-end validation for this version. The unit tests may pass while integration behavior regresses.",
+        "file": "test-automation/uat-reports",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.8,
+        "recommendation": "Run UAT scenarios against v0.4.6 (or the current HEAD targeting v0.4.7) and commit the report before shipping. At minimum, exercise the retry path, the error dispatch path, and the setup/rescue commands."
+      },
+      {
+        "severity": "medium",
+        "title": "84-file diff with 6600+ insertions is disproportionately large for a patch-level release",
+        "body": "Going from v0.4.0 to v0.4.6 involves 84 changed files and 6600+ lines added across retry logic, error handling, the API client, state management, CI, tests, and documentation. This is effectively a major rewrite bundled as minor patches. Any single regression in this bundle could affect user-visible behavior in ways that are extremely difficult to bisect or roll back safely.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 15,
+        "confidence": 0.85,
+        "recommendation": "If this is targeting v0.4.7, verify that each intermediate version (v0.4.1–v0.4.6) was independently validated and that the cumulative diff has been tested as a whole, not just incrementally. Consider a dedicated integration smoke test against the full v0.4.0→HEAD diff."
+      }
+    ],
+    "next_steps": [
+      "Run `grep -r \"process\\.mjs\" scripts/ tests/` to confirm the deleted module has no surviving imports",
+      "Inspect retry.mjs for max-retry ceiling, jitter, and idempotency guards",
+      "Inspect bigmodel-errors.mjs for a catch-all/default classification branch",
+      "Execute UAT scenarios against current HEAD and commit the report",
+      "Verify that the 352-line retry test suite covers infinite-retry, thundering-herd, and non-idempotent retry scenarios"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"This is a massive 6600+ line diff spanning 84 files (v0.4.0→v0.4.6) that touches every critical module: retry logic, error dispatch, the GLM client, state management, filesystem operations, and job tracking. The blast radius is enormous for a minor-version series, and several structural red flags—deleted modules, new retry/backoff machinery, rewritten client error handling—create real risk of silent failures or regressions that would be hard to diagnose in production.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Deleted `scripts/lib/process.mjs` may leave dangling imports\",\"body\":\"The diff shows `scripts/lib/process.mjs` was entirely removed (67 lines deleted). If any surviving module still imports from it, the result is an immediate runtime crash (MODULE_NOT_FOUND) that only surfaces when that code path is exercised. The companion script, render module, and test files are all candidates for stale imports. Without a verified import graph, this is a latent breakage risk.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":67,\"confidence\":0.7,\"recommendation\":\"Run `grep -r \\\"from.*process.mjs\\\" scripts/ tests/` (or equivalent) against the current tree to confirm no surviving import references exist. Add an automated check in CI that flags imports of deleted files.\"},{\"severity\":\"high\",\"title\":\"New 203-line retry.mjs module introduces retry/backoff without visible guardrails\",\"body\":\"A brand-new `scripts/lib/retry.mjs` module (203 lines) introduces retry and backoff logic for API calls. Retry machinery is a top-tier risk area: incorrect jitter can cause thundering-herd retries, missing retry ceilings can cause infinite loops, and retrying non-idempotent operations can cause duplication or data corruption. With no visibility into the implementation, the safe assumption is that at least one of these failure modes is unguarded.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.65,\"recommendation\":\"Verify that retry.mjs has: (1) a hard maximum retry ceiling, (2) exponential backoff with jitter, (3) error classification that only retries idempotent or safely retryable operations, (4) circuit-breaker or total-timeout budget. Ensure tests in `tests/retry.test.mjs` (352 lines) cover these edge cases explicitly.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs rewrite (155 lines changed) couples to bigmodel-errors.mjs dispatch without fallback\",\"body\":\"`scripts/lib/glm-client.mjs` has 155 lines changed and a new dependency on the equally new `scripts/lib/bigmodel-errors.mjs` (168 lines). If the error dispatcher fails to classify an unexpected error shape from the API, the default behavior determines whether the error is silently swallowed, retried infinitely, or surfaced to the user. The coupling between two new/rewritten modules means neither has production seasoning.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.6,\"recommendation\":\"Ensure bigmodel-errors.mjs has an exhaustive default/catch-all branch that logs the unrecognized error shape and propagates a generic failure rather than dropping it. Add a test for 'unknown error shape' classification in `tests/bigmodel-errors.test.mjs`.\"},{\"severity\":\"medium\",\"title\":\"No v0.4.6 UAT report — test coverage gap for latest release\",\"body\":\"The test-automation directory contains UAT reports for v0.4.4 and v0.4.5 but not v0.4.6. The v0.4.6 release includes the new BigModel error dispatch, auto retry/backoff, and other hardening changes, yet there is no evidence of end-to-end validation for this version. The unit tests may pass while integration behavior regresses.\",\"file\":\"test-automation/uat-reports\",\"line_start\":1,\"line_end\":1,\"confidence\":0.8,\"recommendation\":\"Run UAT scenarios against v0.4.6 (or the current HEAD targeting v0.4.7) and commit the report before shipping. At minimum, exercise the retry path, the error dispatch path, and the setup/rescue commands.\"},{\"severity\":\"medium\",\"title\":\"84-file diff with 6600+ insertions is disproportionately large for a patch-level release\",\"body\":\"Going from v0.4.0 to v0.4.6 involves 84 changed files and 6600+ lines added across retry logic, error handling, the API client, state management, CI, tests, and documentation. This is effectively a major rewrite bundled as minor patches. Any single regression in this bundle could affect user-visible behavior in ways that are extremely difficult to bisect or roll back safely.\",\"file\":\"package.json\",\"line_start\":1,\"line_end\":15,\"confidence\":0.85,\"recommendation\":\"If this is targeting v0.4.7, verify that each intermediate version (v0.4.1–v0.4.6) was independently validated and that the cumulative diff has been tested as a whole, not just incrementally. Consider a dedicated integration smoke test against the full v0.4.0→HEAD diff.\"}],\"next_steps\":[\"Run `grep -r \\\"process\\\\.mjs\\\" scripts/ tests/` to confirm the deleted module has no surviving imports\",\"Inspect retry.mjs for max-retry ceiling, jitter, and idempotency guards\",\"Inspect bigmodel-errors.mjs for a catch-all/default classification branch\",\"Execute UAT scenarios against current HEAD and commit the report\",\"Verify that the 352-line retry test suite covers infinite-retry, thundering-herd, and non-idempotent retry scenarios\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T15:05:54.623Z"
+}

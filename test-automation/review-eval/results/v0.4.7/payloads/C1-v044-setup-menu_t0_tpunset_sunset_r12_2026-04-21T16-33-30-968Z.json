@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 12
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 40556,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The commit renames the npm scope and adds an interactive menu to /glm:setup. The scope rename in package.json creates a breaking change for any existing installations that depend on the old package name, with no migration path documented. The setup command changes introduce a menu flow that could leave users in a confused state if they select certain options, and the release_card.md has potential issues with hardcoded values that may not match the actual published package location.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change with no migration or alias",
+        "body": "The package.json `name` field changes the npm scope (line 2), which means the old package name will no longer receive updates. Any user with the old package installed globally or referenced in scripts will break. There is no `npm deprecate` message, no aliasing, and no documented migration step in CHANGELOG.md or elsewhere in this diff. The CHANGELOG for v0.4.7 mentions the rename only tangentially but does not provide uninstall/reinstall instructions. Users pinning to the old scope will silently stop receiving updates, and `npm install` of the old name will either 404 or serve a stale version.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.85,
+        "recommendation": "Add an explicit migration section to the CHANGELOG and README instructing users to `npm uninstall <old-scope/package>` and `npm install <new-scope/package>`. Consider publishing a final version under the old name that prints a deprecation warning pointing to the new name."
+      },
+      {
+        "severity": "medium",
+        "title": "Setup menu options may lack corresponding handlers or have inconsistent behavior",
+        "body": "The commands/setup.md file adds an interactive menu when the tool is 'already configured'. The markdown-based command definition includes conditional branching (already configured vs. not), but there is no explicit error handling or guidance if a menu selection fails mid-operation. The menu choices reference operations that could fail (reconfigure, reset, etc.) without documenting rollback behavior. Additionally, the menu text could confuse users if the detection of 'already configured' has a false positive (e.g., stale config, partial config from a failed prior run).",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.7,
+        "recommendation": "Ensure each menu option has a defined failure path documented in the command. Add a guard for partially-corrupted config states so the 'already configured' detection does not produce an incorrect menu, and document what happens if a selected operation fails partway through."
+      },
+      {
+        "severity": "medium",
+        "title": "marketplace.json references may not match new scope after rename",
+        "body": "The .claude-plugin/marketplace.json changes update references to align with the new scope name, and plugin.json updates its identifier. If the plugin registry or marketplace caches the old manifest, users could be served stale or broken metadata. There is also risk that the release_card.md contains hardcoded references or URLs that may not be updated everywhere (it grew by ~100 lines with significant rewrites), creating broken links or incorrect installation instructions.",
+        "file": ".claude-plugin/marketplace.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.65,
+        "recommendation": "Audit all URLs, package name references, and installation commands in marketplace.json, plugin.json, and release_card.md to ensure they consistently use the new scope. Verify marketplace registration is updated before publishing."
+      }
+    ],
+    "next_steps": [
+      "Confirm the old npm package name is deprecated with a clear migration message",
+      "Add explicit uninstall/reinstall instructions to CHANGELOG for v0.4.7",
+      "Verify all links and package references in release_card.md resolve correctly after the scope rename",
+      "Test the setup menu flow with a corrupted/stale config to verify the 'already configured' branch handles edge cases"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The commit renames the npm scope and adds an interactive menu to /glm:setup. The scope rename in package.json creates a breaking change for any existing installations that depend on the old package name, with no migration path documented. The setup command changes introduce a menu flow that could leave users in a confused state if they select certain options, and the release_card.md has potential issues with hardcoded values that may not match the actual published package location.\",\"findings\":[{\"severity\":\"high\",\"title\":\"npm scope rename is a breaking change with no migration or alias\",\"body\":\"The package.json `name` field changes the npm scope (line 2), which means the old package name will no longer receive updates. Any user with the old package installed globally or referenced in scripts will break. There is no `npm deprecate` message, no aliasing, and no documented migration step in CHANGELOG.md or elsewhere in this diff. The CHANGELOG for v0.4.7 mentions the rename only tangentially but does not provide uninstall/reinstall instructions. Users pinning to the old scope will silently stop receiving updates, and `npm install` of the old name will either 404 or serve a stale version.\",\"file\":\"package.json\",\"line_start\":1,\"line_end\":4,\"confidence\":0.85,\"recommendation\":\"Add an explicit migration section to the CHANGELOG and README instructing users to `npm uninstall <old-scope/package>` and `npm install <new-scope/package>`. Consider publishing a final version under the old name that prints a deprecation warning pointing to the new name.\"},{\"severity\":\"medium\",\"title\":\"Setup menu options may lack corresponding handlers or have inconsistent behavior\",\"body\":\"The commands/setup.md file adds an interactive menu when the tool is 'already configured'. The markdown-based command definition includes conditional branching (already configured vs. not), but there is no explicit error handling or guidance if a menu selection fails mid-operation. The menu choices reference operations that could fail (reconfigure, reset, etc.) without documenting rollback behavior. Additionally, the menu text could confuse users if the detection of 'already configured' has a false positive (e.g., stale config, partial config from a failed prior run).\",\"file\":\"commands/setup.md\",\"line_start\":1,\"line_end\":19,\"confidence\":0.7,\"recommendation\":\"Ensure each menu option has a defined failure path documented in the command. Add a guard for partially-corrupted config states so the 'already configured' detection does not produce an incorrect menu, and document what happens if a selected operation fails partway through.\"},{\"severity\":\"medium\",\"title\":\"marketplace.json references may not match new scope after rename\",\"body\":\"The .claude-plugin/marketplace.json changes update references to align with the new scope name, and plugin.json updates its identifier. If the plugin registry or marketplace caches the old manifest, users could be served stale or broken metadata. There is also risk that the release_card.md contains hardcoded references or URLs that may not be updated everywhere (it grew by ~100 lines with significant rewrites), creating broken links or incorrect installation instructions.\",\"file\":\".claude-plugin/marketplace.json\",\"line_start\":1,\"line_end\":4,\"confidence\":0.65,\"recommendation\":\"Audit all URLs, package name references, and installation commands in marketplace.json, plugin.json, and release_card.md to ensure they consistently use the new scope. Verify marketplace registration is updated before publishing.\"}],\"next_steps\":[\"Confirm the old npm package name is deprecated with a clear migration message\",\"Add explicit uninstall/reinstall instructions to CHANGELOG for v0.4.7\",\"Verify all links and package references in release_card.md resolve correctly after the scope rename\",\"Test the setup menu flow with a corrupted/stale config to verify the 'already configured' branch handles edge cases\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:33:30.985Z"
+}

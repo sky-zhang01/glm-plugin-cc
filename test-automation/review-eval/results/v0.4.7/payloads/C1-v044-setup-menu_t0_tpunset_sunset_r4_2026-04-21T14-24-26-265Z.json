@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 4
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.333,
+    "citation_false_file_hits": 0,
+    "latency_ms": 77229,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit bundles two unrelated changes—npm scope rename and interactive setup-menu logic—into a single commit, which is itself a process risk. The scope rename is a potentially breaking change for existing installations, and the interactive menu added to the setup command relies on LLM-interpretation of markdown instructions to detect already-configured state and present safe options, which is inherently fragile. Without evidence of migration tooling or deprecation notices for the old scope, and without visible guards against destructive re-configuration, this should not ship as-is.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "NPM scope rename is a breaking change with no visible migration path",
+        "body": "package.json changes the npm scope (4 +/- lines). Any existing consumer, CI pipeline, or lockfile referencing the old scope will break at install time. There is no indication of a deprecation path for the old scope, no migration guide in CHANGELOG.md for the rename, and no proof that the new scope is already published. Combined with marketplace.json and plugin.json changes, any misalignment between these three files would cause the plugin to be undiscoverable or uninstallable.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.8,
+        "recommendation": "Verify that the new scope package is published and the old scope is either still available with a deprecation notice or aliased. Add a migration note to the CHANGELOG and ensure marketplace.json and plugin.json reference the exact same scope. Consider shipping the rename as a separate commit with an explicit breaking-change semver bump."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive setup menu relies on LLM-interpreted state detection with no deterministic guard",
+        "body": "commands/setup.md now contains interactive menu logic for the already-configured case. Since this is a Claude plugin command, the 'already configured' detection and the menu options are interpreted by the LLM at runtime—not by deterministic code. This means: (1) partial or corrupt config files may be misclassified as 'configured,' hiding setup from users who need it; (2) destructive options like 'reset' or 'reconfigure' could be presented and executed without a reliable confirmation flow; (3) behavior will vary across LLM sessions, making the feature untestable in the traditional sense.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.7,
+        "recommendation": "Add explicit, hard-coded guard conditions in the markdown that enumerate what constitutes 'configured' (e.g., specific file paths, required keys). Include a prominent warning instruction that the LLM must confirm before any destructive action. If possible, move state detection to a script or tool call rather than relying on prompt interpretation."
+      },
+      {
+        "severity": "medium",
+        "title": "Scope rename across marketplace.json and plugin.json may desynchronize plugin identity",
+        "body": "The scope rename touches .claude-plugin/marketplace.json (4 +/- lines) and .claude-plugin/plugin.json (2 +/- lines). If the plugin identifier, name, or URL in either file does not exactly match the new scope in package.json, the plugin marketplace will show a broken listing or fail to install. These identity fields must be verified end-to-end, not just edited in isolation.",
+        "file": ".claude-plugin/marketplace.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.65,
+        "recommendation": "Diff marketplace.json and plugin.json field by field and confirm every identifier, URL, and package reference uses the new scope consistently. Test a fresh install from the marketplace listing before merging."
+      }
+    ],
+    "next_steps": [
+      "Publish or verify the new npm scope package exists and is installable before merging.",
+      "Diff all three config files (package.json, marketplace.json, plugin.json) to confirm scope consistency.",
+      "Add explicit guard instructions to commands/setup.md for state detection and destructive-action confirmation.",
+      "Consider splitting the scope rename and the setup-menu feature into separate commits to isolate rollback risk."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"This commit bundles two unrelated changes—npm scope rename and interactive setup-menu logic—into a single commit, which is itself a process risk. The scope rename is a potentially breaking change for existing installations, and the interactive menu added to the setup command relies on LLM-interpretation of markdown instructions to detect already-configured state and present safe options, which is inherently fragile. Without evidence of migration tooling or deprecation notices for the old scope, and without visible guards against destructive re-configuration, this should not ship as-is.\",\"findings\":[{\"severity\":\"high\",\"title\":\"NPM scope rename is a breaking change with no visible migration path\",\"body\":\"package.json changes the npm scope (4 +/- lines). Any existing consumer, CI pipeline, or lockfile referencing the old scope will break at install time. There is no indication of a deprecation path for the old scope, no migration guide in CHANGELOG.md for the rename, and no proof that the new scope is already published. Combined with marketplace.json and plugin.json changes, any misalignment between these three files would cause the plugin to be undiscoverable or uninstallable.\",\"file\":\"package.json\",\"line_start\":1,\"line_end\":4,\"confidence\":0.8,\"recommendation\":\"Verify that the new scope package is published and the old scope is either still available with a deprecation notice or aliased. Add a migration note to the CHANGELOG and ensure marketplace.json and plugin.json reference the exact same scope. Consider shipping the rename as a separate commit with an explicit breaking-change semver bump.\"},{\"severity\":\"medium\",\"title\":\"Interactive setup menu relies on LLM-interpreted state detection with no deterministic guard\",\"body\":\"commands/setup.md now contains interactive menu logic for the already-configured case. Since this is a Claude plugin command, the 'already configured' detection and the menu options are interpreted by the LLM at runtime—not by deterministic code. This means: (1) partial or corrupt config files may be misclassified as 'configured,' hiding setup from users who need it; (2) destructive options like 'reset' or 'reconfigure' could be presented and executed without a reliable confirmation flow; (3) behavior will vary across LLM sessions, making the feature untestable in the traditional sense.\",\"file\":\"commands/setup.md\",\"line_start\":1,\"line_end\":19,\"confidence\":0.7,\"recommendation\":\"Add explicit, hard-coded guard conditions in the markdown that enumerate what constitutes 'configured' (e.g., specific file paths, required keys). Include a prominent warning instruction that the LLM must confirm before any destructive action. If possible, move state detection to a script or tool call rather than relying on prompt interpretation.\"},{\"severity\":\"medium\",\"title\":\"Scope rename across marketplace.json and plugin.json may desynchronize plugin identity\",\"body\":\"The scope rename touches .claude-plugin/marketplace.json (4 +/- lines) and .claude-plugin/plugin.json (2 +/- lines). If the plugin identifier, name, or URL in either file does not exactly match the new scope in package.json, the plugin marketplace will show a broken listing or fail to install. These identity fields must be verified end-to-end, not just edited in isolation.\",\"file\":\".claude-plugin/marketplace.json\",\"line_start\":1,\"line_end\":4,\"confidence\":0.65,\"recommendation\":\"Diff marketplace.json and plugin.json field by field and confirm every identifier, URL, and package reference uses the new scope consistently. Test a fresh install from the marketplace listing before merging.\"}],\"next_steps\":[\"Publish or verify the new npm scope package exists and is installable before merging.\",\"Diff all three config files (package.json, marketplace.json, plugin.json) to confirm scope consistency.\",\"Add explicit guard instructions to commands/setup.md for state detection and destructive-action confirmation.\",\"Consider splitting the scope rename and the setup-menu feature into separate commits to isolate rollback risk.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:24:26.289Z"
+}

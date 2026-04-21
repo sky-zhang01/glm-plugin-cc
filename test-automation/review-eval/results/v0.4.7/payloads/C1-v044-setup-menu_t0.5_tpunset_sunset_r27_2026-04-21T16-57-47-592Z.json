@@ -1,0 +1,68 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 27
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 25417,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit adds an interactive menu to the /glm:setup command and renames the npm scope. The changes are primarily to documentation, configuration, and markdown files. The setup command logic change introduces a branching path based on 'already configured' state, but the implementation is in a markdown file (commands/setup.md), which means the actual interactive behavior and failure handling depends on runtime interpretation not visible here. The npm scope rename (package.json) is a compatibility-breaking change that lacks migration guidance.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change with no migration path documented",
+        "body": "The package.json changes the npm scope name. Any existing installations, CI pipelines, or documentation referencing the old scope will break. There is no migration script, deprecation notice, or compatibility shim visible in this diff. Users on the old scope who update will experience silent failures or missing package errors. The CHANGELOG mentions the rename but does not provide actionable migration steps.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 10,
+        "confidence": 0.85,
+        "recommendation": "Add a deprecation/migration guide for users of the old scope. Consider publishing a transitional package under the old scope that redirects or warns. Document the exact steps users must take in CHANGELOG.md and release_card.md."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive menu in setup.md has no documented handling for invalid input or interruption",
+        "body": "The commands/setup.md file now includes an interactive menu for when the system is 'already configured'. As a markdown-based command definition, the error handling for invalid selections, empty input, or user interruption (Ctrl+C mid-flow) is not visible. If the runtime interpreter doesn't gracefully handle these cases, users could be left in an inconsistent or confusing state with no clear recovery path.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.6,
+        "recommendation": "Explicitly document or implement guards for: invalid menu selections, empty input, and mid-operation cancellation. Ensure the setup command is idempotent regardless of which menu path is taken or abandoned."
+      },
+      {
+        "severity": "medium",
+        "title": "release_card.md has large undocumented restructuring — risk of stale or incorrect instructions",
+        "body": "The release_card.md file saw 326 lines changed with significant restructuring. Without a clear diff audit of every instruction block, there is a real risk that outdated URLs, removed prerequisites, or contradictory steps survived the edit. Since this file serves as the primary user-facing release documentation, any inaccuracy directly blocks adoption or causes user-visible failures.",
+        "file": "release_card.md",
+        "line_start": 1,
+        "line_end": 326,
+        "confidence": 0.55,
+        "recommendation": "Perform a line-by-line verification of all URLs, command examples, and step sequences in release_card.md against the current state of the repository and the new npm scope. Automated link checking would help."
+      }
+    ],
+    "next_steps": [
+      "Verify the npm scope rename doesn't break existing published packages or user installations — provide a migration path.",
+      "Audit commands/setup.md for completeness of the interactive menu: what happens on invalid input, cancellation, or partial completion?",
+      "Line-by-line review of release_card.md to confirm all instructions, URLs, and references are current and consistent with the scope rename."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"This commit adds an interactive menu to the /glm:setup command and renames the npm scope. The changes are primarily to documentation, configuration, and markdown files. The setup command logic change introduces a branching path based on 'already configured' state, but the implementation is in a markdown file (commands/setup.md), which means the actual interactive behavior and failure handling depends on runtime interpretation not visible here. The npm scope rename (package.json) is a compatibility-breaking change that lacks migration guidance.\",\"findings\":[{\"severity\":\"high\",\"title\":\"npm scope rename is a breaking change with no migration path documented\",\"body\":\"The package.json changes the npm scope name. Any existing installations, CI pipelines, or documentation referencing the old scope will break. There is no migration script, deprecation notice, or compatibility shim visible in this diff. Users on the old scope who update will experience silent failures or missing package errors. The CHANGELOG mentions the rename but does not provide actionable migration steps.\",\"file\":\"package.json\",\"line_start\":1,\"line_end\":10,\"confidence\":0.85,\"recommendation\":\"Add a deprecation/migration guide for users of the old scope. Consider publishing a transitional package under the old scope that redirects or warns. Document the exact steps users must take in CHANGELOG.md and release_card.md.\"},{\"severity\":\"medium\",\"title\":\"Interactive menu in setup.md has no documented handling for invalid input or interruption\",\"body\":\"The commands/setup.md file now includes an interactive menu for when the system is 'already configured'. As a markdown-based command definition, the error handling for invalid selections, empty input, or user interruption (Ctrl+C mid-flow) is not visible. If the runtime interpreter doesn't gracefully handle these cases, users could be left in an inconsistent or confusing state with no clear recovery path.\",\"file\":\"commands/setup.md\",\"line_start\":1,\"line_end\":19,\"confidence\":0.6,\"recommendation\":\"Explicitly document or implement guards for: invalid menu selections, empty input, and mid-operation cancellation. Ensure the setup command is idempotent regardless of which menu path is taken or abandoned.\"},{\"severity\":\"medium\",\"title\":\"release_card.md has large undocumented restructuring — risk of stale or incorrect instructions\",\"body\":\"The release_card.md file saw 326 lines changed with significant restructuring. Without a clear diff audit of every instruction block, there is a real risk that outdated URLs, removed prerequisites, or contradictory steps survived the edit. Since this file serves as the primary user-facing release documentation, any inaccuracy directly blocks adoption or causes user-visible failures.\",\"file\":\"release_card.md\",\"line_start\":1,\"line_end\":326,\"confidence\":0.55,\"recommendation\":\"Perform a line-by-line verification of all URLs, command examples, and step sequences in release_card.md against the current state of the repository and the new npm scope. Automated link checking would help.\"}],\"next_steps\":[\"Verify the npm scope rename doesn't break existing published packages or user installations — provide a migration path.\",\"Audit commands/setup.md for completeness of the interactive menu: what happens on invalid input, cancellation, or partial completion?\",\"Line-by-line review of release_card.md to confirm all instructions, URLs, and references are current and consistent with the scope rename.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:57:47.617Z"
+}

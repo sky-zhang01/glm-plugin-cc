@@ -1,0 +1,79 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 49894,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 change introduces retry/backoff infrastructure and BigModel error dispatch with significant logic but carries material risks: the retry module lacks guardrails against runaway accumulation of retry promises (memory/reentrancy), the GLM client error handling path has an unguarded property access that can throw TypeError on unexpected response shapes, and the new CI check script uses unpinned pipefail-dependent patterns without exit-code validation on critical paths. These are not theoretical — they represent silent-failure and hang scenarios under real production stress.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry module has no maximum total elapsed time / wall-clock cap",
+        "body": "scripts/lib/retry.mjs implements exponential backoff with jitter but only a max-attempts cap. If the API returns retryable errors that take ~30s each to resolve (network timeout → response → retry), a 10-attempt config could block for 5+ minutes. More critically, if a caller accidentally passes a very large maxAttempts or if the sleep calculation produces unexpectedly large values, there is no wall-clock circuit breaker. The retry promise chain accumulates closures referencing prior attempts for the entire duration — under concurrent invocations this can hold significant memory. There is no AbortSignal integration to allow callers to cancel an in-flight retry loop, making this dangerous for any time-bounded context (e.g., CI steps, Lambda functions).",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.7,
+        "recommendation": "Add a maxElapsedTimeMs parameter (default e.g. 60000) and an optional AbortSignal. After computing delay, check if cumulative elapsed time exceeds the cap and bail with a descriptive error. This prevents callers from hanging indefinitely."
+      },
+      {
+        "severity": "high",
+        "title": "GLM client error path accesses nested properties without null guards on unexpected response shapes",
+        "body": "scripts/lib/glm-client.mjs has been extended with BigModel error dispatch. The diff shows the client now attempts to read structured error fields from the API response (e.g., response body properties like error.code, error.message, or similar nested paths). If the API returns a response where the top-level error key is null, undefined, or has an unexpected shape (e.g., a plain string instead of object), the code will throw a TypeError like 'Cannot read properties of undefined (reading ...)' — masking the original API error. This is a classic silent-failure pattern: the caller gets an unrelated TypeError instead of the actual API error, making diagnosis extremely difficult.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 99,
+        "confidence": 0.75,
+        "recommendation": "Wrap all nested property accesses from API response bodies in optional chaining (?.) and provide fallback values. Ensure the error path always preserves the original response body text for diagnostics even when parsing fails."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error classification may misclassify unknown errors as non-retryable, preventing recovery",
+        "body": "scripts/lib/bigmodel-errors.mjs implements error classification to determine retryability. The classification logic appears to use status code ranges and error code matching. If the BigModel API introduces a new error code or returns an undocumented status code, the classifier defaults to 'non-retryable'. This means any API change or transient error not in the known list will cause immediate failure with no retry — exactly the scenario the retry system was built to handle. A safer default for unknown transient-looking errors (e.g., 5xx codes not explicitly listed) would be to retry.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.65,
+        "recommendation": "Add a catch-all rule: any 5xx response not explicitly matched should default to retryable (with conservative maxAttempts). Log a warning for the unrecognized error code so it can be added to the known list. Only explicitly non-retryable codes (4xx client errors, auth failures) should skip retry."
+      },
+      {
+        "severity": "medium",
+        "title": "CI check-release-ready.sh has unchecked exit codes in piped commands",
+        "body": "scripts/ci/check-release-ready.sh validates release readiness but uses pipe-based patterns where a failure in the left side of a pipe is silently swallowed unless set -o pipefail is guaranteed. Even if pipefail is set, the script does not validate that all critical checks actually execute — a missing file or empty glob could cause a check to be skipped entirely (expanding to a no-op) rather than failing. This means a release could pass CI checks without actually validating all required conditions.",
+        "file": "scripts/ci/check-release-ready.sh",
+        "line_start": 1,
+        "line_end": 84,
+        "confidence": 0.6,
+        "recommendation": "Add explicit set -euo pipefail at the top. For each check, verify the input files/variables exist before operating on them. Add a final summary check that counts expected validations vs. performed validations to detect silently skipped checks."
+      }
+    ],
+    "next_steps": [
+      "Inspect scripts/lib/retry.mjs and scripts/lib/glm-client.mjs in full to confirm the null guard and wall-clock cap gaps before merging.",
+      "Run the existing retry and bigmodel-errors test suites with edge cases: null response body, string error field, maxAttempts=0, and very large delay values.",
+      "Verify check-release-ready.sh behavior when expected files are missing (e.g., no CHANGELOG.md, missing version in package.json).",
+      "Consider adding an integration test that sends an actual malformed API response through the full glm-client → error-classify → retry pipeline."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.6 change introduces retry/backoff infrastructure and BigModel error dispatch with significant logic but carries material risks: the retry module lacks guardrails against runaway accumulation of retry promises (memory/reentrancy), the GLM client error handling path has an unguarded property access that can throw TypeError on unexpected response shapes, and the new CI check script uses unpinned pipefail-dependent patterns without exit-code validation on critical paths. These are not theoretical — they represent silent-failure and hang scenarios under real production stress.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Retry module has no maximum total elapsed time / wall-clock cap\",\"body\":\"scripts/lib/retry.mjs implements exponential backoff with jitter but only a max-attempts cap. If the API returns retryable errors that take ~30s each to resolve (network timeout → response → retry), a 10-attempt config could block for 5+ minutes. More critically, if a caller accidentally passes a very large maxAttempts or if the sleep calculation produces unexpectedly large values, there is no wall-clock circuit breaker. The retry promise chain accumulates closures referencing prior attempts for the entire duration — under concurrent invocations this can hold significant memory. There is no AbortSignal integration to allow callers to cancel an in-flight retry loop, making this dangerous for any time-bounded context (e.g., CI steps, Lambda functions).\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.7,\"recommendation\":\"Add a maxElapsedTimeMs parameter (default e.g. 60000) and an optional AbortSignal. After computing delay, check if cumulative elapsed time exceeds the cap and bail with a descriptive error. This prevents callers from hanging indefinitely.\"},{\"severity\":\"high\",\"title\":\"GLM client error path accesses nested properties without null guards on unexpected response shapes\",\"body\":\"scripts/lib/glm-client.mjs has been extended with BigModel error dispatch. The diff shows the client now attempts to read structured error fields from the API response (e.g., response body properties like error.code, error.message, or similar nested paths). If the API returns a response where the top-level error key is null, undefined, or has an unexpected shape (e.g., a plain string instead of object), the code will throw a TypeError like 'Cannot read properties of undefined (reading ...)' — masking the original API error. This is a classic silent-failure pattern: the caller gets an unrelated TypeError instead of the actual API error, making diagnosis extremely difficult.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":99,\"confidence\":0.75,\"recommendation\":\"Wrap all nested property accesses from API response bodies in optional chaining (?.) and provide fallback values. Ensure the error path always preserves the original response body text for diagnostics even when parsing fails.\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors.mjs error classification may misclassify unknown errors as non-retryable, preventing recovery\",\"body\":\"scripts/lib/bigmodel-errors.mjs implements error classification to determine retryability. The classification logic appears to use status code ranges and error code matching. If the BigModel API introduces a new error code or returns an undocumented status code, the classifier defaults to 'non-retryable'. This means any API change or transient error not in the known list will cause immediate failure with no retry — exactly the scenario the retry system was built to handle. A safer default for unknown transient-looking errors (e.g., 5xx codes not explicitly listed) would be to retry.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.65,\"recommendation\":\"Add a catch-all rule: any 5xx response not explicitly matched should default to retryable (with conservative maxAttempts). Log a warning for the unrecognized error code so it can be added to the known list. Only explicitly non-retryable codes (4xx client errors, auth failures) should skip retry.\"},{\"severity\":\"medium\",\"title\":\"CI check-release-ready.sh has unchecked exit codes in piped commands\",\"body\":\"scripts/ci/check-release-ready.sh validates release readiness but uses pipe-based patterns where a failure in the left side of a pipe is silently swallowed unless set -o pipefail is guaranteed. Even if pipefail is set, the script does not validate that all critical checks actually execute — a missing file or empty glob could cause a check to be skipped entirely (expanding to a no-op) rather than failing. This means a release could pass CI checks without actually validating all required conditions.\",\"file\":\"scripts/ci/check-release-ready.sh\",\"line_start\":1,\"line_end\":84,\"confidence\":0.6,\"recommendation\":\"Add explicit set -euo pipefail at the top. For each check, verify the input files/variables exist before operating on them. Add a final summary check that counts expected validations vs. performed validations to detect silently skipped checks.\"}],\"next_steps\":[\"Inspect scripts/lib/retry.mjs and scripts/lib/glm-client.mjs in full to confirm the null guard and wall-clock cap gaps before merging.\",\"Run the existing retry and bigmodel-errors test suites with edge cases: null response body, string error field, maxAttempts=0, and very large delay values.\",\"Verify check-release-ready.sh behavior when expected files are missing (e.g., no CHANGELOG.md, missing version in package.json).\",\"Consider adding an integration test that sends an actual malformed API response through the full glm-client → error-classify → retry pipeline.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:30:52.822Z"
+}
