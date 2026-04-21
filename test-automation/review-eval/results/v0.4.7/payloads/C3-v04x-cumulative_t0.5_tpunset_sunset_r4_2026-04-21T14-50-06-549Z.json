@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 4
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 169479,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces auto-retry/backoff, BigModel error dispatch, and background job execution across 84 files and 6600+ lines. The highest-ship-risk areas are: (1) retry logic integrated into glm-client without visible idempotency guards, (2) file-based state persistence that may lack atomic writes, and (3) a deleted process.mjs whose responsibilities were partially absorbed by retry.mjs. Integration test coverage for the retry→client→state→job-tracking chain is absent. A crash or transient error in the wrong place could corrupt state or duplicate jobs with no automated recovery path.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry integrated into glm-client without visible idempotency protection",
+        "body": "retry.mjs (203 lines, new) is integrated into glm-client.mjs (155 lines changed) to auto-retry BigModel API calls. If the retried operations include non-idempotent actions—such as job submission or state mutations—a retry after a timeout or network blip will produce duplicate side effects. The diff stat shows no idempotency-key mechanism, request-dedup cache, or conditional-write guard in any of the changed files. The BigModel error dispatcher (bigmodel-errors.mjs, 168 lines) classifies errors for retry decisions, but any misclassification of a non-retryable error as retryable amplifies the duplication risk. Unit tests for retry.test.mjs (352 lines) cover the retry module in isolation but cannot surface cross-module duplication because they mock the client.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.78,
+        "recommendation": "Add an idempotency guard: either a request deduplication key passed to BigModel, or a client-side 'already-sent' ledger that rejects retries of requests whose response was already persisted. Verify that every retried API call is genuinely idempotent (GET/HEAD only, or POST with server-side dedup). If any call is non-idempotent, classify it as non-retryable in bigmodel-errors.mjs."
+      },
+      {
+        "severity": "high",
+        "title": "File-based state writes may lack atomicity—crash mid-write corrupts all subsequent operations",
+        "body": "state.mjs (32 lines changed) and fs.mjs (44 lines changed) manage JSON state files on disk. If state is written by directly truncating and rewriting the file (a common pattern in Node.js), a process crash, OOM kill, or disk-full condition during the write leaves a partial/truncated JSON file. Every subsequent command that reads state will throw a parse error and fail. There is no visible write-ahead log, temp-file-then-rename pattern, or backup-state-before-mutation guard in the diff. The risk is compounded by retry.mjs, which may cause the process to run longer and increase the window for a crash during a state write.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.72,
+        "recommendation": "Audit fs.mjs write helpers to confirm atomic write semantics: write to a temp file in the same directory, then rename (which is atomic on POSIX). Add a state recovery path: if the primary state file fails to parse, attempt to load a .bak or the temp file. Add a unit test in fs.test.mjs that simulates a truncated state file and asserts recovery behavior."
+      },
+      {
+        "severity": "medium",
+        "title": "process.mjs deleted in 'scaffolding purge'—responsibilities may be incompletely migrated to retry.mjs",
+        "body": "process.mjs (67 lines) was entirely removed in commit 225401a ('Bundle F — ReferenceError + full thread/resume scaffolding purge'). Later, retry.mjs (203 lines) was added in v0.4.6. The purge commit message suggests aggressive removal. If process.mjs handled process lifecycle events (signal handlers, cleanup on exit, orphan detection) that retry.mjs does not replicate, those safety nets are gone. In particular, background job execution (added in v0.4.5 with --wait/--background flags) depends on proper process cleanup to avoid orphaned tracked jobs.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.68,
+        "recommendation": "Compare the responsibilities of the deleted process.mjs against retry.mjs and session-lifecycle-hook.mjs (5 lines changed) line by line. Confirm that signal handling (SIGTERM, SIGINT), process exit cleanup, and orphan job detection are all covered. If any are missing, restore them before shipping."
+      },
+      {
+        "severity": "medium",
+        "title": "No integration tests for retry→client→state→job-tracking failure chain",
+        "body": "The test suite has strong unit-test coverage per module (retry.test.mjs 352 lines, bigmodel-errors.test.mjs 189 lines, state.test.mjs 81 lines, etc.) but no integration test that exercises the full chain: a BigModel API call fails transiently → bigmodel-errors classifies it → retry.mjs backs off and retries → glm-client resubmits → state.mjs records the outcome → tracked-jobs.mjs updates job status. The most dangerous bugs in this system—duplicate submissions, corrupted state after partial retry, stuck jobs after max-retry exhaustion—only surface at the integration level. The UAT scenarios (v0.4.4, v0.4.5) predate the retry logic (v0.4.6) and cannot cover it.",
+        "file": "tests/retry.test.mjs",
+        "line_start": 1,
+        "line_end": 352,
+        "confidence": 0.75,
+        "recommendation": "Add at least one integration test that: (1) starts a real glm-client call against a mock server, (2) injects a transient 503, (3) asserts exactly one retry occurs, (4) asserts state is correct after recovery, (5) asserts no duplicate job entries. Add another test for max-retry exhaustion that verifies state is left in a recoverable 'failed' state, not a stuck 'in-progress' state."
+      },
+      {
+        "severity": "medium",
+        "title": "Tracked jobs may be orphaned if background process exits without cleanup",
+        "body": "tracked-jobs.mjs (78 lines changed) manages background job state. The --background flag (added v0.4.5) allows jobs to run detached. If the background process exits unexpectedly (OOM, signal, unhandled rejection) after creating a tracked job but before marking it complete, the job remains in an 'in-progress' state indefinitely. There is no visible TTL, heartbeat, or reaper mechanism in the diff to detect and recover orphaned jobs. Over time, orphaned jobs accumulate and may cause incorrect status reporting or resource exhaustion.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.65,
+        "recommendation": "Add a job TTL or heartbeat mechanism: each tracked job gets a deadline, and a startup sweep marks any job past its deadline as 'orphaned/failed'. Alternatively, use a PID file per tracked job and check process liveness on status queries. Document the expected behavior for users who encounter orphaned jobs."
+      }
+    ],
+    "next_steps": [
+      "Audit glm-client.mjs to enumerate every API call that is retried and confirm each is idempotent or guarded by a dedup mechanism.",
+      "Verify fs.mjs state write helpers use atomic write (write-to-temp + rename) and add a recovery path for truncated state files.",
+      "Diff process.mjs (pre-deletion) against retry.mjs + session-lifecycle-hook.mjs to confirm no process-safety responsibilities were lost in the purge.",
+      "Write an integration test covering transient-failure→retry→state-consistency→job-tracking-correctness before release.",
+      "Add a job reaper or TTL to tracked-jobs.mjs to prevent orphan accumulation in background execution mode."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff introduces auto-retry/backoff, BigModel error dispatch, and background job execution across 84 files and 6600+ lines. The highest-ship-risk areas are: (1) retry logic integrated into glm-client without visible idempotency guards, (2) file-based state persistence that may lack atomic writes, and (3) a deleted process.mjs whose responsibilities were partially absorbed by retry.mjs. Integration test coverage for the retry→client→state→job-tracking chain is absent. A crash or transient error in the wrong place could corrupt state or duplicate jobs with no automated recovery path.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Retry integrated into glm-client without visible idempotency protection\",\n      \"body\": \"retry.mjs (203 lines, new) is integrated into glm-client.mjs (155 lines changed) to auto-retry BigModel API calls. If the retried operations include non-idempotent actions—such as job submission or state mutations—a retry after a timeout or network blip will produce duplicate side effects. The diff stat shows no idempotency-key mechanism, request-dedup cache, or conditional-write guard in any of the changed files. The BigModel error dispatcher (bigmodel-errors.mjs, 168 lines) classifies errors for retry decisions, but any misclassification of a non-retryable error as retryable amplifies the duplication risk. Unit tests for retry.test.mjs (352 lines) cover the retry module in isolation but cannot surface cross-module duplication because they mock the client.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Add an idempotency guard: either a request deduplication key passed to BigModel, or a client-side 'already-sent' ledger that rejects retries of requests whose response was already persisted. Verify that every retried API call is genuinely idempotent (GET/HEAD only, or POST with server-side dedup). If any call is non-idempotent, classify it as non-retryable in bigmodel-errors.mjs.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"File-based state writes may lack atomicity—crash mid-write corrupts all subsequent operations\",\n      \"body\": \"state.mjs (32 lines changed) and fs.mjs (44 lines changed) manage JSON state files on disk. If state is written by directly truncating and rewriting the file (a common pattern in Node.js), a process crash, OOM kill, or disk-full condition during the write leaves a partial/truncated JSON file. Every subsequent command that reads state will throw a parse error and fail. There is no visible write-ahead log, temp-file-then-rename pattern, or backup-state-before-mutation guard in the diff. The risk is compounded by retry.mjs, which may cause the process to run longer and increase the window for a crash during a state write.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Audit fs.mjs write helpers to confirm atomic write semantics: write to a temp file in the same directory, then rename (which is atomic on POSIX). Add a state recovery path: if the primary state file fails to parse, attempt to load a .bak or the temp file. Add a unit test in fs.test.mjs that simulates a truncated state file and asserts recovery behavior.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"process.mjs deleted in 'scaffolding purge'—responsibilities may be incompletely migrated to retry.mjs\",\n      \"body\": \"process.mjs (67 lines) was entirely removed in commit 225401a ('Bundle F — ReferenceError + full thread/resume scaffolding purge'). Later, retry.mjs (203 lines) was added in v0.4.6. The purge commit message suggests aggressive removal. If process.mjs handled process lifecycle events (signal handlers, cleanup on exit, orphan detection) that retry.mjs does not replicate, those safety nets are gone. In particular, background job execution (added in v0.4.5 with --wait/--background flags) depends on proper process cleanup to avoid orphaned tracked jobs.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Compare the responsibilities of the deleted process.mjs against retry.mjs and session-lifecycle-hook.mjs (5 lines changed) line by line. Confirm that signal handling (SIGTERM, SIGINT), process exit cleanup, and orphan job detection are all covered. If any are missing, restore them before shipping.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"No integration tests for retry→client→state→job-tracking failure chain\",\n      \"body\": \"The test suite has strong unit-test coverage per module (retry.test.mjs 352 lines, bigmodel-errors.test.mjs 189 lines, state.test.mjs 81 lines, etc.) but no integration test that exercises the full chain: a BigModel API call fails transiently → bigmodel-errors classifies it → retry.mjs backs off and retries → glm-client resubmits → state.mjs records the outcome → tracked-jobs.mjs updates job status. The most dangerous bugs in this system—duplicate submissions, corrupted state after partial retry, stuck jobs after max-retry exhaustion—only surface at the integration level. The UAT scenarios (v0.4.4, v0.4.5) predate the retry logic (v0.4.6) and cannot cover it.\",\n      \"file\": \"tests/retry.test.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 352,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Add at least one integration test that: (1) starts a real glm-client call against a mock server, (2) injects a transient 503, (3) asserts exactly one retry occurs, (4) asserts state is correct after recovery, (5) asserts no duplicate job entries. Add another test for max-retry exhaustion that verifies state is left in a recoverable 'failed' state, not a stuck 'in-progress' state.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Tracked jobs may be orphaned if background process exits without cleanup\",\n      \"body\": \"tracked-jobs.mjs (78 lines changed) manages background job state. The --background flag (added v0.4.5) allows jobs to run detached. If the background process exits unexpectedly (OOM, signal, unhandled rejection) after creating a tracked job but before marking it complete, the job remains in an 'in-progress' state indefinitely. There is no visible TTL, heartbeat, or reaper mechanism in the diff to detect and recover orphaned jobs. Over time, orphaned jobs accumulate and may cause incorrect status reporting or resource exhaustion.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Add a job TTL or heartbeat mechanism: each tracked job gets a deadline, and a startup sweep marks any job past its deadline as 'orphaned/failed'. Alternatively, use a PID file per tracked job and check process liveness on status queries. Document the expected behavior for users who encounter orphaned jobs.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Audit glm-client.mjs to enumerate every API call that is retried and confirm each is idempotent or guarded by a dedup mechanism.\",\n    \"Verify fs.mjs state write helpers use atomic write (write-to-temp + rename) and add a recovery path for truncated state files.\",\n    \"Diff process.mjs (pre-deletion) against retry.mjs + session-lifecycle-hook.mjs to confirm no process-safety responsibilities were lost in the purge.\",\n    \"Write an integration test covering transient-failure→retry→state-consistency→job-tracking-correctness before release.\",\n    \"Add a job reaper or TTL to tracked-jobs.mjs to prevent orphan accumulation in background execution mode.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:50:06.589Z"
+}

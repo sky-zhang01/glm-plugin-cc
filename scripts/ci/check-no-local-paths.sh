@@ -47,6 +47,11 @@ declare -a LABELS=(
 #   the authoritative gitea host on Sky's network.
 # - scripts/setup/configure-gitea-protection.sh — the whole script's
 #   job is to talk to the gitea host; the URL is intentional.
+# - test-automation/review-eval/corpus/ — frozen git-history fixture
+#   artifacts (diff.patch files + describing meta.json). These carry
+#   pre-cleanup strings (old @skylab/ scope, old internal hostname) by
+#   construction; rewriting them would invalidate their fixture purpose.
+#   The review-eval harness itself is not a runtime surface.
 EXCLUDE_GLOBS=(
   ':(exclude)scripts/ci/check-no-local-paths.sh'
   ':(exclude)node_modules/**'
@@ -59,6 +64,8 @@ EXCLUDE_GLOBS=(
   ':(exclude)docs/ci.md'
   ':(exclude)CONTRIBUTING.md'
   ':(exclude)scripts/setup/configure-gitea-protection.sh'
+  ':(exclude)test-automation/review-eval/corpus/**'
+  ':(exclude)test-automation/review-eval/results/**'
 )
 
 VIOLATIONS=0

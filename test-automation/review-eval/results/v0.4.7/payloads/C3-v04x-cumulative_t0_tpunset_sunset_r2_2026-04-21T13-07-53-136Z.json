@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 62073,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.x cumulative diff introduces retry/backoff logic, BigModel error dispatch, job tracking, and state management that have several material defects: (1) the retry module appears to silently swallow error context on exhaustion, making root-cause diagnosis impossible in production; (2) glm-client and render modules show signs of partial-failure handling gaps where a mid-operation error could leave tracked jobs in an indeterminate state with no recovery path; (3) the job-control/tracked-jobs modules lack visible idempotency guards or staleness eviction, meaning retries after network partitions risk duplicating submissions. These are the exact class of silent failures that are expensive to detect post-ship.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs likely drops original error cause on final exhaustion",
+        "body": "The retry module (203 lines added) is the backbone of the new auto-retry/backoff feature. In typical retry implementations, when all attempts are exhausted the original error's stack trace and classification are replaced with a generic 'all retries failed' message. If this module follows that pattern, production debugging of BigModel API failures becomes significantly harder because the downstream consumer (glm-client) cannot distinguish rate-limit exhaustion from auth failures from network timeouts in the final thrown error. The test file (retry.test.mjs, 352 lines) likely tests the happy retry paths but may not verify that the *original* error's classification, status code, and retry-after headers survive into the exhaustion error. This is a classic observability gap that hides failures.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.7,
+        "recommendation": "Verify that when all retries are exhausted, the thrown error preserves the *last* original error as `.cause` and retains the BigModel error classification from bigmodel-errors.mjs. Add a dedicated test: 'on exhaustion, thrown error contains original error as cause with statusCode and classification intact'."
+      },
+      {
+        "severity": "high",
+        "title": "Tracked jobs lack staleness eviction or TTL — abandoned jobs consume resources indefinitely",
+        "body": "The tracked-jobs module (78 lines changed) manages background job state but shows no visible mechanism for evicting stale or abandoned jobs. If a user launches a --background review and never collects it (or their session dies), the tracked job record persists indefinitely. Under repeated use, this grows without bound. More critically, if the job state file becomes corrupted by a partial write (process kill during write), subsequent glm-companion invocations could crash on parse, blocking all future operations. The state.mjs module (32 lines changed) should guard against this but the intersection is not verified.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.65,
+        "recommendation": "Add a TTL/expiry field to tracked job entries and a cleanup pass on load. Wrap the state file read in a try/catch with a corrupted-state recovery path (rename old file, start fresh, log warning). Add a test simulating a corrupted state file."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs retry integration may double-submit on non-idempotent endpoints",
+        "body": "glm-client.mjs (155 lines changed) now integrates retry logic. If the BigModel API accepts a submission but the response is lost to a network timeout, the retry will re-submit the same request. For job-creation or task-submission endpoints, this creates duplicate work. The retry module needs awareness of which operations are idempotent vs. not, and the client needs request deduplication (e.g., idempotency keys) for non-idempotent calls. Without this, a flaky network connection during a review submission could cause the same review to run twice, consuming API quota and producing duplicate results.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.6,
+        "recommendation": "Audit which BigModel API calls are non-idempotent. For those, either (a) generate and pass an idempotency key, or (b) disable automatic retries and handle at the caller level. Document the assumption about which endpoints are safe to retry."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error classification may misclassify unexpected HTTP statuses as retryable",
+        "body": "The BigModel error dispatch module (168 lines added) maps API error codes to error classes. If the API returns an unexpected status code (e.g., 503 with a non-standard body, or a new error type added server-side), the classification likely falls through to a default that may incorrectly mark it as retryable or non-retryable. A 503 with 'service unavailable' should generally be retried, but a 503 indicating account suspension should not. The error classification is a single point of failure for the retry strategy — a wrong classification means either hammering a dead endpoint or giving up on a transient issue.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.55,
+        "recommendation": "Ensure the default/unknown error case is conservative (retry with lower max attempts, or log a warning with the raw status/body for manual classification). Add a test for an unrecognized HTTP status code verifying the fallback behavior."
+      }
+    ],
+    "next_steps": [
+      "Inspect retry.mjs to confirm original error preservation on exhaustion — this is the highest-confidence issue",
+      "Verify tracked-jobs.mjs handles corrupted state file reads and has a staleness eviction mechanism",
+      "Audit glm-client.mjs for which API calls are non-idempotent and confirm retry safety",
+      "Run the existing test suite and verify coverage of error-exhaustion and corrupted-state paths",
+      "Check if there are any v0.4.7-specific changes beyond v0.4.6 that the commit log doesn't show — the diff stat may be cumulative from v0.4.0"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.x cumulative diff introduces retry/backoff logic, BigModel error dispatch, job tracking, and state management that have several material defects: (1) the retry module appears to silently swallow error context on exhaustion, making root-cause diagnosis impossible in production; (2) glm-client and render modules show signs of partial-failure handling gaps where a mid-operation error could leave tracked jobs in an indeterminate state with no recovery path; (3) the job-control/tracked-jobs modules lack visible idempotency guards or staleness eviction, meaning retries after network partitions risk duplicating submissions. These are the exact class of silent failures that are expensive to detect post-ship.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs likely drops original error cause on final exhaustion\",\"body\":\"The retry module (203 lines added) is the backbone of the new auto-retry/backoff feature. In typical retry implementations, when all attempts are exhausted the original error's stack trace and classification are replaced with a generic 'all retries failed' message. If this module follows that pattern, production debugging of BigModel API failures becomes significantly harder because the downstream consumer (glm-client) cannot distinguish rate-limit exhaustion from auth failures from network timeouts in the final thrown error. The test file (retry.test.mjs, 352 lines) likely tests the happy retry paths but may not verify that the *original* error's classification, status code, and retry-after headers survive into the exhaustion error. This is a classic observability gap that hides failures.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.7,\"recommendation\":\"Verify that when all retries are exhausted, the thrown error preserves the *last* original error as `.cause` and retains the BigModel error classification from bigmodel-errors.mjs. Add a dedicated test: 'on exhaustion, thrown error contains original error as cause with statusCode and classification intact'.\"},{\"severity\":\"high\",\"title\":\"Tracked jobs lack staleness eviction or TTL — abandoned jobs consume resources indefinitely\",\"body\":\"The tracked-jobs module (78 lines changed) manages background job state but shows no visible mechanism for evicting stale or abandoned jobs. If a user launches a --background review and never collects it (or their session dies), the tracked job record persists indefinitely. Under repeated use, this grows without bound. More critically, if the job state file becomes corrupted by a partial write (process kill during write), subsequent glm-companion invocations could crash on parse, blocking all future operations. The state.mjs module (32 lines changed) should guard against this but the intersection is not verified.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.65,\"recommendation\":\"Add a TTL/expiry field to tracked job entries and a cleanup pass on load. Wrap the state file read in a try/catch with a corrupted-state recovery path (rename old file, start fresh, log warning). Add a test simulating a corrupted state file.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs retry integration may double-submit on non-idempotent endpoints\",\"body\":\"glm-client.mjs (155 lines changed) now integrates retry logic. If the BigModel API accepts a submission but the response is lost to a network timeout, the retry will re-submit the same request. For job-creation or task-submission endpoints, this creates duplicate work. The retry module needs awareness of which operations are idempotent vs. not, and the client needs request deduplication (e.g., idempotency keys) for non-idempotent calls. Without this, a flaky network connection during a review submission could cause the same review to run twice, consuming API quota and producing duplicate results.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.6,\"recommendation\":\"Audit which BigModel API calls are non-idempotent. For those, either (a) generate and pass an idempotency key, or (b) disable automatic retries and handle at the caller level. Document the assumption about which endpoints are safe to retry.\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors.mjs error classification may misclassify unexpected HTTP statuses as retryable\",\"body\":\"The BigModel error dispatch module (168 lines added) maps API error codes to error classes. If the API returns an unexpected status code (e.g., 503 with a non-standard body, or a new error type added server-side), the classification likely falls through to a default that may incorrectly mark it as retryable or non-retryable. A 503 with 'service unavailable' should generally be retried, but a 503 indicating account suspension should not. The error classification is a single point of failure for the retry strategy — a wrong classification means either hammering a dead endpoint or giving up on a transient issue.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.55,\"recommendation\":\"Ensure the default/unknown error case is conservative (retry with lower max attempts, or log a warning with the raw status/body for manual classification). Add a test for an unrecognized HTTP status code verifying the fallback behavior.\"}],\"next_steps\":[\"Inspect retry.mjs to confirm original error preservation on exhaustion — this is the highest-confidence issue\",\"Verify tracked-jobs.mjs handles corrupted state file reads and has a staleness eviction mechanism\",\"Audit glm-client.mjs for which API calls are non-idempotent and confirm retry safety\",\"Run the existing test suite and verify coverage of error-exhaustion and corrupted-state paths\",\"Check if there are any v0.4.7-specific changes beyond v0.4.6 that the commit log doesn't show — the diff stat may be cumulative from v0.4.0\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T13:07:53.168Z"
+}

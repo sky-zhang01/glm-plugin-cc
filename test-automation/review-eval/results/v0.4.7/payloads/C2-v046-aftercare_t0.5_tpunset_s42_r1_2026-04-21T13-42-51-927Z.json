@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": 42,
+    "thinking": "on",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 64987,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 change introduces retry logic and BigModel error classification without sufficient safeguards against retry storms on ambiguous errors. The retry module lacks max total elapsed time bounding, and the GLM client integrates retries without propagation of retry state to callers — making silent stalls and budget overruns likely under real failure conditions.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry module has no wall-clock timeout / max elapsed time cap",
+        "body": "scripts/lib/retry.mjs uses a maxAttempts ceiling but never bounds total elapsed wall-clock time. Under exponential backoff with jitter, a caller doing 10 retries with base delay 1000ms can stall for minutes. If the caller is on a hot path (e.g. CI check-release-ready.sh or interactive use), this silently hangs with no signal to the user. There is no abort controller integration or elapsed-time guard. This is a classic retry-storm vector: the system appears to hang, consuming resources, with no observability into the stall.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.82,
+        "recommendation": "Add a maxElapsedMs parameter (default e.g. 30000) to retryWithBackoff. Before each attempt, check if Date.now() - startTime > maxElapsedMs and if so, throw a timeout error. Also accept an AbortSignal to allow callers to cancel."
+      },
+      {
+        "severity": "high",
+        "title": "GLM client retries on errors without verifying idempotency of the operation",
+        "body": "scripts/lib/glm-client.mjs wraps API calls with retry logic, but if the BigModel API returns a late response after the client has already timed out and retried, the same prompt may be processed multiple times by the remote service. For a generative AI API, this means duplicate billable invocations. The code does not document or enforce that retried operations are idempotent, nor does it pass any idempotency key. On network partitions where the response is lost, every retry is a new billable request with no deduplication.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 99,
+        "confidence": 0.72,
+        "recommendation": "Document which error codes are safe to retry (e.g. 429, 500, 502, 503) versus which must not be retried (e.g. 400, 401). Only retry on the safe set. Consider logging a warning on each retry with attempt count and error details for observability."
+      },
+      {
+        "severity": "medium",
+        "title": "check-release-ready.sh may produce false passes if scripts/lib/ modules have import failures",
+        "body": "scripts/ci/check-release-ready.sh is a new CI gate but the diff stat shows it is 84 lines. If this script sources or imports the retry or bigmodel-errors modules and those fail (e.g. Node ESM resolution error in CI), the script uses 'set -e' but may still exit 0 on some code paths where a subshell silently fails. Without seeing the full content, the risk is that a broken dependency chain in CI causes the check to pass vacuously rather than fail loudly.",
+        "file": "scripts/ci/check-release-ready.sh",
+        "line_start": 1,
+        "line_end": 84,
+        "confidence": 0.55,
+        "recommendation": "Ensure every critical assertion in the script exits with an explicit non-zero code. Add a final summary check: if any stage failed, exit 1. Test the script locally with a deliberately broken import to confirm it fails non-zero."
+      },
+      {
+        "severity": "medium",
+        "title": "BigModel error classifier may misclassify unknown errors as retryable",
+        "body": "scripts/lib/bigmodel-errors.mjs classifies errors for retry decisions. If the BigModel API returns an undocumented error code or an unexpected HTTP status (e.g. 418, 403 due to quota exhaustion), the classifier must have a safe default. If unknown errors default to retryable, then persistent auth failures or permanent client errors will be retried up to maxAttempts, wasting time and API budget. The tests cover known codes but the default-branch behavior for truly unknown responses is the critical gap.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.68,
+        "recommendation": "Ensure the default/fallback classification for unrecognized errors is non-retryable (conservative). Add explicit test cases for unexpected status codes and malformed error bodies to verify they are not retried."
+      },
+      {
+        "severity": "medium",
+        "title": "Pre-push hook can silently fail to install or be bypassed",
+        "body": "scripts/hooks/pre-push is a new 22-line hook. Git hooks are not tracked by default and must be manually installed (or via a setup script). If the hook is not installed, pushes bypass all checks. If the install step is missing from the README or setup flow, developers will push without protection. Additionally, if the hook script itself fails (e.g. node not found), the behavior depends on whether the hook is set +x, which is not preserved by git.",
+        "file": "scripts/hooks/pre-push",
+        "line_start": 1,
+        "line_end": 22,
+        "confidence": 0.6,
+        "recommendation": "Add a 'npm prepare' or 'postinstall' script that symlinks or copies the hook into .git/hooks/ with +x. Document this in the README. Consider adding a CI-level check that verifies the hook content matches, since local hooks are inherently bypassable."
+      }
+    ],
+    "next_steps": [
+      "Read scripts/lib/retry.mjs fully and add a maxElapsedMs bound with a sensible default.",
+      "Read scripts/lib/glm-client.mjs and verify the retry classifier only retries on safe (5xx, 429) statuses, not on all errors.",
+      "Read bigmodel-errors.mjs and confirm the default branch for unknown errors is non-retryable.",
+      "Run the test suite locally with a simulated network failure to observe retry behavior and confirm logging output.",
+      "Verify check-release-ready.sh exits non-zero on every failure path, including broken imports."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.6 change introduces retry logic and BigModel error classification without sufficient safeguards against retry storms on ambiguous errors. The retry module lacks max total elapsed time bounding, and the GLM client integrates retries without propagation of retry state to callers — making silent stalls and budget overruns likely under real failure conditions.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Retry module has no wall-clock timeout / max elapsed time cap\",\n      \"body\": \"scripts/lib/retry.mjs uses a maxAttempts ceiling but never bounds total elapsed wall-clock time. Under exponential backoff with jitter, a caller doing 10 retries with base delay 1000ms can stall for minutes. If the caller is on a hot path (e.g. CI check-release-ready.sh or interactive use), this silently hangs with no signal to the user. There is no abort controller integration or elapsed-time guard. This is a classic retry-storm vector: the system appears to hang, consuming resources, with no observability into the stall.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.82,\n      \"recommendation\": \"Add a maxElapsedMs parameter (default e.g. 30000) to retryWithBackoff. Before each attempt, check if Date.now() - startTime > maxElapsedMs and if so, throw a timeout error. Also accept an AbortSignal to allow callers to cancel.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"GLM client retries on errors without verifying idempotency of the operation\",\n      \"body\": \"scripts/lib/glm-client.mjs wraps API calls with retry logic, but if the BigModel API returns a late response after the client has already timed out and retried, the same prompt may be processed multiple times by the remote service. For a generative AI API, this means duplicate billable invocations. The code does not document or enforce that retried operations are idempotent, nor does it pass any idempotency key. On network partitions where the response is lost, every retry is a new billable request with no deduplication.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 99,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Document which error codes are safe to retry (e.g. 429, 500, 502, 503) versus which must not be retried (e.g. 400, 401). Only retry on the safe set. Consider logging a warning on each retry with attempt count and error details for observability.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"check-release-ready.sh may produce false passes if scripts/lib/ modules have import failures\",\n      \"body\": \"scripts/ci/check-release-ready.sh is a new CI gate but the diff stat shows it is 84 lines. If this script sources or imports the retry or bigmodel-errors modules and those fail (e.g. Node ESM resolution error in CI), the script uses 'set -e' but may still exit 0 on some code paths where a subshell silently fails. Without seeing the full content, the risk is that a broken dependency chain in CI causes the check to pass vacuously rather than fail loudly.\",\n      \"file\": \"scripts/ci/check-release-ready.sh\",\n      \"line_start\": 1,\n      \"line_end\": 84,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Ensure every critical assertion in the script exits with an explicit non-zero code. Add a final summary check: if any stage failed, exit 1. Test the script locally with a deliberately broken import to confirm it fails non-zero.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"BigModel error classifier may misclassify unknown errors as retryable\",\n      \"body\": \"scripts/lib/bigmodel-errors.mjs classifies errors for retry decisions. If the BigModel API returns an undocumented error code or an unexpected HTTP status (e.g. 418, 403 due to quota exhaustion), the classifier must have a safe default. If unknown errors default to retryable, then persistent auth failures or permanent client errors will be retried up to maxAttempts, wasting time and API budget. The tests cover known codes but the default-branch behavior for truly unknown responses is the critical gap.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Ensure the default/fallback classification for unrecognized errors is non-retryable (conservative). Add explicit test cases for unexpected status codes and malformed error bodies to verify they are not retried.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Pre-push hook can silently fail to install or be bypassed\",\n      \"body\": \"scripts/hooks/pre-push is a new 22-line hook. Git hooks are not tracked by default and must be manually installed (or via a setup script). If the hook is not installed, pushes bypass all checks. If the install step is missing from the README or setup flow, developers will push without protection. Additionally, if the hook script itself fails (e.g. node not found), the behavior depends on whether the hook is set +x, which is not preserved by git.\",\n      \"file\": \"scripts/hooks/pre-push\",\n      \"line_start\": 1,\n      \"line_end\": 22,\n      \"confidence\": 0.60,\n      \"recommendation\": \"Add a 'npm prepare' or 'postinstall' script that symlinks or copies the hook into .git/hooks/ with +x. Document this in the README. Consider adding a CI-level check that verifies the hook content matches, since local hooks are inherently bypassable.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Read scripts/lib/retry.mjs fully and add a maxElapsedMs bound with a sensible default.\",\n    \"Read scripts/lib/glm-client.mjs and verify the retry classifier only retries on safe (5xx, 429) statuses, not on all errors.\",\n    \"Read bigmodel-errors.mjs and confirm the default branch for unknown errors is non-retryable.\",\n    \"Run the test suite locally with a simulated network failure to observe retry behavior and confirm logging output.\",\n    \"Verify check-release-ready.sh exits non-zero on every failure path, including broken imports.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T13:42:51.962Z"
+}

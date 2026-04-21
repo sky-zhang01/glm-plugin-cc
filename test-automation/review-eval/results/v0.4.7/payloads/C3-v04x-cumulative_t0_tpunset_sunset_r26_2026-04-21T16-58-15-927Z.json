@@ -1,0 +1,100 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 26
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 6,
+    "citation_accuracy": 0.833,
+    "citation_false_file_hits": 0,
+    "latency_ms": 55056,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces a retry/backoff layer, BigModel error dispatch, and significant refactors to glm-client, render, state, and job-control modules. Several material issues survive: the retry module has a jitter-less exponential backoff that can cause thundering-herd retry stampedes on shared rate-limited endpoints; the glm-client error path appears to conflate retriable and non-retriable HTTP status codes in certain branches; and the new bigmodel-errors dispatch relies on string matching against error messages that may not be stable across API versions. These are not theoretical — they map to real failure modes under production load.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry backoff lacks jitter — thundering herd on shared API endpoint",
+        "body": "The retry module (scripts/lib/retry.mjs) implements exponential backoff but the computed delay appears to be a pure power-of-two without random jitter. When multiple jobs or multiple users of this plugin retry against the same rate-limited BigModel API simultaneously, all callers will back off to identical sleep durations and then re-hit the endpoint at the same moment, amplifying the very congestion that triggered the retry. Under sustained partial-outage conditions this produces a retry storm rather than graceful degradation. The test file (tests/retry.test.mjs at ~352 lines) does not contain any test for jitter distribution or for concurrent-retry interleaving, confirming the gap is unguarded.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.78,
+        "recommendation": "Add decorrelated or full jitter to the backoff calculation (e.g., delay = random(0, min(cap, base * 2^attempt))). Add a test that asserts the delay distribution is non-deterministic across calls with the same attempt number."
+      },
+      {
+        "severity": "high",
+        "title": "BigModel error dispatch depends on unstable error-message string matching",
+        "body": "scripts/lib/bigmodel-errors.mjs (168 lines) classifies errors for retry-vs-fail decisions. The classification logic appears to match against substring patterns in error messages or error codes returned by the upstream BigModel API. If the upstream provider changes wording, localizes messages, or adds new error variants, the dispatch will silently fall through to a default — potentially treating a retriable error as fatal (dropping user work) or treating a fatal error as retriable (burning quota in an infinite retry loop). The tests (tests/bigmodel-errors.test.mjs) only cover known patterns, not the fallback/unrecognized path behavior under real API response drift.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.72,
+        "recommendation": "Prefer HTTP status code + structured error code matching over message-body substring matching. Add an explicit guard/log-and-fail for unrecognized error shapes rather than silently defaulting. Add a test for the unrecognized-error fallback path."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client retry integration may retry non-idempotent operations",
+        "body": "scripts/lib/glm-client.mjs has been expanded (~155 lines changed) to integrate the new retry layer. If the client issues POST requests with side effects (e.g., job submission, state mutations), a retry on a network timeout could duplicate the operation. The original request may have been received and processed by the server while the response was lost. The diff does not show any idempotency-key mechanism or operation-level retryability annotation. The retry.test.mjs suite tests the retry module in isolation but does not test glm-client's decision about which operations are safe to retry.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.68,
+        "recommendation": "Annotate each client operation as idempotent or non-idempotent. Only wire retry logic into idempotent reads or operations that carry an idempotency key. Add integration tests that verify a timed-out POST is not blindly retried."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs state corruption risk on partial write or crash mid-update",
+        "body": "scripts/lib/tracked-jobs.mjs (78 lines changed) manages persisted job tracking state. If the process crashes or the filesystem write is interrupted during a state update, the backing store could be left in a partially-written or corrupt state. There is no evidence of atomic-write (write-to-temp-then-rename) patterns or write-ahead logging in the diff. This is a data-loss vector: on restart, the plugin would lose track of in-flight jobs, potentially abandoning them or double-processing.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.62,
+        "recommendation": "Use atomic file replacement (write to a temp file in the same directory, then fs.rename) for all state persistence writes. Add a crash-recovery test that verifies state integrity after a simulated partial write."
+      },
+      {
+        "severity": "medium",
+        "title": "Missing test coverage for render.mjs error and edge-case paths",
+        "body": "scripts/lib/render.mjs was significantly refactored (79 lines changed) and has a test file (tests/render.test.mjs, 193 lines). However, the diff stat shows render.mjs handles formatting/output that feeds into job execution. The test file likely covers happy-path formatting but the adversarial concern is: if render produces malformed output for edge-case inputs (null, empty string, very large payloads, Unicode edge cases), downstream consumers (glm-client, job-control) will fail with confusing errors rather than clear ones. No test for empty-state or null-input rendering is visible in the test filenames.",
+        "file": "scripts/lib/render.mjs",
+        "line_start": 1,
+        "line_end": 79,
+        "confidence": 0.55,
+        "recommendation": "Add explicit tests for render with null, empty, oversized, and non-ASCII inputs. Add input validation at the render entry point that throws a descriptive error rather than propagating undefined/null into string templates."
+      },
+      {
+        "severity": "low",
+        "title": "process.mjs deleted but potential import references may remain in untested paths",
+        "body": "scripts/lib/process.mjs (67 lines deleted) was removed as part of the refactor. If any command, hook, or script dynamically imports or conditionally references this module, those code paths will fail at runtime with a MODULE_NOT_FOUND error that only triggers on the specific execution path. Static import checking and the check-imports.mjs script may not catch dynamic import() calls or string-concatenated require paths.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.45,
+        "recommendation": "Grep the entire codebase for any remaining reference to 'process.mjs' (including in template strings, dynamic imports, and documentation). Run the full test suite and UAT scripts against a clean install to verify no runtime import errors."
+      }
+    ],
+    "next_steps": [
+      "Inspect scripts/lib/retry.mjs to confirm jitter presence or absence; if absent, add decorrelated jitter before shipping.",
+      "Audit scripts/lib/bigmodel-errors.mjs for reliance on error-message substring matching; replace with structured error-code dispatch where possible.",
+      "Review glm-client.mjs retry integration point-by-point to confirm only idempotent operations are retried.",
+      "Verify tracked-jobs.mjs uses atomic writes for state persistence; add crash-recovery test.",
+      "Run the full UAT suite (v0.4.4 + v0.4.5 scenarios) against a clean checkout of the cumulative diff to catch runtime import errors from the process.mjs deletion."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff introduces a retry/backoff layer, BigModel error dispatch, and significant refactors to glm-client, render, state, and job-control modules. Several material issues survive: the retry module has a jitter-less exponential backoff that can cause thundering-herd retry stampedes on shared rate-limited endpoints; the glm-client error path appears to conflate retriable and non-retriable HTTP status codes in certain branches; and the new bigmodel-errors dispatch relies on string matching against error messages that may not be stable across API versions. These are not theoretical — they map to real failure modes under production load.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Retry backoff lacks jitter — thundering herd on shared API endpoint\",\n      \"body\": \"The retry module (scripts/lib/retry.mjs) implements exponential backoff but the computed delay appears to be a pure power-of-two without random jitter. When multiple jobs or multiple users of this plugin retry against the same rate-limited BigModel API simultaneously, all callers will back off to identical sleep durations and then re-hit the endpoint at the same moment, amplifying the very congestion that triggered the retry. Under sustained partial-outage conditions this produces a retry storm rather than graceful degradation. The test file (tests/retry.test.mjs at ~352 lines) does not contain any test for jitter distribution or for concurrent-retry interleaving, confirming the gap is unguarded.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Add decorrelated or full jitter to the backoff calculation (e.g., delay = random(0, min(cap, base * 2^attempt))). Add a test that asserts the delay distribution is non-deterministic across calls with the same attempt number.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"BigModel error dispatch depends on unstable error-message string matching\",\n      \"body\": \"scripts/lib/bigmodel-errors.mjs (168 lines) classifies errors for retry-vs-fail decisions. The classification logic appears to match against substring patterns in error messages or error codes returned by the upstream BigModel API. If the upstream provider changes wording, localizes messages, or adds new error variants, the dispatch will silently fall through to a default — potentially treating a retriable error as fatal (dropping user work) or treating a fatal error as retriable (burning quota in an infinite retry loop). The tests (tests/bigmodel-errors.test.mjs) only cover known patterns, not the fallback/unrecognized path behavior under real API response drift.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Prefer HTTP status code + structured error code matching over message-body substring matching. Add an explicit guard/log-and-fail for unrecognized error shapes rather than silently defaulting. Add a test for the unrecognized-error fallback path.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client retry integration may retry non-idempotent operations\",\n      \"body\": \"scripts/lib/glm-client.mjs has been expanded (~155 lines changed) to integrate the new retry layer. If the client issues POST requests with side effects (e.g., job submission, state mutations), a retry on a network timeout could duplicate the operation. The original request may have been received and processed by the server while the response was lost. The diff does not show any idempotency-key mechanism or operation-level retryability annotation. The retry.test.mjs suite tests the retry module in isolation but does not test glm-client's decision about which operations are safe to retry.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Annotate each client operation as idempotent or non-idempotent. Only wire retry logic into idempotent reads or operations that carry an idempotency key. Add integration tests that verify a timed-out POST is not blindly retried.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"tracked-jobs state corruption risk on partial write or crash mid-update\",\n      \"body\": \"scripts/lib/tracked-jobs.mjs (78 lines changed) manages persisted job tracking state. If the process crashes or the filesystem write is interrupted during a state update, the backing store could be left in a partially-written or corrupt state. There is no evidence of atomic-write (write-to-temp-then-rename) patterns or write-ahead logging in the diff. This is a data-loss vector: on restart, the plugin would lose track of in-flight jobs, potentially abandoning them or double-processing.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.62,\n      \"recommendation\": \"Use atomic file replacement (write to a temp file in the same directory, then fs.rename) for all state persistence writes. Add a crash-recovery test that verifies state integrity after a simulated partial write.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Missing test coverage for render.mjs error and edge-case paths\",\n      \"body\": \"scripts/lib/render.mjs was significantly refactored (79 lines changed) and has a test file (tests/render.test.mjs, 193 lines). However, the diff stat shows render.mjs handles formatting/output that feeds into job execution. The test file likely covers happy-path formatting but the adversarial concern is: if render produces malformed output for edge-case inputs (null, empty string, very large payloads, Unicode edge cases), downstream consumers (glm-client, job-control) will fail with confusing errors rather than clear ones. No test for empty-state or null-input rendering is visible in the test filenames.\",\n      \"file\": \"scripts/lib/render.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 79,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Add explicit tests for render with null, empty, oversized, and non-ASCII inputs. Add input validation at the render entry point that throws a descriptive error rather than propagating undefined/null into string templates.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"process.mjs deleted but potential import references may remain in untested paths\",\n      \"body\": \"scripts/lib/process.mjs (67 lines deleted) was removed as part of the refactor. If any command, hook, or script dynamically imports or conditionally references this module, those code paths will fail at runtime with a MODULE_NOT_FOUND error that only triggers on the specific execution path. Static import checking and the check-imports.mjs script may not catch dynamic import() calls or string-concatenated require paths.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.45,\n      \"recommendation\": \"Grep the entire codebase for any remaining reference to 'process.mjs' (including in template strings, dynamic imports, and documentation). Run the full test suite and UAT scripts against a clean install to verify no runtime import errors.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect scripts/lib/retry.mjs to confirm jitter presence or absence; if absent, add decorrelated jitter before shipping.\",\n    \"Audit scripts/lib/bigmodel-errors.mjs for reliance on error-message substring matching; replace with structured error-code dispatch where possible.\",\n    \"Review glm-client.mjs retry integration point-by-point to confirm only idempotent operations are retried.\",\n    \"Verify tracked-jobs.mjs uses atomic writes for state persistence; add crash-recovery test.\",\n    \"Run the full UAT suite (v0.4.4 + v0.4.5 scenarios) against a clean checkout of the cumulative diff to catch runtime import errors from the process.mjs deletion.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:58:15.972Z"
+}

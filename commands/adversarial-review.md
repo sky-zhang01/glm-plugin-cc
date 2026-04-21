@@ -1,6 +1,6 @@
 ---
 description: Run a GLM review that challenges the implementation approach and design choices
-argument-hint: '[--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [focus ...]'
+argument-hint: '[--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--temperature <0-2>] [--top-p <0-1>] [--seed <int>] [focus ...]'
 disable-model-invocation: true
 allowed-tools: Read, Glob, Grep, Bash(node:*), Bash(git:*), AskUserQuestion
 ---
@@ -88,5 +88,20 @@ Bash({
   Mirrors codex CLI default `model_reasoning_effort = "medium"` on
   `gpt-5.4`). Use `--thinking off` only if the latency / token cost is
   prohibitive. BigModel API only exposes binary enabled/disabled.
+- `--temperature <0-2>` / `--top-p <0-1>` / `--seed <int>` — sampling
+  parameters. Same semantics as `/glm:review`. The v0.4.7 149-run
+  sweep (summarised in `/glm:review`'s "Diff size guidance" section)
+  detected no statistically significant temperature effect on schema
+  compliance across small / medium / large fixtures (underpowered for
+  ~15pct-per-step effects), and observed **zero cross-project
+  file hallucinations and zero out-of-diff file citations across all
+  149 runs at any temperature**. The fabricated-citation concern that
+  originally motivated exposing these flags was partially a
+  scoring-rubric artifact on diff-meta findings; genuine line-level
+  content fabrication still exists (the scoring rubric can't fully
+  validate quoted claims), but is not correlated with temperature in
+  this data. Plugin ships no opinionated default;
+  `/glm:adversarial-review` uses BigModel's server-side default
+  unless overridden.
 - `--wait` / `--background` — execution mode bypass. See "Execution mode rules" above.
 - Trailing tokens after flags are treated as free-form focus text.

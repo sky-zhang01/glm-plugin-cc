@@ -1,0 +1,70 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 9
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 52678,
+    "error_code": ""
+  },
+  "parsed": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "verdict": "needs-attention",
+    "summary": "The npm scope rename from `@anthropic` to `@anthropic-ai` (or similar) combined with an interactive menu addition to setup carries concrete breakage risk for existing installations. The scope rename in package.json will cause `npm install` failures for any user or CI pipeline still referencing the old package name, and the changelog entry for v0.4.7 does not clearly call this out as a breaking change requiring manual migration. The interactive menu in setup.md appears to be prompt-driven logic for Claude's command system rather than traditional code, but the branching logic there could silently skip configuration steps if the menu selection isn't handled correctly.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change with no migration path documented",
+        "body": "package.json changes the npm scope/package name. Any existing installation, CI pipeline, or dependent package referencing the old scope will fail with npm ENOENT or 404 on install. The CHANGELOG.md entry for v0.4.7 describes this as a 'fix' and 'rename' but does not flag it as a breaking change, nor does it provide a migration command or deprecation notice. Users upgrading via npm will experience silent install failures or will pull the old package indefinitely if the old name isn't deprecated. This is especially dangerous for automated setups where the error may be buried in logs.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 5,
+        "confidence": 0.78,
+        "recommendation": "Explicitly mark this as a BREAKING CHANGE in the CHANGELOG. Add a deprecation notice to the old package name on npm (or publish a stub that warns). Document a migration command or script for existing users. If the scope hasn't actually changed, clarify this in the commit message to avoid reviewer confusion."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive menu in setup.md lacks handling for invalid/unexpected user input",
+        "body": "commands/setup.md adds an interactive menu when the system is already configured. As a Claude command prompt, this relies on the LLM correctly interpreting the user's menu selection and branching accordingly. If a user provides an unexpected response (e.g., empty input, a number outside the menu range, freeform text), the prompt does not show an explicit guard or fallback instruction. Under stress or ambiguous input, the LLM may silently proceed with a default action or re-run the full setup, potentially overwriting existing configuration without confirmation. This is a prompt-engineering gap that creates a path to data loss (overwriting valid config).",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.65,
+        "recommendation": "Add an explicit instruction in the setup.md prompt to handle invalid/ambiguous menu selections by re-prompting the user rather than defaulting to any destructive action. Include a guard such as: 'If the user's response does not match any menu option, ask them to clarify before proceeding. Do NOT overwrite existing configuration without explicit confirmation.'"
+      },
+      {
+        "severity": "low",
+        "title": "release_card.md changes are extensive but carry no version validation against actual package version",
+        "body": "release_card.md has 326 lines changed (273 additions, 103 deletions), representing substantial documentation rewrite. There is no apparent mechanism to ensure the version number mentioned in release_card.md stays synchronized with package.json's version field. If they drift, users may install a different version than documented, leading to confusion or unexpected behavior. This is a maintenance hazard rather than an immediate ship blocker.",
+        "file": "release_card.md",
+        "line_start": 1,
+        "line_end": 326,
+        "confidence": 0.45,
+        "recommendation": "Add a CI check or pre-release hook that validates the version in release_card.md matches the version in package.json. Alternatively, use a single source of truth for the version number."
+      }
+    ],
+    "next_steps": [
+      "Verify the actual npm scope change by reading the full diff of package.json — confirm whether the old package name is deprecated on npm",
+      "Read the full commands/setup.md diff to trace the menu branching logic and confirm there's a fallback for unexpected input",
+      "If the scope rename is confirmed breaking, bump the major version (semver) and add a migration guide before shipping",
+      "Confirm that the .claude-plugin/marketplace.json and plugin.json changes are consistent with the new scope name"
+    ]
+  },
+  "rawOutputHead": "{\n  \"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The npm scope rename from `@anthropic` to `@anthropic-ai` (or similar) combined with an interactive menu addition to setup carries concrete breakage risk for existing installations. The scope rename in package.json will cause `npm install` failures for any user or CI pipeline still referencing the old package name, and the changelog entry for v0.4.7 does not clearly call this out as a breaking change requiring manual migration. The interactive menu in setup.md appears to be prompt-driven logic for Claude's command system rather than traditional code, but the branching logic there could silently skip configuration steps if the menu selection isn't handled correctly.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename is a breaking change with no migration path documented\",\n      \"body\": \"package.json changes the npm scope/package name. Any existing installation, CI pipeline, or dependent package referencing the old scope will fail with npm ENOENT or 404 on install. The CHANGELOG.md entry for v0.4.7 describes this as a 'fix' and 'rename' but does not flag it as a breaking change, nor does it provide a migration command or deprecation notice. Users upgrading via npm will experience silent install failures or will pull the old package indefinitely if the old name isn't deprecated. This is especially dangerous for automated setups where the error may be buried in logs.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 5,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Explicitly mark this as a BREAKING CHANGE in the CHANGELOG. Add a deprecation notice to the old package name on npm (or publish a stub that warns). Document a migration command or script for existing users. If the scope hasn't actually changed, clarify this in the commit message to avoid reviewer confusion.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Interactive menu in setup.md lacks handling for invalid/unexpected user input\",\n      \"body\": \"commands/setup.md adds an interactive menu when the system is already configured. As a Claude command prompt, this relies on the LLM correctly interpreting the user's menu selection and branching accordingly. If a user provides an unexpected response (e.g., empty input, a number outside the menu range, freeform text), the prompt does not show an explicit guard or fallback instruction. Under stress or ambiguous input, the LLM may silently proceed with a default action or re-run the full setup, potentially overwriting existing configuration without confirmation. This is a prompt-engineering gap that creates a path to data loss (overwriting valid config).\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Add an explicit instruction in the setup.md prompt to handle invalid/ambiguous menu selections by re-prompting the user rather than defaulting to any destructive action. Include a guard such as: 'If the user's response does not match any menu option, ask them to clarify before proceeding. Do NOT overwrite existing configuration without explicit confirmation.'\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"release_card.md changes are extensive but carry no version validation against actual package version\",\n      \"body\": \"release_card.md has 326 lines changed (273 additions, 103 deletions), representing substantial documentation rewrite. There is no apparent mechanism to ensure the version number mentioned in release_card.md stays synchronized with package.json's version field. If they drift, users may install a different version than documented, leading to confusion or unexpected behavior. This is a maintenance hazard rather than an immediate ship blocker.\",\n      \"file\": \"release_card.md\",\n      \"line_start\": 1,\n      \"line_end\": 326,\n      \"confidence\": 0.45,\n      \"recommendation\": \"Add a CI check or pre-release hook that validates the version in release_card.md matches the version in package.json. Alternatively, use a single source of truth for the version number.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Verify the actual npm scope change by reading the full diff of package.json — confirm whether the old package name is deprecated on npm\",\n    \"Read the full commands/setup.md diff to trace the menu branching logic and confirm there's a fallback for unexpected input\",\n    \"If the scope rename is confirmed breaking, bump the major version (semver) and add a migration guide before shipping\",\n    \"Confirm that the .claude-plugin/marketplace.json and plugin.json changes are consistent with the new scope name\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:28:51.201Z"
+}

@@ -1,0 +1,70 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 7
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 102558,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit bundles a breaking package-identity change (npm scope rename) with a behavioral change to /glm:setup. The scope rename in package.json has no visible migration path or deprecation shim, meaning existing installations pinning or importing the old scope will silently break. The new interactive menu in setup.md risks blocking non-interactive or scripted workflows with no documented escape hatch.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change with no migration path",
+        "body": "The commit message explicitly states 'rename npm scope' and package.json shows 4 lines changed. Renaming the npm package scope (e.g. @oldscope/x → @newscope/x) breaks every existing installation, CI pipeline, and lockfile that references the old scope. There is no evidence of a deprecation path, compatibility shim, or migration guide. The CHANGELOG entry and release_card.md would need to carry explicit breaking-change warnings and migration instructions; given the large but opaque diff to release_card.md (326 lines), it is unclear whether adequate migration guidance exists. Users upgrading from v0.4.6 who have the plugin installed under the old scope will get 'package not found' or will retain a stale copy that never receives updates.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.75,
+        "recommendation": "Either (a) revert the scope rename to a non-breaking point release and plan it for a major version bump with a documented migration path, or (b) publish a stub package under the old scope that depends on the new scope and warns users. Verify that CHANGELOG and release_card.md contain explicit breaking-change migration steps."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive setup menu may block non-interactive / scripted invocations",
+        "body": "The commit adds an interactive menu to /glm:setup 'when already configured' (commands/setup.md, 19 lines changed). If the command now unconditionally prompts the user for input on re-invocation, any CI/CD pipeline, automation script, or headless environment calling setup will hang or fail. There is no visible guard for a non-interactive mode, a --yes/--force flag, or a timeout. For a setup command that users reasonably expect to be idempotent and scriptable, this is a regression in operational safety.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.6,
+        "recommendation": "Add a non-interactive/default path to the setup command (e.g., if stdin is not a TTY, or a --non-interactive flag is set, proceed with sensible defaults or no-op). Document the flag in the command help text."
+      },
+      {
+        "severity": "medium",
+        "title": "Plugin identity files changed alongside scope rename — plugin discovery may break",
+        "body": "Both .claude-plugin/marketplace.json (4 lines) and .claude-plugin/plugin.json (2 lines) were modified in the same commit that renames the npm scope. If the plugin identifier or package reference inside these files was updated to match the new scope but existing deployments cache the old identifiers, users may see duplicate entries (old + new) or fail to find the plugin at all. The two files are small (2-4 lines changed) suggesting identifier fields were swapped, but no backward-compatibility aliasing is visible.",
+        "file": ".claude-plugin/marketplace.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.55,
+        "recommendation": "Verify that the old plugin identifier continues to resolve (even if deprecated) for at least one release cycle. Test a clean install from scratch and an upgrade from the previous version to confirm the plugin is discoverable under both the old and new identifiers."
+      }
+    ],
+    "next_steps": [
+      "Run `git diff 7766943^..7766943 -- package.json` to confirm the exact scope change and assess blast radius on existing consumers.",
+      "Inspect commands/setup.md diff to verify whether a non-interactive / skip-prompt code path exists for automated environments.",
+      "Diff .claude-plugin/plugin.json and marketplace.json to confirm whether plugin identifiers were changed and whether any aliasing is in place.",
+      "Test upgrade path: install the plugin at the version prior to this commit, then upgrade, and verify that (a) the plugin is still discoverable and (b) setup does not hang in a non-TTY environment.",
+      "If the scope rename must ship, ensure CHANGELOG.md explicitly marks it as BREAKING and provides a one-line migration command (e.g., npm uninstall @oldscope/x && npm install @newscope/x)."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"This commit bundles a breaking package-identity change (npm scope rename) with a behavioral change to /glm:setup. The scope rename in package.json has no visible migration path or deprecation shim, meaning existing installations pinning or importing the old scope will silently break. The new interactive menu in setup.md risks blocking non-interactive or scripted workflows with no documented escape hatch.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename is a breaking change with no migration path\",\n      \"body\": \"The commit message explicitly states 'rename npm scope' and package.json shows 4 lines changed. Renaming the npm package scope (e.g. @oldscope/x → @newscope/x) breaks every existing installation, CI pipeline, and lockfile that references the old scope. There is no evidence of a deprecation path, compatibility shim, or migration guide. The CHANGELOG entry and release_card.md would need to carry explicit breaking-change warnings and migration instructions; given the large but opaque diff to release_card.md (326 lines), it is unclear whether adequate migration guidance exists. Users upgrading from v0.4.6 who have the plugin installed under the old scope will get 'package not found' or will retain a stale copy that never receives updates.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Either (a) revert the scope rename to a non-breaking point release and plan it for a major version bump with a documented migration path, or (b) publish a stub package under the old scope that depends on the new scope and warns users. Verify that CHANGELOG and release_card.md contain explicit breaking-change migration steps.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Interactive setup menu may block non-interactive / scripted invocations\",\n      \"body\": \"The commit adds an interactive menu to /glm:setup 'when already configured' (commands/setup.md, 19 lines changed). If the command now unconditionally prompts the user for input on re-invocation, any CI/CD pipeline, automation script, or headless environment calling setup will hang or fail. There is no visible guard for a non-interactive mode, a --yes/--force flag, or a timeout. For a setup command that users reasonably expect to be idempotent and scriptable, this is a regression in operational safety.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Add a non-interactive/default path to the setup command (e.g., if stdin is not a TTY, or a --non-interactive flag is set, proceed with sensible defaults or no-op). Document the flag in the command help text.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Plugin identity files changed alongside scope rename — plugin discovery may break\",\n      \"body\": \"Both .claude-plugin/marketplace.json (4 lines) and .claude-plugin/plugin.json (2 lines) were modified in the same commit that renames the npm scope. If the plugin identifier or package reference inside these files was updated to match the new scope but existing deployments cache the old identifiers, users may see duplicate entries (old + new) or fail to find the plugin at all. The two files are small (2-4 lines changed) suggesting identifier fields were swapped, but no backward-compatibility aliasing is visible.\",\n      \"file\": \".claude-plugin/marketplace.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Verify that the old plugin identifier continues to resolve (even if deprecated) for at least one release cycle. Test a clean install from scratch and an upgrade from the previous version to confirm the plugin is discoverable under both the old and new identifiers.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `git diff 7766943^..7766943 -- package.json` to confirm the exact scope change and assess blast radius on existing consumers.\",\n    \"Inspect commands/setup.md diff to verify whether a non-interactive / skip-prompt code path exists for automated environments.\",\n    \"Diff .claude-plugin/plugin.json and marketplace.json to confirm whether plugin identifiers were changed and whether any aliasing is in place.\",\n    \"Test upgrade path: install the plugin at the version prior to this commit, then upgrade, and verify that (a) the plugin is still discoverable and (b) setup does not hang in a non-TTY environment.\",\n    \"If the scope rename must ship, ensure CHANGELOG.md explicitly marks it as BREAKING and provides a one-line migration command (e.g., npm uninstall @oldscope/x && npm install @newscope/x).\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:46:44.328Z"
+}

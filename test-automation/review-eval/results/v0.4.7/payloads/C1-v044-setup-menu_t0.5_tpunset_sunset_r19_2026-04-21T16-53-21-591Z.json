@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 19
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 38032,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The commit adds an interactive menu to the setup command and renames the npm scope. The setup.md change introduces user-facing flow logic in a markdown-based command file with conditional branching (already-configured vs not), but the markdown-only format means error handling, state validation, and idempotency are entirely implicit and untestable. The scope rename in package.json is a breaking change for existing users who depend on the old package name, with no migration path documented in the CHANGELOG. The release_card.md has significant restructuring but lacks validation that all referenced URLs, endpoints, or configuration values still resolve correctly after the scope rename.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change with no migration path",
+        "body": "The package.json scope is being renamed (old scope to new scope). Any existing users who have installed or depend on the package under the old name will break. The CHANGELOG entry at v0.4.7 does not explicitly call out the scope rename as a breaking change or provide migration instructions (e.g., 'uninstall old, reinstall new'). The marketplace.json and plugin.json references are updated, but consumers pinning or referencing the old scope name will silently get a stale or 404 package. This is an irreversible, user-visible disruption.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 6,
+        "confidence": 0.85,
+        "recommendation": "Either (a) document the scope rename as a breaking change in CHANGELOG with explicit migration steps, or (b) publish a compatibility shim under the old name that redirects to the new one. If this is a Claude plugin (not npm), verify that existing installs auto-resolve the new scope without manual user action."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive menu in setup.md has no guard for non-interactive or degraded sessions",
+        "body": "The setup.md command now presents an interactive menu when already configured, offering choices like reconfigure or exit. If the user's session does not support interactive prompts (piped input, CI context, degraded terminal), the command may hang, error silently, or default to an unexpected path. There is no visible fallback or timeout logic in the markdown-based command definition.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.65,
+        "recommendation": "Add explicit non-interactive handling or a default safe behavior (e.g., 'if non-interactive, print current config and exit 0') to the setup command documentation/logic. Document the expected behavior in non-TTY contexts."
+      },
+      {
+        "severity": "medium",
+        "title": "CHANGELOG and release_card inconsistency on scope rename impact",
+        "body": "The CHANGELOG lists v0.4.7 features (interactive menu, scope rename) but the release_card.md has been substantially rewritten (~326 lines changed). The release_card may now reference the new scope in URLs or instructions that haven't been validated end-to-end. If the package hasn't been published under the new scope yet at the time users read the card, all install instructions will fail.",
+        "file": "release_card.md",
+        "line_start": 1,
+        "line_end": 326,
+        "confidence": 0.55,
+        "recommendation": "Verify that all URLs, install commands, and references in release_card.md resolve correctly under the new scope before merging. Add a pre-merge validation step or smoke test that the new scope is published and installable."
+      }
+    ],
+    "next_steps": [
+      "Confirm the new npm/Claude scope is already published and resolvable before merge; if not, block this commit.",
+      "Add explicit breaking-change documentation and migration instructions for the scope rename in CHANGELOG.md.",
+      "Test the setup command in a non-interactive context (piped stdin, CI) and document expected behavior.",
+      "Run a smoke test of all install/configure URLs referenced in release_card.md against the new scope."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The commit adds an interactive menu to the setup command and renames the npm scope. The setup.md change introduces user-facing flow logic in a markdown-based command file with conditional branching (already-configured vs not), but the markdown-only format means error handling, state validation, and idempotency are entirely implicit and untestable. The scope rename in package.json is a breaking change for existing users who depend on the old package name, with no migration path documented in the CHANGELOG. The release_card.md has significant restructuring but lacks validation that all referenced URLs, endpoints, or configuration values still resolve correctly after the scope rename.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename is a breaking change with no migration path\",\n      \"body\": \"The package.json scope is being renamed (old scope to new scope). Any existing users who have installed or depend on the package under the old name will break. The CHANGELOG entry at v0.4.7 does not explicitly call out the scope rename as a breaking change or provide migration instructions (e.g., 'uninstall old, reinstall new'). The marketplace.json and plugin.json references are updated, but consumers pinning or referencing the old scope name will silently get a stale or 404 package. This is an irreversible, user-visible disruption.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 6,\n      \"confidence\": 0.85,\n      \"recommendation\": \"Either (a) document the scope rename as a breaking change in CHANGELOG with explicit migration steps, or (b) publish a compatibility shim under the old name that redirects to the new one. If this is a Claude plugin (not npm), verify that existing installs auto-resolve the new scope without manual user action.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Interactive menu in setup.md has no guard for non-interactive or degraded sessions\",\n      \"body\": \"The setup.md command now presents an interactive menu when already configured, offering choices like reconfigure or exit. If the user's session does not support interactive prompts (piped input, CI context, degraded terminal), the command may hang, error silently, or default to an unexpected path. There is no visible fallback or timeout logic in the markdown-based command definition.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Add explicit non-interactive handling or a default safe behavior (e.g., 'if non-interactive, print current config and exit 0') to the setup command documentation/logic. Document the expected behavior in non-TTY contexts.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"CHANGELOG and release_card inconsistency on scope rename impact\",\n      \"body\": \"The CHANGELOG lists v0.4.7 features (interactive menu, scope rename) but the release_card.md has been substantially rewritten (~326 lines changed). The release_card may now reference the new scope in URLs or instructions that haven't been validated end-to-end. If the package hasn't been published under the new scope yet at the time users read the card, all install instructions will fail.\",\n      \"file\": \"release_card.md\",\n      \"line_start\": 1,\n      \"line_end\": 326,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Verify that all URLs, install commands, and references in release_card.md resolve correctly under the new scope before merging. Add a pre-merge validation step or smoke test that the new scope is published and installable.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Confirm the new npm/Claude scope is already published and resolvable before merge; if not, block this commit.\",\n    \"Add explicit breaking-change documentation and migration instructions for the scope rename in CHANGELOG.md.\",\n    \"Test the setup command in a non-interactive context (piped stdin, CI) and document expected behavior.\",\n    \"Run a smoke test of all install/configure URLs referenced in release_card.md against the new scope.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:53:21.610Z"
+}

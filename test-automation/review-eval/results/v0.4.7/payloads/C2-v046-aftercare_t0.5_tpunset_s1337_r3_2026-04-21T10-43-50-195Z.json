@@ -1,0 +1,78 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": 1337,
+    "thinking": "on",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 53984,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 aftercare introduces retry/backoff and error-dispatch machinery that looks solid on the happy path, but the retry module's cancellation mechanism is racy, the GLM client's abort-path can silently swallow in-flight results, and the error classifier's retry decision logic has an edge-case that will double-fire requests on certain transient auth failures. These are exactly the kind of silent-degradation bugs that sampling-sweep runs are designed to catch.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry cancellation race: settled retries can still fire final callback after abort",
+        "body": "In `scripts/lib/retry.mjs`, `RetryController.abort()` sets a flag and calls `clearTimeout` on pending timers, but between the abort call and the next microtask, an already-resolved/rejected promise from an in-flight attempt can still propagate its result through the retry loop. If the consumer has already cleaned up state (e.g., discarded a stream or closed a DB connection) in response to the abort, the late-settled result writes to freed resources. This is a classic TOCTOU race in async cancellation. The tests (`tests/retry.test.mjs`) cover abort-before-start and abort-during-delay, but never abort concurrent with a settling attempt promise, which is the exact scenario that bites in production under backpressure.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Gate every `.then`/`.catch` continuation inside the retry loop on `controller.signal.aborted` *after* awaiting the attempt promise, and reject with a cancellation error if the flag is already set when the attempt settles. Add a test that aborts concurrent with an attempt resolution and asserts no further state mutation occurs."
+      },
+      {
+        "severity": "high",
+        "title": "GLM client abort silently replaces real error with AbortError, hiding root cause",
+        "body": "In `scripts/lib/glm-client.mjs`, when `signal.addEventListener('abort', ...)` fires, it rejects the outer promise with an `AbortError`. However, if the HTTP request has already received an error response (e.g., 429 or 503), the abort handler overwrites that structured error with a generic AbortError, making it impossible for the caller or retry logic to distinguish 'user cancelled' from 'server rejected then we timed out'. The `bigmodel-errors.mjs` classifier will see `AbortError` and may retry a request that was intentionally cancelled, or conversely may not retry a transient server error that got masked.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 99,
+        "confidence": 0.68,
+        "recommendation": "In the abort handler, check whether the response/error is already settled before overwriting. Store the original error and attach it as `cause` on the AbortError, or prefer the real error if it has already arrived. Add a test simulating abort arriving after a 429 response to verify the original error is preserved for the retry classifier."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors classifier treats some retryable 429s as non-retryable when rate-limit header is absent",
+        "body": "In `scripts/lib/bigmodel-errors.mjs`, the classifier for HTTP 429 checks for a `retry-after` header to decide retryability. If the server returns 429 without this header (common for some API gateway implementations), the classifier falls through to a default branch that marks the error as non-retryable. This means that under sustained load, the retry layer will give up on requests that the server would have accepted after a short backoff. The test suite only covers 429 with explicit `retry-after`, never the header-less case, so this branch is untested.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.75,
+        "recommendation": "Default 429 to retryable with a sensible backoff (e.g., the configured base delay) when `retry-after` is absent, rather than marking non-retryable. Add test cases for 429 with and without rate-limit headers."
+      },
+      {
+        "severity": "medium",
+        "title": "check-release-ready.sh executes arbitrary git hooks without integrity verification",
+        "body": "`scripts/ci/check-release-ready.sh` sources or inspects git hook scripts and configuration. If the pre-push hook (`scripts/hooks/pre-push`) is compromised or replaced (e.g., via a supply-chain attack on the repo), the CI script will execute it without any checksum verification. This is a trust-boundary issue: CI is trusting local filesystem state that may have been tampered with between checkout and execution.",
+        "file": "scripts/ci/check-release-ready.sh",
+        "line_start": 1,
+        "line_end": 84,
+        "confidence": 0.55,
+        "recommendation": "Pin hook scripts by content hash or verify them against a committed manifest before executing. Alternatively, inline the hook logic directly in the CI script rather than delegating to external scripts."
+      }
+    ],
+    "next_steps": [
+      "Trace the abort-during-attempt-resolution path in retry.mjs with a concrete test case to confirm or rule out the race.",
+      "Verify the GLM client's abort handler preserves the original HTTP error when both arrive concurrently.",
+      "Add test coverage for headerless 429 responses in the error classifier before trusting retry decisions in production sweep runs."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.6 aftercare introduces retry/backoff and error-dispatch machinery that looks solid on the happy path, but the retry module's cancellation mechanism is racy, the GLM client's abort-path can silently swallow in-flight results, and the error classifier's retry decision logic has an edge-case that will double-fire requests on certain transient auth failures. These are exactly the kind of silent-degradation bugs that sampling-sweep runs are designed to catch.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Retry cancellation race: settled retries can still fire final callback after abort\",\"body\":\"In `scripts/lib/retry.mjs`, `RetryController.abort()` sets a flag and calls `clearTimeout` on pending timers, but between the abort call and the next microtask, an already-resolved/rejected promise from an in-flight attempt can still propagate its result through the retry loop. If the consumer has already cleaned up state (e.g., discarded a stream or closed a DB connection) in response to the abort, the late-settled result writes to freed resources. This is a classic TOCTOU race in async cancellation. The tests (`tests/retry.test.mjs`) cover abort-before-start and abort-during-delay, but never abort concurrent with a settling attempt promise, which is the exact scenario that bites in production under backpressure.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.72,\"recommendation\":\"Gate every `.then`/`.catch` continuation inside the retry loop on `controller.signal.aborted` *after* awaiting the attempt promise, and reject with a cancellation error if the flag is already set when the attempt settles. Add a test that aborts concurrent with an attempt resolution and asserts no further state mutation occurs.\"},{\"severity\":\"high\",\"title\":\"GLM client abort silently replaces real error with AbortError, hiding root cause\",\"body\":\"In `scripts/lib/glm-client.mjs`, when `signal.addEventListener('abort', ...)` fires, it rejects the outer promise with an `AbortError`. However, if the HTTP request has already received an error response (e.g., 429 or 503), the abort handler overwrites that structured error with a generic AbortError, making it impossible for the caller or retry logic to distinguish 'user cancelled' from 'server rejected then we timed out'. The `bigmodel-errors.mjs` classifier will see `AbortError` and may retry a request that was intentionally cancelled, or conversely may not retry a transient server error that got masked.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":99,\"confidence\":0.68,\"recommendation\":\"In the abort handler, check whether the response/error is already settled before overwriting. Store the original error and attach it as `cause` on the AbortError, or prefer the real error if it has already arrived. Add a test simulating abort arriving after a 429 response to verify the original error is preserved for the retry classifier.\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors classifier treats some retryable 429s as non-retryable when rate-limit header is absent\",\"body\":\"In `scripts/lib/bigmodel-errors.mjs`, the classifier for HTTP 429 checks for a `retry-after` header to decide retryability. If the server returns 429 without this header (common for some API gateway implementations), the classifier falls through to a default branch that marks the error as non-retryable. This means that under sustained load, the retry layer will give up on requests that the server would have accepted after a short backoff. The test suite only covers 429 with explicit `retry-after`, never the header-less case, so this branch is untested.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.75,\"recommendation\":\"Default 429 to retryable with a sensible backoff (e.g., the configured base delay) when `retry-after` is absent, rather than marking non-retryable. Add test cases for 429 with and without rate-limit headers.\"},{\"severity\":\"medium\",\"title\":\"check-release-ready.sh executes arbitrary git hooks without integrity verification\",\"body\":\"`scripts/ci/check-release-ready.sh` sources or inspects git hook scripts and configuration. If the pre-push hook (`scripts/hooks/pre-push`) is compromised or replaced (e.g., via a supply-chain attack on the repo), the CI script will execute it without any checksum verification. This is a trust-boundary issue: CI is trusting local filesystem state that may have been tampered with between checkout and execution.\",\"file\":\"scripts/ci/check-release-ready.sh\",\"line_start\":1,\"line_end\":84,\"confidence\":0.55,\"recommendation\":\"Pin hook scripts by content hash or verify them against a committed manifest before executing. Alternatively, inline the hook logic directly in the CI script rather than delegating to external scripts.\"}],\"next_steps\":[\"Trace the abort-during-attempt-resolution path in retry.mjs with a concrete test case to confirm or rule out the race.\",\"Verify the GLM client's abort handler preserves the original HTTP error when both arrive concurrently.\",\"Add test coverage for headerless 429 responses in the error classifier before trusting retry decisions in production sweep runs.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:43:50.220Z"
+}

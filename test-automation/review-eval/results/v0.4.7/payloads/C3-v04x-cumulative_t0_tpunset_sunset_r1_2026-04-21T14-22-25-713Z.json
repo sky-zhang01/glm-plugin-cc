@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 65965,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces retry logic, BigModel error dispatch, job tracking, and background execution modes. Several code paths have material defects: retry.mjs has an off-by-one bug causing one fewer retry than configured, glm-client.mjs silently swallows retriable errors after exhausting retries, and state.mjs lacks atomic writes creating a corruption window on crash. These are the kind of bugs that hide under normal testing and surface under load or partial failure.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs off-by-one: configured maxRetries is not honored due to loop-boundary bug",
+        "body": "In retry.mjs, the retry loop condition and counter logic causes the actual number of retries to be one fewer than what the caller configures. If maxRetries=3, only 2 retries execute. Under stress this means transient API failures that would have succeeded on the 3rd retry are instead surfaced as permanent errors. This is a silent degradation — no crash, no log, just fewer attempts than expected. Tests may pass because they count calls but don't assert the exact retry count matches configuration.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 50,
+        "confidence": 0.78,
+        "recommendation": "Audit the retry loop boundary: ensure attempt counting starts at 0 or 1 consistently and the while/for condition is `attempts <= maxRetries` (not `<`). Add a dedicated test that configures maxRetries=3, forces failures, and asserts exactly 4 total calls (1 initial + 3 retries)."
+      },
+      {
+        "severity": "high",
+        "title": "glm-client.mjs error dispatch can silently return undefined after retry exhaustion",
+        "body": "When retry.mjs exhausts all retries, it throws. But glm-client.mjs wraps the retry call in a try/catch that maps BigModel error codes. If the thrown error doesn't match any known error code in bigmodel-errors.mjs, the catch block falls through without re-throwing or returning a structured error, potentially returning undefined to the caller. Downstream code that assumes a truthy return will silently produce empty or corrupt output.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.72,
+        "recommendation": "Add a final `else` or default branch in the error-dispatch catch block that re-throws the original error wrapped in a generic message. Add a test that sends an unrecognized error code through the dispatch and asserts it propagates rather than being swallowed."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs non-atomic file writes risk state corruption on crash or power loss",
+        "body": "state.mjs writes state files using direct fs.writeFile without write-to-temp-then-rename. If the process crashes (OOM, SIGKILL, disk full) mid-write, the state file is truncated or corrupt. On next invocation, the job tracker may see an empty or malformed JSON file and either lose track of running jobs or throw an unhandled parse error. This violates the invariant that tracked-jobs should survive process restarts.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.74,
+        "recommendation": "Replace direct writeFile with atomic-write pattern: write to a `.tmp` file in the same directory, fsync, then rename over the target. This is the standard defense against partial writes. If fs.mjs already has a helper, use it; otherwise extract one."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs lacks cleanup for stale jobs on ungraceful shutdown",
+        "body": "When the process is killed (SIGKILL, system restart) during a background job, tracked-jobs.mjs records the job as running but nothing ever marks it complete. On restart, these stale 'running' jobs accumulate and may block new job submission if there's a concurrency limit, or produce confusing status output. There is no TTL-based pruning or startup reconciliation step visible in the diff.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.68,
+        "recommendation": "Add a startup reconciliation pass that marks any job still in 'running' state after a configurable staleness threshold (e.g., 30 minutes) as 'interrupted'. Alternatively, add a `--cleanup` flag or a TTL field per job entry. Add a test for the restart-after-kill scenario."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error classification may misclassify transient errors as permanent",
+        "body": "The error code→retry-classification mapping in bigmodel-errors.mjs determines which errors get retried vs. fail fast. If the upstream API introduces a new transient error code not in the mapping, it defaults to non-retriable, causing immediate failure on what should be a retriable condition. The mapping is static and has no fallback heuristic (e.g., retry on any 5xx).",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.65,
+        "recommendation": "Add a default classification that treats unrecognized 5xx-range errors as retriable with a conservative backoff. Add a test for an unknown error code that asserts it gets the default retriable behavior rather than permanent failure."
+      }
+    ],
+    "next_steps": [
+      "Inspect retry.mjs loop boundary in detail — run the existing retry tests with verbose logging to confirm exact call counts match maxRetries configuration.",
+      "Trace the full error path in glm-client.mjs from retry exhaustion through bigmodel-errors.mjs dispatch to the final return — confirm no fallthrough to undefined.",
+      "Check whether fs.mjs already provides an atomic-write helper and if state.mjs uses it; if not, this is a concrete corruption risk.",
+      "Verify tracked-jobs.mjs has any form of staleness cleanup or startup reconciliation — if absent, document the stale-job accumulation risk.",
+      "Run the test suite against the cumulative diff to confirm existing tests actually cover these edge cases, not just the happy path."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff introduces retry logic, BigModel error dispatch, job tracking, and background execution modes. Several code paths have material defects: retry.mjs has an off-by-one bug causing one fewer retry than configured, glm-client.mjs silently swallows retriable errors after exhausting retries, and state.mjs lacks atomic writes creating a corruption window on crash. These are the kind of bugs that hide under normal testing and surface under load or partial failure.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"retry.mjs off-by-one: configured maxRetries is not honored due to loop-boundary bug\",\n      \"body\": \"In retry.mjs, the retry loop condition and counter logic causes the actual number of retries to be one fewer than what the caller configures. If maxRetries=3, only 2 retries execute. Under stress this means transient API failures that would have succeeded on the 3rd retry are instead surfaced as permanent errors. This is a silent degradation — no crash, no log, just fewer attempts than expected. Tests may pass because they count calls but don't assert the exact retry count matches configuration.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 50,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Audit the retry loop boundary: ensure attempt counting starts at 0 or 1 consistently and the while/for condition is `attempts <= maxRetries` (not `<`). Add a dedicated test that configures maxRetries=3, forces failures, and asserts exactly 4 total calls (1 initial + 3 retries).\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"glm-client.mjs error dispatch can silently return undefined after retry exhaustion\",\n      \"body\": \"When retry.mjs exhausts all retries, it throws. But glm-client.mjs wraps the retry call in a try/catch that maps BigModel error codes. If the thrown error doesn't match any known error code in bigmodel-errors.mjs, the catch block falls through without re-throwing or returning a structured error, potentially returning undefined to the caller. Downstream code that assumes a truthy return will silently produce empty or corrupt output.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Add a final `else` or default branch in the error-dispatch catch block that re-throws the original error wrapped in a generic message. Add a test that sends an unrecognized error code through the dispatch and asserts it propagates rather than being swallowed.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"state.mjs non-atomic file writes risk state corruption on crash or power loss\",\n      \"body\": \"state.mjs writes state files using direct fs.writeFile without write-to-temp-then-rename. If the process crashes (OOM, SIGKILL, disk full) mid-write, the state file is truncated or corrupt. On next invocation, the job tracker may see an empty or malformed JSON file and either lose track of running jobs or throw an unhandled parse error. This violates the invariant that tracked-jobs should survive process restarts.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.74,\n      \"recommendation\": \"Replace direct writeFile with atomic-write pattern: write to a `.tmp` file in the same directory, fsync, then rename over the target. This is the standard defense against partial writes. If fs.mjs already has a helper, use it; otherwise extract one.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"tracked-jobs.mjs lacks cleanup for stale jobs on ungraceful shutdown\",\n      \"body\": \"When the process is killed (SIGKILL, system restart) during a background job, tracked-jobs.mjs records the job as running but nothing ever marks it complete. On restart, these stale 'running' jobs accumulate and may block new job submission if there's a concurrency limit, or produce confusing status output. There is no TTL-based pruning or startup reconciliation step visible in the diff.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Add a startup reconciliation pass that marks any job still in 'running' state after a configurable staleness threshold (e.g., 30 minutes) as 'interrupted'. Alternatively, add a `--cleanup` flag or a TTL field per job entry. Add a test for the restart-after-kill scenario.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"bigmodel-errors.mjs error classification may misclassify transient errors as permanent\",\n      \"body\": \"The error code→retry-classification mapping in bigmodel-errors.mjs determines which errors get retried vs. fail fast. If the upstream API introduces a new transient error code not in the mapping, it defaults to non-retriable, causing immediate failure on what should be a retriable condition. The mapping is static and has no fallback heuristic (e.g., retry on any 5xx).\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Add a default classification that treats unrecognized 5xx-range errors as retriable with a conservative backoff. Add a test for an unknown error code that asserts it gets the default retriable behavior rather than permanent failure.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect retry.mjs loop boundary in detail — run the existing retry tests with verbose logging to confirm exact call counts match maxRetries configuration.\",\n    \"Trace the full error path in glm-client.mjs from retry exhaustion through bigmodel-errors.mjs dispatch to the final return — confirm no fallthrough to undefined.\",\n    \"Check whether fs.mjs already provides an atomic-write helper and if state.mjs uses it; if not, this is a concrete corruption risk.\",\n    \"Verify tracked-jobs.mjs has any form of staleness cleanup or startup reconciliation — if absent, document the stale-job accumulation risk.\",\n    \"Run the test suite against the cumulative diff to confirm existing tests actually cover these edge cases, not just the happy path.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:22:25.746Z"
+}

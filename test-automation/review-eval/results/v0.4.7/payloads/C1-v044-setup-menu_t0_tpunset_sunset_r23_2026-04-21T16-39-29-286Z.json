@@ -1,0 +1,36 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 23
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 10861,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "approve",
+    "summary": "This commit updates metadata/config files (package.json, plugin.json, marketplace.json), adds a changelog entry, modifies a setup command markdown file, and updates release card documentation. There are no executable code changes, no auth/logic paths, no data mutations, and no runtime behavior modifications. The changes are limited to configuration, documentation, and markdown content. No material adversarial findings can be sustained against configuration and documentation files.",
+    "findings": [],
+    "next_steps": [
+      "If the renamed npm scope affects package publishing or downstream consumers, verify that the new scope is correctly published and accessible.",
+      "Confirm that the interactive menu behavior described in commands/setup.md matches the actual plugin runtime behavior, since this review only covers the markdown and metadata, not plugin implementation code."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"approve\",\n  \"summary\": \"This commit updates metadata/config files (package.json, plugin.json, marketplace.json), adds a changelog entry, modifies a setup command markdown file, and updates release card documentation. There are no executable code changes, no auth/logic paths, no data mutations, and no runtime behavior modifications. The changes are limited to configuration, documentation, and markdown content. No material adversarial findings can be sustained against configuration and documentation files.\",\n  \"findings\": [],\n  \"next_steps\": [\n    \"If the renamed npm scope affects package publishing or downstream consumers, verify that the new scope is correctly published and accessible.\",\n    \"Confirm that the interactive menu behavior described in commands/setup.md matches the actual plugin runtime behavior, since this review only covers the markdown and metadata, not plugin implementation code.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:39:29.286Z"
+}

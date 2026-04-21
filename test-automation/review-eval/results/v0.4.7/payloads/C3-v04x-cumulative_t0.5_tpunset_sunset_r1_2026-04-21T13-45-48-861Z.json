@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 92824,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces a retry subsystem, BigModel error dispatch, and job-tracking changes that are well-tested on their own, but I found several material weaknesses: the retry module treats any retriable failure as idempotent without caller-side guard verification, the process.mjs module was deleted while other files may still reference it (dead import risk), and the BigModel error dispatcher relies on string/regex matching against API error messages that can silently misclassify unexpected error formats—causing infinite retries on non-retriable errors. These are the strongest reasons this change should not ship without addressing.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs has no idempotency verification—callers may silently duplicate side-effects on retry",
+        "body": "The retry module (scripts/lib/retry.mjs, +203 lines) provides generic retry with exponential backoff but does not verify that the operation being retried is idempotent. If a caller (e.g., glm-client.mjs submitting a job) receives a network timeout after the server has already processed the request, the retry will re-execute the full operation—potentially creating duplicate jobs, duplicate submissions, or duplicate charges. The retry config accepts a simple `retriable` predicate but has no mechanism for the caller to assert idempotency or supply an idempotency key. Under real failure conditions (partial network failures), this can cause silent data duplication that is hard to detect after the fact.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Either (a) require callers to pass an explicit `idempotent: true` flag and document the contract, or (b) add an optional `dedupKey` parameter that the retry wrapper checks before re-executing. At minimum, add a loud warning in logs when a non-GET operation is retried."
+      },
+      {
+        "severity": "high",
+        "title": "bigmodel-errors.mjs relies on fragile string/regex matching for error classification—unknown formats silently fall through to wrong behavior",
+        "body": "scripts/lib/bigmodel-errors.mjs (+168 lines) classifies BigModel API errors using regex/string matching against error messages (e.g., matching rate-limit, auth, timeout patterns). If the upstream API changes its error message format or returns an undocumented error structure, the classifier will fail to match any known pattern. Depending on the default branch behavior, this can either: (1) treat a non-retriable error as retriable, causing wasted retry cycles and delayed failure signaling, or (2) treat a retriable error as non-retriable, causing premature job failure. Both paths are silent—no logging of unmatched error patterns was visible in the diff, making this failure mode invisible to operators.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.75,
+        "recommendation": "Add explicit fallback logging for unmatched error patterns (log the full error body at WARN level). Add a strict `unknown` classification that does NOT retry by default, and make the classification function return the raw error alongside the classification so callers can audit."
+      },
+      {
+        "severity": "medium",
+        "title": "process.mjs deleted but import references may persist—runtime crash risk",
+        "body": "scripts/lib/process.mjs (67 lines deleted) was removed in this cumulative diff. If any file still contains `import ... from './process.mjs'` or `from './lib/process.mjs'`, the import will fail at runtime with MODULE_NOT_FOUND. The diff stat shows glm-companion.mjs, render.mjs, and other files were modified—but without verifying every import statement was updated, there is a real risk of a latent dead import that only fires on a specific code path (e.g., an error path or edge-case command). This is the kind of failure that passes unit tests but crashes in production on uncommon flows.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.65,
+        "recommendation": "Grep the entire codebase for any remaining references to 'process.mjs' (import, require, dynamic import). Add a CI check that validates all imports resolve (the existing check-imports.mjs may cover this—verify it catches deleted-module references)."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs concurrent write risk—state file corruption under parallel job operations",
+        "body": "scripts/lib/tracked-jobs.mjs (+78 lines) manages job state that appears to be persisted to a file (given the companion fs.mjs changes). If two concurrent invocations of the tool (e.g., two review commands running simultaneously) both read-modify-write the same state file, the last writer wins and the first writer's job tracking is silently lost. This is a classic TOCTOU race on the state file. The result is lost jobs, orphaned tracking entries, or corrupted JSON that crashes subsequent reads.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.6,
+        "recommendation": "Use atomic file writes (write to temp file + rename) and consider file locking (e.g., proper-lockfile) for concurrent access. At minimum, wrap the read-modify-write in a retry loop that detects and recovers from concurrent modification."
+      }
+    ],
+    "next_steps": [
+      "Read scripts/lib/retry.mjs and verify whether any caller passes non-idempotent operations—trace glm-client.mjs job submission paths specifically",
+      "Read scripts/lib/bigmodel-errors.mjs and check the default/fallback behavior when no error pattern matches",
+      "Grep for 'process.mjs' across the entire repo to confirm no dead imports remain after the deletion",
+      "Read scripts/lib/tracked-jobs.mjs and fs.mjs to verify atomic write patterns are used for state persistence",
+      "Run the existing test suite with --import-check or equivalent to confirm no broken module resolution"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 cumulative diff introduces a retry subsystem, BigModel error dispatch, and job-tracking changes that are well-tested on their own, but I found several material weaknesses: the retry module treats any retriable failure as idempotent without caller-side guard verification, the process.mjs module was deleted while other files may still reference it (dead import risk), and the BigModel error dispatcher relies on string/regex matching against API error messages that can silently misclassify unexpected error formats—causing infinite retries on non-retriable errors. These are the strongest reasons this change should not ship without addressing.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs has no idempotency verification—callers may silently duplicate side-effects on retry\",\"body\":\"The retry module (scripts/lib/retry.mjs, +203 lines) provides generic retry with exponential backoff but does not verify that the operation being retried is idempotent. If a caller (e.g., glm-client.mjs submitting a job) receives a network timeout after the server has already processed the request, the retry will re-execute the full operation—potentially creating duplicate jobs, duplicate submissions, or duplicate charges. The retry config accepts a simple `retriable` predicate but has no mechanism for the caller to assert idempotency or supply an idempotency key. Under real failure conditions (partial network failures), this can cause silent data duplication that is hard to detect after the fact.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.72,\"recommendation\":\"Either (a) require callers to pass an explicit `idempotent: true` flag and document the contract, or (b) add an optional `dedupKey` parameter that the retry wrapper checks before re-executing. At minimum, add a loud warning in logs when a non-GET operation is retried.\"},{\"severity\":\"high\",\"title\":\"bigmodel-errors.mjs relies on fragile string/regex matching for error classification—unknown formats silently fall through to wrong behavior\",\"body\":\"scripts/lib/bigmodel-errors.mjs (+168 lines) classifies BigModel API errors using regex/string matching against error messages (e.g., matching rate-limit, auth, timeout patterns). If the upstream API changes its error message format or returns an undocumented error structure, the classifier will fail to match any known pattern. Depending on the default branch behavior, this can either: (1) treat a non-retriable error as retriable, causing wasted retry cycles and delayed failure signaling, or (2) treat a retriable error as non-retriable, causing premature job failure. Both paths are silent—no logging of unmatched error patterns was visible in the diff, making this failure mode invisible to operators.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.75,\"recommendation\":\"Add explicit fallback logging for unmatched error patterns (log the full error body at WARN level). Add a strict `unknown` classification that does NOT retry by default, and make the classification function return the raw error alongside the classification so callers can audit.\"},{\"severity\":\"medium\",\"title\":\"process.mjs deleted but import references may persist—runtime crash risk\",\"body\":\"scripts/lib/process.mjs (67 lines deleted) was removed in this cumulative diff. If any file still contains `import ... from './process.mjs'` or `from './lib/process.mjs'`, the import will fail at runtime with MODULE_NOT_FOUND. The diff stat shows glm-companion.mjs, render.mjs, and other files were modified—but without verifying every import statement was updated, there is a real risk of a latent dead import that only fires on a specific code path (e.g., an error path or edge-case command). This is the kind of failure that passes unit tests but crashes in production on uncommon flows.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":67,\"confidence\":0.65,\"recommendation\":\"Grep the entire codebase for any remaining references to 'process.mjs' (import, require, dynamic import). Add a CI check that validates all imports resolve (the existing check-imports.mjs may cover this—verify it catches deleted-module references).\"},{\"severity\":\"medium\",\"title\":\"tracked-jobs.mjs concurrent write risk—state file corruption under parallel job operations\",\"body\":\"scripts/lib/tracked-jobs.mjs (+78 lines) manages job state that appears to be persisted to a file (given the companion fs.mjs changes). If two concurrent invocations of the tool (e.g., two review commands running simultaneously) both read-modify-write the same state file, the last writer wins and the first writer's job tracking is silently lost. This is a classic TOCTOU race on the state file. The result is lost jobs, orphaned tracking entries, or corrupted JSON that crashes subsequent reads.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.6,\"recommendation\":\"Use atomic file writes (write to temp file + rename) and consider file locking (e.g., proper-lockfile) for concurrent access. At minimum, wrap the read-modify-write in a retry loop that detects and recovers from concurrent modification.\"}],\"next_steps\":[\"Read scripts/lib/retry.mjs and verify whether any caller passes non-idempotent operations—trace glm-client.mjs job submission paths specifically\",\"Read scripts/lib/bigmodel-errors.mjs and check the default/fallback behavior when no error pattern matches\",\"Grep for 'process.mjs' across the entire repo to confirm no dead imports remain after the deletion\",\"Read scripts/lib/tracked-jobs.mjs and fs.mjs to verify atomic write patterns are used for state persistence\",\"Run the existing test suite with --import-check or equivalent to confirm no broken module resolution\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T13:45:48.896Z"
+}

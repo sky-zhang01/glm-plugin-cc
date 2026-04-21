@@ -1,0 +1,37 @@
+{
+  "fixture_id": "C1-v044-setup-menu",
+  "curated_by": "maintainer 2026-04-21 (same-day as release)",
+  "notes": "Ground truth for scoring /glm:adversarial-review output on the C1 small-diff fixture. Smaller diff = reviewer has narrower scope to critique, so 0-2 findings is plausible; expected_bugs list is shorter than C2.",
+  "expected_bugs": [
+    {
+      "id": "EB-1",
+      "description": "The 'terminal clause' ('Each option is terminal … must not re-open the menu on the post-action state') is a markdown sentence asking Claude to 'not re-enter'. This is a weak invariant — if Claude re-reads setup.md after the companion rerun, it may match the 'Both set + empty ARGUMENTS' branch again and loop.",
+      "hit_if_finding_mentions": ["terminal", "re-enter", "re-open", "loop", "invariant", "weak"],
+      "file": "commands/setup.md",
+      "severity_floor": "low"
+    },
+    {
+      "id": "EB-2",
+      "description": "Skill-layer UAT is deferred to post-release per release_card. Companion-layer UAT (7/7 PASS) verifies plumbing but does NOT exercise the AskUserQuestion flow claim. Reviewer could legitimately critique this as a test-coverage gap.",
+      "hit_if_finding_mentions": ["UAT", "skill-layer", "deferred", "AskUserQuestion", "test coverage"],
+      "file": "release_card.md",
+      "severity_floor": "low"
+    }
+  ],
+  "known_false_files": [
+    "reference_runtime.py",
+    "openclaw_memory_slot_runtime.py",
+    "governance.py",
+    "workflow_governor/"
+  ],
+  "known_false_file_note": "Same universal hallucination signal list as C2. Any citation to these workflow-governor paths is definitive cross-project hallucination — wrong project entirely.",
+  "allowed_files": [
+    ".claude-plugin/marketplace.json",
+    ".claude-plugin/plugin.json",
+    "CHANGELOG.md",
+    "commands/setup.md",
+    "package.json",
+    "release_card.md"
+  ],
+  "allowed_files_note": "Tight list — only 6 files touched in this commit. Any finding.file outside this set is a hallucination signal (wrong file in the diff)."
+}

@@ -1,0 +1,100 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 6,
+    "citation_accuracy": 0.833,
+    "citation_false_file_hits": 0,
+    "latency_ms": 81418,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces critical new runtime paths—retry.mjs, bigmodel-errors.mjs, tracked-jobs.mjs, and significant changes to glm-client.mjs and state.mjs—without sufficient evidence of edge-case hardening. Multiple high-severity concerns remain around silent data loss in job tracking, retry exhaustion with no caller visibility, and state corruption under concurrent access. The change should not ship until these paths are defended.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs exponential backoff can silently swallow the final error",
+        "body": "The retry module appears to implement exponential backoff with a max-attempts cap. If all retries exhaust, the error returned to the caller must preserve the full error chain. Tracing the call sites in glm-client.mjs and glm-companion.mjs, if the retry wrapper catches and re-wraps errors, the original error code and HTTP status may be lost, making it impossible for callers to distinguish rate-limit exhaustion from auth failures from network partitions. The tests in retry.test.mjs cover the happy retry path but without seeing explicit assertions that the final thrown error preserves the original cause chain, a caller could receive a generic 'all retries exhausted' and make a wrong decision (e.g., treating a 401 as transient).",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Verify that retry.mjs's final rejection wraps the last error as cause (e.g., using Error.cause or a custom property) so callers in glm-client.mjs can still inspect the original status code. Add an explicit test case: 'on maxRetries=0, the original error is thrown unmodified' and 'on maxRetries=N exhaustion, the error has .cause pointing to the last attempt's error'."
+      },
+      {
+        "severity": "high",
+        "title": "tracked-jobs.mjs state writes are not atomic—partial writes corrupt job state",
+        "body": "tracked-jobs.mjs manages job state persistence. If the process is interrupted (SIGKILL, OOM, disk full) during a state file write, the file can be left truncated or partially written. On next read, JSON.parse will throw, and the user sees no jobs or a crash. There is no evidence of atomic-write (write-to-temp + rename) or write-then-verify. Given this tracks running/background jobs, a corrupted state file means lost job references with no way to recover or cancel them.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.78,
+        "recommendation": "Implement atomic writes: write to a .tmp file, fsync, then rename over the target. Add a test that simulates a truncated state file and verifies the read path returns an empty/recoverable state rather than throwing."
+      },
+      {
+        "severity": "high",
+        "title": "glm-client.mjs job submission has no idempotency key—retries can duplicate jobs",
+        "body": "When glm-client.mjs submits a request to the BigModel API and the response is lost (network timeout, connection reset), the retry layer in retry.mjs will re-execute the request. If the original request succeeded server-side but the response was lost, the retry creates a duplicate job. There is no evidence of an idempotency key or deduplication mechanism in the request payload. For background/wait mode jobs, this means a user could end up with two jobs consuming quota when they expected one.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.7,
+        "recommendation": "Add an idempotency key (e.g., a UUID generated before the first attempt and reused across retries) to the API request payload or headers. Document whether the BigModel API supports idempotent requests. If not, add client-side deduplication by tracking pending request hashes."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error classification may misroute unrecognized errors as retryable",
+        "body": "The new bigmodel-errors.mjs module classifies API errors into retryable vs. non-retryable categories. If the API returns an unexpected error code or a new error variant not in the classification map, the default behavior determines whether the error is retried. A conservative default (don't retry unknowns) is safe but may under-retry; a permissive default (retry unknowns) could cause excessive retries on genuinely fatal errors (e.g., account suspended, model deprecated). Without seeing the default case explicitly tested, this is a blind spot.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.68,
+        "recommendation": "Add an explicit test case: 'when the API returns an unrecognised error code, it is classified as non-retryable' (or whichever default is chosen). Ensure the default is documented and the classification map is easily extensible."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs concurrent access has no locking—parallel glm:review commands can race",
+        "body": "state.mjs reads and writes shared state files. If two glm:review commands run concurrently (e.g., user triggers review on two files simultaneously), both read the same state, each writes back their modified version, and the last write wins—losing the first command's state updates. This is a classic TOCTOU race. The tracked-jobs.mjs layer has the same issue. No file locking (flock, lockfile, or optimistic concurrency) is visible.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.74,
+        "recommendation": "Add file-based locking (e.g., proper-lockfile or a simple flock wrapper) around state read-modify-write cycles. Alternatively, use optimistic concurrency by reading a version token and failing if it changed. At minimum, document the limitation and warn against parallel invocations."
+      },
+      {
+        "severity": "medium",
+        "title": "fs.mjs readFileJSON silently returns empty object on malformed JSON—hides corruption",
+        "body": "fs.mjs appears to have a readFileJSON helper used by state.mjs and tracked-jobs.mjs. If it catches JSON.parse errors and returns an empty object, state corruption is silently masked: the user's jobs, config, or review state disappears without any warning. This makes debugging nearly impossible because the system appears healthy but has lost data.",
+        "file": "scripts/lib/fs.mjs",
+        "line_start": 1,
+        "line_end": 44,
+        "confidence": 0.71,
+        "recommendation": "Differentiate between 'file not found' (acceptable, return empty) and 'file exists but is malformed' (log a warning, return empty but emit a diagnostic). Add a test: 'readFileJSON on a malformed JSON file logs a warning and returns empty object'."
+      }
+    ],
+    "next_steps": [
+      "Audit retry.mjs's final error shape—confirm error cause chain is preserved on exhaustion",
+      "Implement atomic writes in tracked-jobs.mjs and state.mjs (write-to-tmp + rename pattern)",
+      "Verify bigmodel-errors.mjs default classification for unknown error codes and add a test",
+      "Add file locking or optimistic concurrency to state.mjs for parallel-command safety",
+      "Ensure fs.mjs differentiates 'file not found' from 'corrupt JSON' with appropriate diagnostics"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 diff introduces critical new runtime paths—retry.mjs, bigmodel-errors.mjs, tracked-jobs.mjs, and significant changes to glm-client.mjs and state.mjs—without sufficient evidence of edge-case hardening. Multiple high-severity concerns remain around silent data loss in job tracking, retry exhaustion with no caller visibility, and state corruption under concurrent access. The change should not ship until these paths are defended.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs exponential backoff can silently swallow the final error\",\"body\":\"The retry module appears to implement exponential backoff with a max-attempts cap. If all retries exhaust, the error returned to the caller must preserve the full error chain. Tracing the call sites in glm-client.mjs and glm-companion.mjs, if the retry wrapper catches and re-wraps errors, the original error code and HTTP status may be lost, making it impossible for callers to distinguish rate-limit exhaustion from auth failures from network partitions. The tests in retry.test.mjs cover the happy retry path but without seeing explicit assertions that the final thrown error preserves the original cause chain, a caller could receive a generic 'all retries exhausted' and make a wrong decision (e.g., treating a 401 as transient).\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.72,\"recommendation\":\"Verify that retry.mjs's final rejection wraps the last error as cause (e.g., using Error.cause or a custom property) so callers in glm-client.mjs can still inspect the original status code. Add an explicit test case: 'on maxRetries=0, the original error is thrown unmodified' and 'on maxRetries=N exhaustion, the error has .cause pointing to the last attempt's error'.\"},{\"severity\":\"high\",\"title\":\"tracked-jobs.mjs state writes are not atomic—partial writes corrupt job state\",\"body\":\"tracked-jobs.mjs manages job state persistence. If the process is interrupted (SIGKILL, OOM, disk full) during a state file write, the file can be left truncated or partially written. On next read, JSON.parse will throw, and the user sees no jobs or a crash. There is no evidence of atomic-write (write-to-temp + rename) or write-then-verify. Given this tracks running/background jobs, a corrupted state file means lost job references with no way to recover or cancel them.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.78,\"recommendation\":\"Implement atomic writes: write to a .tmp file, fsync, then rename over the target. Add a test that simulates a truncated state file and verifies the read path returns an empty/recoverable state rather than throwing.\"},{\"severity\":\"high\",\"title\":\"glm-client.mjs job submission has no idempotency key—retries can duplicate jobs\",\"body\":\"When glm-client.mjs submits a request to the BigModel API and the response is lost (network timeout, connection reset), the retry layer in retry.mjs will re-execute the request. If the original request succeeded server-side but the response was lost, the retry creates a duplicate job. There is no evidence of an idempotency key or deduplication mechanism in the request payload. For background/wait mode jobs, this means a user could end up with two jobs consuming quota when they expected one.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.7,\"recommendation\":\"Add an idempotency key (e.g., a UUID generated before the first attempt and reused across retries) to the API request payload or headers. Document whether the BigModel API supports idempotent requests. If not, add client-side deduplication by tracking pending request hashes.\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors.mjs error classification may misroute unrecognized errors as retryable\",\"body\":\"The new bigmodel-errors.mjs module classifies API errors into retryable vs. non-retryable categories. If the API returns an unexpected error code or a new error variant not in the classification map, the default behavior determines whether the error is retried. A conservative default (don't retry unknowns) is safe but may under-retry; a permissive default (retry unknowns) could cause excessive retries on genuinely fatal errors (e.g., account suspended, model deprecated). Without seeing the default case explicitly tested, this is a blind spot.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.68,\"recommendation\":\"Add an explicit test case: 'when the API returns an unrecognised error code, it is classified as non-retryable' (or whichever default is chosen). Ensure the default is documented and the classification map is easily extensible.\"},{\"severity\":\"medium\",\"title\":\"state.mjs concurrent access has no locking—parallel glm:review commands can race\",\"body\":\"state.mjs reads and writes shared state files. If two glm:review commands run concurrently (e.g., user triggers review on two files simultaneously), both read the same state, each writes back their modified version, and the last write wins—losing the first command's state updates. This is a classic TOCTOU race. The tracked-jobs.mjs layer has the same issue. No file locking (flock, lockfile, or optimistic concurrency) is visible.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.74,\"recommendation\":\"Add file-based locking (e.g., proper-lockfile or a simple flock wrapper) around state read-modify-write cycles. Alternatively, use optimistic concurrency by reading a version token and failing if it changed. At minimum, document the limitation and warn against parallel invocations.\"},{\"severity\":\"medium\",\"title\":\"fs.mjs readFileJSON silently returns empty object on malformed JSON—hides corruption\",\"body\":\"fs.mjs appears to have a readFileJSON helper used by state.mjs and tracked-jobs.mjs. If it catches JSON.parse errors and returns an empty object, state corruption is silently masked: the user's jobs, config, or review state disappears without any warning. This makes debugging nearly impossible because the system appears healthy but has lost data.\",\"file\":\"scripts/lib/fs.mjs\",\"line_start\":1,\"line_end\":44,\"confidence\":0.71,\"recommendation\":\"Differentiate between 'file not found' (acceptable, return empty) and 'file exists but is malformed' (log a warning, return empty but emit a diagnostic). Add a test: 'readFileJSON on a malformed JSON file logs a warning and returns empty object'.\"}],\"next_steps\":[\"Audit retry.mjs's final error shape—confirm error cause chain is preserved on exhaustion\",\"Implement atomic writes in tracked-jobs.mjs and state.mjs (write-to-tmp + rename pattern)\",\"Verify bigmodel-errors.mjs default classification for unknown error codes and add a test\",\"Add file locking or optimistic concurrency to state.mjs for parallel-command safety\",\"Ensure fs.mjs differentiates 'file not found' from 'corrupt JSON' with appropriate diagnostics\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T13:53:03.465Z"
+}

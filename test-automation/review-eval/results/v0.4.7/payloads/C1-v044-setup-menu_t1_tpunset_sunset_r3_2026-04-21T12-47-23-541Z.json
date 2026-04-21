@@ -1,0 +1,68 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 38419,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The commit renames the npm scope and adds an interactive menu to /glm:setup when already configured. The scope rename from @anthropic to @anthropics is a breaking change for any existing installations referencing the old package name. The setup command adds interactive menu logic but with fragile parsing and no handling for edge cases like corrupted existing config.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change for existing users",
+        "body": "The package scope changes from '@anthropic' to '@anthropics' in marketplace.json and package.json. Any user with existing installations, scripts, or CI pipelines referencing @anthropic/claude-code-glm will break. There is no deprecation path, no migration guide in the diff, and the CHANGELOG mentions the rename but provides no upgrade instructions for affected users.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 5,
+        "confidence": 0.85,
+        "recommendation": "Either provide a clear migration path (e.g., deprecate the old package with a postinstall message pointing to the new one), or document the breaking change prominently. If this is a scoped registry package, ensure the old scope continues to resolve or alias."
+      },
+      {
+        "severity": "medium",
+        "title": "Setup menu relies on fragile string matching for existing config detection",
+        "body": "The setup.md command adds an interactive menu when already configured, but the detection of 'already configured' state depends on grep/matching against stored config output. If the config format changes, or if the config file is partially written or corrupted, the menu may not appear or may present incorrect options, leading to silent misconfiguration or data loss of existing settings.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.65,
+        "recommendation": "Add explicit error handling for corrupted or unexpected config states. If config parsing fails, surface a clear error rather than falling through to a default menu path that could overwrite settings."
+      },
+      {
+        "severity": "low",
+        "title": "CHANGELOG references version that may not match package.json",
+        "body": "The CHANGELOG adds an entry but the version consistency between CHANGELOG.md and package.json should be verified. If these drift, users may not realize which version they are running or what changes apply to their installation.",
+        "file": "CHANGELOG.md",
+        "line_start": 1,
+        "line_end": 21,
+        "confidence": 0.5,
+        "recommendation": "Verify that the CHANGELOG version entry exactly matches the version in package.json before release. Consider automating this check."
+      }
+    ],
+    "next_steps": [
+      "Verify the npm scope rename does not break existing published packages or user installations; provide a deprecation/migration path if it does.",
+      "Inspect commands/setup.md in full to confirm the interactive menu handles edge cases: empty config, corrupted config, and non-interactive terminal sessions.",
+      "Confirm package.json version matches the CHANGELOG entry before tagging a release."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The commit renames the npm scope and adds an interactive menu to /glm:setup when already configured. The scope rename from @anthropic to @anthropics is a breaking change for any existing installations referencing the old package name. The setup command adds interactive menu logic but with fragile parsing and no handling for edge cases like corrupted existing config.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename is a breaking change for existing users\",\n      \"body\": \"The package scope changes from '@anthropic' to '@anthropics' in marketplace.json and package.json. Any user with existing installations, scripts, or CI pipelines referencing @anthropic/claude-code-glm will break. There is no deprecation path, no migration guide in the diff, and the CHANGELOG mentions the rename but provides no upgrade instructions for affected users.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 5,\n      \"confidence\": 0.85,\n      \"recommendation\": \"Either provide a clear migration path (e.g., deprecate the old package with a postinstall message pointing to the new one), or document the breaking change prominently. If this is a scoped registry package, ensure the old scope continues to resolve or alias.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Setup menu relies on fragile string matching for existing config detection\",\n      \"body\": \"The setup.md command adds an interactive menu when already configured, but the detection of 'already configured' state depends on grep/matching against stored config output. If the config format changes, or if the config file is partially written or corrupted, the menu may not appear or may present incorrect options, leading to silent misconfiguration or data loss of existing settings.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Add explicit error handling for corrupted or unexpected config states. If config parsing fails, surface a clear error rather than falling through to a default menu path that could overwrite settings.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"CHANGELOG references version that may not match package.json\",\n      \"body\": \"The CHANGELOG adds an entry but the version consistency between CHANGELOG.md and package.json should be verified. If these drift, users may not realize which version they are running or what changes apply to their installation.\",\n      \"file\": \"CHANGELOG.md\",\n      \"line_start\": 1,\n      \"line_end\": 21,\n      \"confidence\": 0.5,\n      \"recommendation\": \"Verify that the CHANGELOG version entry exactly matches the version in package.json before release. Consider automating this check.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Verify the npm scope rename does not break existing published packages or user installations; provide a deprecation/migration path if it does.\",\n    \"Inspect commands/setup.md in full to confirm the interactive menu handles edge cases: empty config, corrupted config, and non-interactive terminal sessions.\",\n    \"Confirm package.json version matches the CHANGELOG entry before tagging a release.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T12:47:23.565Z"
+}

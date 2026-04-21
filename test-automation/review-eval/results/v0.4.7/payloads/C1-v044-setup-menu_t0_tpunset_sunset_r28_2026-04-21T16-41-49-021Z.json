@@ -1,0 +1,33 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 28
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 12093,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "approve",
+    "summary": "This commit adds an interactive re-configuration menu to /glm:setup when already configured, renames the npm scope, and updates release documentation. The changes are confined to markdown command files, plugin metadata, and docs. There are no executable code paths, no data mutations, no auth boundaries, and no runtime logic — only declarative plugin config and markdown prompt instructions. No material adversarial finding can be sustained from the diff.",
+    "findings": [],
+    "next_steps": []
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"approve\",\n  \"summary\": \"This commit adds an interactive re-configuration menu to /glm:setup when already configured, renames the npm scope, and updates release documentation. The changes are confined to markdown command files, plugin metadata, and docs. There are no executable code paths, no data mutations, no auth boundaries, and no runtime logic — only declarative plugin config and markdown prompt instructions. No material adversarial finding can be sustained from the diff.\",\n  \"findings\": [],\n  \"next_steps\": []\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:41:49.021Z"
+}

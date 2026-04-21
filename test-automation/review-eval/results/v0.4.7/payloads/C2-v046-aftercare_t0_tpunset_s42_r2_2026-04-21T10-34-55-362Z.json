@@ -1,0 +1,79 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 57163,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 release introduces a retry library and BigModel error dispatch system that have several material weaknesses: retry.mjs uses wall-clock Date.now() for jitter calculation which can misbehave under clock skew, the retry helper silently swallows non-retryable errors by returning null without re-throwing, and the BigModel error classifier uses substring matching on Chinese error messages that is fragile and will silently misclassify errors when the upstream API changes its wording. Combined with the removal of the verify-release.yml CI workflow without replacement gate, this represents a regression in release safety. The test suite covers happy paths well but does not stress clock-skew, concurrent retry exhaustion, or mutated upstream error strings.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry helper returns null on non-retryable errors instead of throwing, enabling silent failures",
+        "body": "In retry.mjs, when the error classifier returns false (non-retryable), the retry loop logs a warning but returns null rather than re-throwing. Any caller awaiting retry(fn, ...) that receives null has no way to distinguish 'the function returned null legitimately' from 'an error occurred and was swallowed'. This is a classic silent-failure pattern. If the upstream API returns an unexpected error format that isn't classified as retryable, the entire operation silently produces null output with no exception propagation.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 85,
+        "line_end": 95,
+        "confidence": 0.88,
+        "recommendation": "Re-throw the last error when the classifier returns false, or at minimum throw a wrapped error. Returning null on error hides failures from callers and makes debugging extremely difficult. Consider: `if (!shouldRetry(lastError, attempt)) throw lastError;`"
+      },
+      {
+        "severity": "high",
+        "title": "BigModel error classifier relies on substring matching of Chinese error messages from upstream API",
+        "body": "The bigmodel-errors.mjs classifyError function uses string.includes() to match specific Chinese-language error messages (e.g., '速率限制', 'token超限', '模型不存在'). This is fragile because: (1) upstream API can change error message wording at any time without notice, (2) the classification silently defaults to UNKNOWN for any unmatched message, and (3) there are no tests verifying behavior when the API returns unexpected message formats. If the upstream changes '速率限制' to '频率限制', all rate-limit errors become unclassified and un-retryable, causing hard failures instead of automatic backoff.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 40,
+        "line_end": 80,
+        "confidence": 0.82,
+        "recommendation": "Add HTTP status code based classification as the primary mechanism (e.g., 429 → rate limit, 401/403 → auth, 500 → server error), with message substring matching only as a secondary hint. Add a test case that verifies behavior when message text doesn't match any known pattern, and ensure the fallback classification is still retryable for transient-looking status codes."
+      },
+      {
+        "severity": "medium",
+        "title": "verify-release.yml CI workflow deleted without functional replacement",
+        "body": "The .github/workflows/verify-release.yml file (102 lines) was deleted entirely. The new scripts/ci/check-release-ready.sh exists but is a local script, not a CI gate. This means releases can now be pushed without automated CI verification. The pre-push hook is optional (can be bypassed with --no-verify) and only runs locally. This removes a safety gate that previously prevented broken releases from being tagged.",
+        "file": ".github/workflows/verify-release.yml",
+        "line_start": 1,
+        "line_end": 102,
+        "confidence": 0.75,
+        "recommendation": "Either restore a CI workflow that gates releases (tag protection, required status checks) or document that check-release-ready.sh is the sole gate and ensure it's enforced. A local pre-push hook is insufficient as a release safety gate since it can be bypassed and doesn't protect against all committers."
+      },
+      {
+        "severity": "medium",
+        "title": "retry uses Date.now() for jitter calculation, vulnerable to system clock changes",
+        "body": "The retry.mjs withJitter function calculates jitter delay using Date.now() as part of the pseudo-random seed. Under system clock adjustments (NTP corrections, VM suspend/resume), Date.now() can jump backwards or forwards. While the immediate impact is limited (jitter becomes non-uniform), the delay calculation in retryWithBackoff uses `Date.now() < deadline` for timeout checking. If the clock jumps forward significantly, retries could be aborted prematurely; if it jumps backward, retries could persist far longer than intended.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 30,
+        "line_end": 55,
+        "confidence": 0.6,
+        "recommendation": "Use performance.now() or a monotonic clock equivalent for elapsed-time calculations in the retry loop. Date.now() is acceptable for wall-clock logging but should not drive control flow. Alternatively, use attempt-count based termination as the primary mechanism with wall-clock timeout as secondary."
+      }
+    ],
+    "next_steps": [
+      "Fix the null-return-on-non-retryable-error issue in retry.mjs — this is a silent failure vector that will be extremely difficult to debug in production.",
+      "Strengthen the error classifier to use HTTP status codes as primary signal, with message matching only as secondary. Add tests for unknown message formats.",
+      "Restore or replace the CI release gate that was removed with verify-release.yml deletion.",
+      "Add integration tests that verify retry behavior under concurrent calls and with error messages that don't match any known pattern."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.6 release introduces a retry library and BigModel error dispatch system that have several material weaknesses: retry.mjs uses wall-clock Date.now() for jitter calculation which can misbehave under clock skew, the retry helper silently swallows non-retryable errors by returning null without re-throwing, and the BigModel error classifier uses substring matching on Chinese error messages that is fragile and will silently misclassify errors when the upstream API changes its wording. Combined with the removal of the verify-release.yml CI workflow without replacement gate, this represents a regression in release safety. The test suite covers happy paths well but does not stress clock-skew, concurrent retry exhaustion, or mutated upstream error strings.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry helper returns null on non-retryable errors instead of throwing, enabling silent failures\",\"body\":\"In retry.mjs, when the error classifier returns false (non-retryable), the retry loop logs a warning but returns null rather than re-throwing. Any caller awaiting retry(fn, ...) that receives null has no way to distinguish 'the function returned null legitimately' from 'an error occurred and was swallowed'. This is a classic silent-failure pattern. If the upstream API returns an unexpected error format that isn't classified as retryable, the entire operation silently produces null output with no exception propagation.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":85,\"line_end\":95,\"confidence\":0.88,\"recommendation\":\"Re-throw the last error when the classifier returns false, or at minimum throw a wrapped error. Returning null on error hides failures from callers and makes debugging extremely difficult. Consider: `if (!shouldRetry(lastError, attempt)) throw lastError;`\"},{\"severity\":\"high\",\"title\":\"BigModel error classifier relies on substring matching of Chinese error messages from upstream API\",\"body\":\"The bigmodel-errors.mjs classifyError function uses string.includes() to match specific Chinese-language error messages (e.g., '速率限制', 'token超限', '模型不存在'). This is fragile because: (1) upstream API can change error message wording at any time without notice, (2) the classification silently defaults to UNKNOWN for any unmatched message, and (3) there are no tests verifying behavior when the API returns unexpected message formats. If the upstream changes '速率限制' to '频率限制', all rate-limit errors become unclassified and un-retryable, causing hard failures instead of automatic backoff.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":40,\"line_end\":80,\"confidence\":0.82,\"recommendation\":\"Add HTTP status code based classification as the primary mechanism (e.g., 429 → rate limit, 401/403 → auth, 500 → server error), with message substring matching only as a secondary hint. Add a test case that verifies behavior when message text doesn't match any known pattern, and ensure the fallback classification is still retryable for transient-looking status codes.\"},{\"severity\":\"medium\",\"title\":\"verify-release.yml CI workflow deleted without functional replacement\",\"body\":\"The .github/workflows/verify-release.yml file (102 lines) was deleted entirely. The new scripts/ci/check-release-ready.sh exists but is a local script, not a CI gate. This means releases can now be pushed without automated CI verification. The pre-push hook is optional (can be bypassed with --no-verify) and only runs locally. This removes a safety gate that previously prevented broken releases from being tagged.\",\"file\":\".github/workflows/verify-release.yml\",\"line_start\":1,\"line_end\":102,\"confidence\":0.75,\"recommendation\":\"Either restore a CI workflow that gates releases (tag protection, required status checks) or document that check-release-ready.sh is the sole gate and ensure it's enforced. A local pre-push hook is insufficient as a release safety gate since it can be bypassed and doesn't protect against all committers.\"},{\"severity\":\"medium\",\"title\":\"retry uses Date.now() for jitter calculation, vulnerable to system clock changes\",\"body\":\"The retry.mjs withJitter function calculates jitter delay using Date.now() as part of the pseudo-random seed. Under system clock adjustments (NTP corrections, VM suspend/resume), Date.now() can jump backwards or forwards. While the immediate impact is limited (jitter becomes non-uniform), the delay calculation in retryWithBackoff uses `Date.now() < deadline` for timeout checking. If the clock jumps forward significantly, retries could be aborted prematurely; if it jumps backward, retries could persist far longer than intended.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":30,\"line_end\":55,\"confidence\":0.6,\"recommendation\":\"Use performance.now() or a monotonic clock equivalent for elapsed-time calculations in the retry loop. Date.now() is acceptable for wall-clock logging but should not drive control flow. Alternatively, use attempt-count based termination as the primary mechanism with wall-clock timeout as secondary.\"}],\"next_steps\":[\"Fix the null-return-on-non-retryable-error issue in retry.mjs — this is a silent failure vector that will be extremely difficult to debug in production.\",\"Strengthen the error classifier to use HTTP status codes as primary signal, with message matching only as secondary. Add tests for unknown message formats.\",\"Restore or replace the CI release gate that was removed with verify-release.yml deletion.\",\"Add integration tests that verify retry behavior under concurrent calls and with error messages that don't match any known pattern.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:34:55.390Z"
+}

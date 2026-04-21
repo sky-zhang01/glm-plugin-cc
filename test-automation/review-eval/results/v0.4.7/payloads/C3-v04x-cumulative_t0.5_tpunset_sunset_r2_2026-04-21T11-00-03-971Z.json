@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 58057,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.4→v0.4.6 cumulative diff introduces a retry/backoff system (retry.mjs), BigModel error dispatch (bigmodel-errors.mjs), and tracked-jobs refactoring. Several material weaknesses survive into HEAD: the retry module's cancellation path is not reliably tested for partial-failure cascades, the new BigModel error classifier silently falls through to a generic retry on unrecognized error shapes (potentially amplifying rate-limit abuse), and tracked-jobs state can leak across concurrent invocations due to file-based locking with stale-lock handling that defaults to removal rather than safe rejection. These are the kind of latent bugs that only surface under production load. I recommend blocking until the retry-idempotency and lock-safety gaps are addressed.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry module retries non-retryable errors on unrecognized error shape",
+        "body": "In retry.mjs, when `classifyError` returns an unrecognized or malformed error object (e.g. a network error with a non-standard shape, or an error with a `code` property that is not in the `NON_RETRYABLE` set), the code falls through to the default retry path. This means transient-corruption responses or auth failures from the BigModel API could be retried up to `maxRetries` times, amplifying load and potentially causing secondary failures. The `bigmodel-errors.mjs` classifier attempts to parse known error codes, but the catch-all path in the retry loop does not distinguish 'unrecognized' from 'transient'. Under a partial outage where the API returns an unexpected error code, this will silently retry rather than fail fast. Missing: an explicit 'do not retry unknown error shapes' guard or an allowlist approach for retryable codes.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Adopt an allowlist model: only retry errors that are explicitly classified as RETRYABLE. For any error that does not match a known classification, return immediately without retrying. Add a test case for an unrecognized error code path that asserts zero retries."
+      },
+      {
+        "severity": "high",
+        "title": "File-based job lock uses stale-lock removal heuristic instead of safe rejection",
+        "body": "In tracked-jobs.mjs, the locking mechanism detects stale locks by comparing lock file mtime to a threshold. When a stale lock is detected, the code unconditionally removes the lock and proceeds. This is unsafe under concurrent invocation: two processes could both detect the same stale lock simultaneously, both remove it, and both proceed to write, causing a race condition that corrupts the tracked-jobs state file. The window is small but real on network filesystems or under heavy load. The lack of atomic compare-and-swap (e.g. `O_EXCL`) means there is no true mutual exclusion. The stale-lock heuristic does not account for the case where the original owner is still alive but slow (e.g. paused in a debugger or throttled by the OS scheduler).",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.78,
+        "recommendation": "Replace the stale-lock heuristic with atomic file creation using `O_EXCL | O_CREAT`. If lock acquisition fails, reject rather than removing and retrying. For stale lock cleanup, use a lock-file-content PID check plus `kill(pid, 0)` to confirm the owner is truly dead before removal. Add a concurrent-lock-acquisition test that asserts only one writer wins."
+      },
+      {
+        "severity": "medium",
+        "title": "BigModel error dispatcher silently returns retry=true for unparseable error responses",
+        "body": "bigmodel-errors.mjs classifies API errors by inspecting `error.code`, `error.status`, and `error.message`. If the API response body is malformed (e.g. HTML error page from a CDN/proxy, truncated JSON, or a new API version returning an unfamiliar schema), the classifier will not match any known pattern and the default return value permits retry. This was partially addressed in the diff but the final fallthrough still returns `retryable: true` for unrecognized shapes. A proxy returning `502 Bad Gateway` with an HTML body that does not include any recognized error string will be retried indefinitely up to maxRetries, wasting quota and masking the real issue from the user.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.75,
+        "recommendation": "Change the default fallthrough to `retryable: false` for unrecognized errors. Add a `UNKNOWN` classification that logs a warning with the raw error payload for observability. Add tests for HTML body responses, empty bodies, and null/undefined error objects."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs retry integration does not propagate cancellation signal to in-flight request",
+        "body": "The retry loop in glm-client.mjs wraps the BigModel API call. When the retry module decides to stop retrying (max retries exceeded or non-retryable error), the code correctly stops, but any in-flight HTTP request from the last attempt is not explicitly aborted. Under a timeout scenario, this means a hung TCP connection may persist beyond the retry window, consuming resources. The `AbortController` signal, if provided, is not wired through to the fetch call in a way that the retry module's timeout can trigger it.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.68,
+        "recommendation": "Wire an AbortController to each fetch attempt with a per-attempt timeout. When the retry loop decides to stop or the outer timeout fires, call `controller.abort()`. Add a test that verifies the fetch is aborted when the retry timeout fires mid-request."
+      }
+    ],
+    "next_steps": [
+      "Inspect retry.mjs line-by-line and confirm the default error classification is deny-by-default (non-retryable) for unrecognized shapes.",
+      "Audit tracked-jobs.mjs lock acquisition path for atomicity; add a concurrent-writer test.",
+      "Verify bigmodel-errors.mjs handles HTML/empty/non-JSON error bodies from CDN proxies without enabling retry.",
+      "Add integration test for glm-client.mjs abort propagation on timeout during retry.",
+      "Re-run the full test suite to confirm no existing tests rely on the current permissive retry-default behavior."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.4→v0.4.6 cumulative diff introduces a retry/backoff system (retry.mjs), BigModel error dispatch (bigmodel-errors.mjs), and tracked-jobs refactoring. Several material weaknesses survive into HEAD: the retry module's cancellation path is not reliably tested for partial-failure cascades, the new BigModel error classifier silently falls through to a generic retry on unrecognized error shapes (potentially amplifying rate-limit abuse), and tracked-jobs state can leak across concurrent invocations due to file-based locking with stale-lock handling that defaults to removal rather than safe rejection. These are the kind of latent bugs that only surface under production load. I recommend blocking until the retry-idempotency and lock-safety gaps are addressed.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Retry module retries non-retryable errors on unrecognized error shape\",\"body\":\"In retry.mjs, when `classifyError` returns an unrecognized or malformed error object (e.g. a network error with a non-standard shape, or an error with a `code` property that is not in the `NON_RETRYABLE` set), the code falls through to the default retry path. This means transient-corruption responses or auth failures from the BigModel API could be retried up to `maxRetries` times, amplifying load and potentially causing secondary failures. The `bigmodel-errors.mjs` classifier attempts to parse known error codes, but the catch-all path in the retry loop does not distinguish 'unrecognized' from 'transient'. Under a partial outage where the API returns an unexpected error code, this will silently retry rather than fail fast. Missing: an explicit 'do not retry unknown error shapes' guard or an allowlist approach for retryable codes.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.72,\"recommendation\":\"Adopt an allowlist model: only retry errors that are explicitly classified as RETRYABLE. For any error that does not match a known classification, return immediately without retrying. Add a test case for an unrecognized error code path that asserts zero retries.\"},{\"severity\":\"high\",\"title\":\"File-based job lock uses stale-lock removal heuristic instead of safe rejection\",\"body\":\"In tracked-jobs.mjs, the locking mechanism detects stale locks by comparing lock file mtime to a threshold. When a stale lock is detected, the code unconditionally removes the lock and proceeds. This is unsafe under concurrent invocation: two processes could both detect the same stale lock simultaneously, both remove it, and both proceed to write, causing a race condition that corrupts the tracked-jobs state file. The window is small but real on network filesystems or under heavy load. The lack of atomic compare-and-swap (e.g. `O_EXCL`) means there is no true mutual exclusion. The stale-lock heuristic does not account for the case where the original owner is still alive but slow (e.g. paused in a debugger or throttled by the OS scheduler).\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.78,\"recommendation\":\"Replace the stale-lock heuristic with atomic file creation using `O_EXCL | O_CREAT`. If lock acquisition fails, reject rather than removing and retrying. For stale lock cleanup, use a lock-file-content PID check plus `kill(pid, 0)` to confirm the owner is truly dead before removal. Add a concurrent-lock-acquisition test that asserts only one writer wins.\"},{\"severity\":\"medium\",\"title\":\"BigModel error dispatcher silently returns retry=true for unparseable error responses\",\"body\":\"bigmodel-errors.mjs classifies API errors by inspecting `error.code`, `error.status`, and `error.message`. If the API response body is malformed (e.g. HTML error page from a CDN/proxy, truncated JSON, or a new API version returning an unfamiliar schema), the classifier will not match any known pattern and the default return value permits retry. This was partially addressed in the diff but the final fallthrough still returns `retryable: true` for unrecognized shapes. A proxy returning `502 Bad Gateway` with an HTML body that does not include any recognized error string will be retried indefinitely up to maxRetries, wasting quota and masking the real issue from the user.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.75,\"recommendation\":\"Change the default fallthrough to `retryable: false` for unrecognized errors. Add a `UNKNOWN` classification that logs a warning with the raw error payload for observability. Add tests for HTML body responses, empty bodies, and null/undefined error objects.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs retry integration does not propagate cancellation signal to in-flight request\",\"body\":\"The retry loop in glm-client.mjs wraps the BigModel API call. When the retry module decides to stop retrying (max retries exceeded or non-retryable error), the code correctly stops, but any in-flight HTTP request from the last attempt is not explicitly aborted. Under a timeout scenario, this means a hung TCP connection may persist beyond the retry window, consuming resources. The `AbortController` signal, if provided, is not wired through to the fetch call in a way that the retry module's timeout can trigger it.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.68,\"recommendation\":\"Wire an AbortController to each fetch attempt with a per-attempt timeout. When the retry loop decides to stop or the outer timeout fires, call `controller.abort()`. Add a test that verifies the fetch is aborted when the retry timeout fires mid-request.\"}],\"next_steps\":[\"Inspect retry.mjs line-by-line and confirm the default error classification is deny-by-default (non-retryable) for unrecognized shapes.\",\"Audit tracked-jobs.mjs lock acquisition path for atomicity; add a concurrent-writer test.\",\"Verify bigmodel-errors.mjs handles HTML/empty/non-JSON error bodies from CDN proxies without enabling retry.\",\"Add integration test for glm-client.mjs abort propagation on timeout during retry.\",\"Re-run the full test suite to confirm no existing tests rely on the current permissive retry-default behavior.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T11:00:03.997Z"
+}

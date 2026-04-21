@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 14
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 31077,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The commit adds an interactive menu to the setup command and renames the npm scope. While the changes are mostly documentation and configuration, the setup command modification introduces a menu system with potential edge cases around user input handling, and the scope rename from one namespace to another could break existing installations if not coordinated with package registry changes.",
+    "findings": [
+      {
+        "severity": "medium",
+        "title": "Setup command menu lacks input validation and error handling documentation",
+        "body": "The commands/setup.md file introduces an interactive menu flow for when the system is already configured. The markdown-based command definition references a menu with options like 'Update configuration', 'Reset configuration', and 'Cancel'. If the user provides unexpected input or the menu system encounters a partial state (e.g., config file exists but is malformed/corrupted), there is no documented fallback behavior. A corrupted config could cause the 'already configured' check to pass but subsequent menu actions to fail silently or destructively, particularly the 'Reset configuration' option which implies data deletion.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.55,
+        "recommendation": "Add explicit documentation/handling for the case where config exists but is invalid JSON or corrupted. Ensure 'Reset configuration' has a confirmation step and that the menu gracefully handles unexpected input states."
+      },
+      {
+        "severity": "medium",
+        "title": "NPM scope rename creates upgrade path gap for existing users",
+        "body": "The package.json changes the package name scope (from one namespace to another based on the diff stat showing 4 lines changed). This is a breaking change for any existing users who have installed the previous scoped package. The old package will remain at its last version on the registry while the new scoped package starts fresh. Users on the old scope won't receive updates through normal npm update mechanisms. The CHANGELOG mentions this as part of v0.4.7 but does not flag it as a breaking change requiring manual uninstall/reinstall.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.7,
+        "recommendation": "Add a migration note to CHANGELOG.md and README/release_card.md explicitly stating that users must uninstall the old package and reinstall the new one. Consider whether the old package name should receive a final version that prints a deprecation notice pointing to the new scope."
+      },
+      {
+        "severity": "low",
+        "title": "Release card has significant content changes but no validation of internal consistency",
+        "body": "The release_card.md has 326 lines changed (273 additions, 103 deletions), making it the largest change in this commit. It likely contains version references, installation instructions, and feature descriptions. Given the npm scope rename, any hardcoded package names, installation commands, or version references in this file must be verified for consistency with the actual package.json values. A mismatch between documented install commands and the actual package name would create a broken first-use experience.",
+        "file": "release_card.md",
+        "line_start": 1,
+        "line_end": 326,
+        "confidence": 0.6,
+        "recommendation": "Verify that all package name references, install commands, and version numbers in release_card.md exactly match package.json. Consider extracting these values from a single source of truth rather than hardcoding them in documentation."
+      }
+    ],
+    "next_steps": [
+      "Inspect the full diff of commands/setup.md to verify the menu logic handles edge cases (empty input, malformed config, SIGINT during prompt)",
+      "Verify that the old npm scope package either has a deprecation notice or a documented migration path",
+      "Confirm release_card.md install instructions use the correct new scoped package name",
+      "Check if the .claude-plugin/marketplace.json and plugin.json changes are consistent with the new scope name"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The commit adds an interactive menu to the setup command and renames the npm scope. While the changes are mostly documentation and configuration, the setup command modification introduces a menu system with potential edge cases around user input handling, and the scope rename from one namespace to another could break existing installations if not coordinated with package registry changes.\",\"findings\":[{\"severity\":\"medium\",\"title\":\"Setup command menu lacks input validation and error handling documentation\",\"body\":\"The commands/setup.md file introduces an interactive menu flow for when the system is already configured. The markdown-based command definition references a menu with options like 'Update configuration', 'Reset configuration', and 'Cancel'. If the user provides unexpected input or the menu system encounters a partial state (e.g., config file exists but is malformed/corrupted), there is no documented fallback behavior. A corrupted config could cause the 'already configured' check to pass but subsequent menu actions to fail silently or destructively, particularly the 'Reset configuration' option which implies data deletion.\",\"file\":\"commands/setup.md\",\"line_start\":1,\"line_end\":19,\"confidence\":0.55,\"recommendation\":\"Add explicit documentation/handling for the case where config exists but is invalid JSON or corrupted. Ensure 'Reset configuration' has a confirmation step and that the menu gracefully handles unexpected input states.\"},{\"severity\":\"medium\",\"title\":\"NPM scope rename creates upgrade path gap for existing users\",\"body\":\"The package.json changes the package name scope (from one namespace to another based on the diff stat showing 4 lines changed). This is a breaking change for any existing users who have installed the previous scoped package. The old package will remain at its last version on the registry while the new scoped package starts fresh. Users on the old scope won't receive updates through normal npm update mechanisms. The CHANGELOG mentions this as part of v0.4.7 but does not flag it as a breaking change requiring manual uninstall/reinstall.\",\"file\":\"package.json\",\"line_start\":1,\"line_end\":4,\"confidence\":0.7,\"recommendation\":\"Add a migration note to CHANGELOG.md and README/release_card.md explicitly stating that users must uninstall the old package and reinstall the new one. Consider whether the old package name should receive a final version that prints a deprecation notice pointing to the new scope.\"},{\"severity\":\"low\",\"title\":\"Release card has significant content changes but no validation of internal consistency\",\"body\":\"The release_card.md has 326 lines changed (273 additions, 103 deletions), making it the largest change in this commit. It likely contains version references, installation instructions, and feature descriptions. Given the npm scope rename, any hardcoded package names, installation commands, or version references in this file must be verified for consistency with the actual package.json values. A mismatch between documented install commands and the actual package name would create a broken first-use experience.\",\"file\":\"release_card.md\",\"line_start\":1,\"line_end\":326,\"confidence\":0.6,\"recommendation\":\"Verify that all package name references, install commands, and version numbers in release_card.md exactly match package.json. Consider extracting these values from a single source of truth rather than hardcoding them in documentation.\"}],\"next_steps\":[\"Inspect the full diff of commands/setup.md to verify the menu logic handles edge cases (empty input, malformed config, SIGINT during prompt)\",\"Verify that the old npm scope package either has a deprecation notice or a documented migration path\",\"Confirm release_card.md install instructions use the correct new scoped package name\",\"Check if the .claude-plugin/marketplace.json and plugin.json changes are consistent with the new scope name\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:49:47.696Z"
+}

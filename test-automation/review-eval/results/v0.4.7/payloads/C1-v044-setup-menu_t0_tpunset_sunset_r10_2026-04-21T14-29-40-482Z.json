@@ -1,0 +1,37 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 10
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 49280,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "approve",
+    "summary": "This commit is primarily a metadata/documentation change for a Claude plugin: it renames the npm scope, adds an interactive menu to the setup command when already configured, and updates the release card and changelog. Based on the available context (file list and diff stat only, no diff content provided), no material defects can be identified with sufficient confidence to warrant blocking. The npm scope rename in package.json is the highest-risk item but is expected to be a controlled rename at publish time with no evidence of dangling references in the provided file list.",
+    "findings": [],
+    "next_steps": [
+      "Verify the old npm scope package is properly deprecated or redirected to avoid user confusion after the rename.",
+      "Confirm the interactive menu in commands/setup.md handles all edge cases: empty config, malformed config, partial config from a failed prior run.",
+      "Smoke-test the setup command's re-configuration flow to ensure it preserves existing valid settings when the user chooses to keep them."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"approve\",\n  \"summary\": \"This commit is primarily a metadata/documentation change for a Claude plugin: it renames the npm scope, adds an interactive menu to the setup command when already configured, and updates the release card and changelog. Based on the available context (file list and diff stat only, no diff content provided), no material defects can be identified with sufficient confidence to warrant blocking. The npm scope rename in package.json is the highest-risk item but is expected to be a controlled rename at publish time with no evidence of dangling references in the provided file list.\",\n  \"findings\": [],\n  \"next_steps\": [\n    \"Verify the old npm scope package is properly deprecated or redirected to avoid user confusion after the rename.\",\n    \"Confirm the interactive menu in commands/setup.md handles all edge cases: empty config, malformed config, partial config from a failed prior run.\",\n    \"Smoke-test the setup command's re-configuration flow to ensure it preserves existing valid settings when the user chooses to keep them.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:29:40.483Z"
+}

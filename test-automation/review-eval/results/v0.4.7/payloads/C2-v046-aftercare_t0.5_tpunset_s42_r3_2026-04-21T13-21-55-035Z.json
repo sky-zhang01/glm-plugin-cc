@@ -1,0 +1,100 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": 42,
+    "thinking": "on",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 6,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 66485,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 hardening aftercare introduces a retry library, BigModel error classification, and GLM client improvements. While tests exist, the retry logic has several edge-case defects around signal handling, abort controller cleanup, and backoff behavior that could cause silent hangs or resource leaks in production. The glm-client integration with retry lacks tests, and the error classification module has unhandled edge cases.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs exponential backoff computes interval before jitter, but does not document or validate the upper-bound cap",
+        "body": "In the retry module, `exponentialBackoff` returns `Math.min(cap, base * 2 ** attempt)`. When `attempt` is large (e.g., >= 30), `2 ** attempt` becomes Infinity before the Math.min cap applies. While Math.min(Infinity, cap) correctly returns cap, this relies on IEEE 754 behavior rather than defensive coding. More critically, if `base` is accidentally 0 or negative, the retry delay becomes 0 or NaN (with jitter), causing a tight spin loop. There is no validation that `base` and `cap` are positive finite numbers.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 50,
+        "confidence": 0.65,
+        "recommendation": "Add guard assertions at the top of `exponentialBackoff` (or in the `retry` function when parsing options) that validate `baseDelay` and `maxDelay` are positive finite numbers. Return early with a clear error rather than proceeding with NaN/0 delays."
+      },
+      {
+        "severity": "high",
+        "title": "retry.mjs uses AbortController but the signal handler cleanup path is fragile under concurrent abort + resolve",
+        "body": "In the retry loop, an `onAbort` handler is registered on `signal` to reject the promise. When the main loop resolves (either success or max-retries-exhausted), the code removes the listener via `signal.removeEventListener('abort', onAbort)`. However, there is a TOCTOU race: if `signal.abort()` fires between the last retry attempt completing and the `removeEventListener` call, the `onAbort` handler will reject an already-resolved promise. While the Promise spec prevents double-resolution, any side effects in the caller's `.catch()` will fire spuriously. Additionally, if the retry loop throws synchronously, the `removeEventListener` may be skipped entirely (depending on whether it's in a finally block), leaking the listener.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.7,
+        "recommendation": "Use try/finally to guarantee `removeEventListener` runs. Gate the `onAbort` rejection with a `settled` boolean so it becomes a no-op after the main path has resolved."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs retry integration is untested",
+        "body": "The glm-client.mjs diff shows significant changes (~99 lines added/modified) integrating the new retry and error-classification modules. However, no corresponding test file (e.g., `tests/glm-client.test.mjs`) appears in the diff. The integration point — where HTTP errors are classified, retried, and backoff is applied — is the highest-risk surface because it combines network unreliability with the new retry logic. The existing `tests/retry.test.mjs` and `tests/bigmodel-errors.test.mjs` test the modules in isolation, but the composition is unverified.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 99,
+        "confidence": 0.8,
+        "recommendation": "Add integration tests for glm-client that exercise retry behavior: simulate transient 429/500 responses, verify correct backoff, verify abort signal propagation, and verify that non-retryable errors surface immediately without retry attempts."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs classifyError returns generic fallback for unexpected HTTP status codes, silently swallowing diagnostic information",
+        "body": "The error classifier handles known BigModel status codes but falls back to a generic 'unknown' classification for any unhandled status code. In production, if BigModel introduces a new error code (e.g., 451 or 418), the retry layer will treat it based on the unknown category's retryability setting. If `unknown` is retryable, the system will waste retries on what might be a permanent error. If not retryable, a transient new error code will fail fast without diagnosis. The error message should preserve the original status code and response body for debugging.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.7,
+        "recommendation": "Ensure the unknown/default error classification preserves the full HTTP status code, response headers, and body in the returned error object. Consider logging a warning when an unclassified status code is encountered, so it surfaces in observability rather than being silently categorized."
+      },
+      {
+        "severity": "medium",
+        "title": "retry.mjs sleep function does not clean up the timer if the abort signal fires, leaking the setTimeout reference",
+        "body": "The `sleep` helper in retry.mjs creates a `setTimeout` and wires up an abort handler that calls `reject()`. However, when abort fires and the promise rejects, the original `setTimeout` timer is never cleared via `clearTimeout`. It will eventually fire and call `resolve()` on an already-rejected promise (which is a no-op in JS but keeps the timer alive until it expires). For large `maxDelay` values (e.g., 60s), this means a dangling timer holds a closure referencing the reject function and any captured state for the full delay duration, potentially causing unexpected GC retention and wasted scheduler slots under high concurrency.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 50,
+        "confidence": 0.75,
+        "recommendation": "In the abort handler, call `clearTimeout(timerId)` before rejecting. Store the timer ID in a variable accessible to the abort handler closure."
+      },
+      {
+        "severity": "low",
+        "title": "check-release-ready.sh does not validate that CHANGELOG entries follow a consistent format or version ordering",
+        "body": "The new `scripts/ci/check-release-ready.sh` script checks release readiness but appears to validate only structural properties (file existence, version match). It does not verify that CHANGELOG.md entries are in chronological order or that the unreleased section has been properly updated. A malformed CHANGELOG (e.g., duplicate version headers, entries placed under the wrong version) would pass the check but cause confusing release notes.",
+        "file": "scripts/ci/check-release-ready.sh",
+        "line_start": 1,
+        "line_end": 84,
+        "confidence": 0.5,
+        "recommendation": "Add a validation step that parses CHANGELOG.md and verifies version headers are in descending semver order and that no duplicate version headers exist."
+      }
+    ],
+    "next_steps": [
+      "Add integration tests for glm-client.mjs covering retry + error classification composition",
+      "Fix the timer leak in retry.mjs sleep by calling clearTimeout in the abort handler",
+      "Guard retry.mjs against invalid delay parameters (0, negative, NaN, Infinity)",
+      "Add settled-flag guard in retry.mjs to prevent spurious abort-side rejections after the main loop resolves",
+      "Verify bigmodel-errors.mjs unknown-category handling preserves diagnostic information"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.6 hardening aftercare introduces a retry library, BigModel error classification, and GLM client improvements. While tests exist, the retry logic has several edge-case defects around signal handling, abort controller cleanup, and backoff behavior that could cause silent hangs or resource leaks in production. The glm-client integration with retry lacks tests, and the error classification module has unhandled edge cases.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs exponential backoff computes interval before jitter, but does not document or validate the upper-bound cap\",\"body\":\"In the retry module, `exponentialBackoff` returns `Math.min(cap, base * 2 ** attempt)`. When `attempt` is large (e.g., >= 30), `2 ** attempt` becomes Infinity before the Math.min cap applies. While Math.min(Infinity, cap) correctly returns cap, this relies on IEEE 754 behavior rather than defensive coding. More critically, if `base` is accidentally 0 or negative, the retry delay becomes 0 or NaN (with jitter), causing a tight spin loop. There is no validation that `base` and `cap` are positive finite numbers.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":50,\"confidence\":0.65,\"recommendation\":\"Add guard assertions at the top of `exponentialBackoff` (or in the `retry` function when parsing options) that validate `baseDelay` and `maxDelay` are positive finite numbers. Return early with a clear error rather than proceeding with NaN/0 delays.\"},{\"severity\":\"high\",\"title\":\"retry.mjs uses AbortController but the signal handler cleanup path is fragile under concurrent abort + resolve\",\"body\":\"In the retry loop, an `onAbort` handler is registered on `signal` to reject the promise. When the main loop resolves (either success or max-retries-exhausted), the code removes the listener via `signal.removeEventListener('abort', onAbort)`. However, there is a TOCTOU race: if `signal.abort()` fires between the last retry attempt completing and the `removeEventListener` call, the `onAbort` handler will reject an already-resolved promise. While the Promise spec prevents double-resolution, any side effects in the caller's `.catch()` will fire spuriously. Additionally, if the retry loop throws synchronously, the `removeEventListener` may be skipped entirely (depending on whether it's in a finally block), leaking the listener.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.7,\"recommendation\":\"Use try/finally to guarantee `removeEventListener` runs. Gate the `onAbort` rejection with a `settled` boolean so it becomes a no-op after the main path has resolved.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs retry integration is untested\",\"body\":\"The glm-client.mjs diff shows significant changes (~99 lines added/modified) integrating the new retry and error-classification modules. However, no corresponding test file (e.g., `tests/glm-client.test.mjs`) appears in the diff. The integration point — where HTTP errors are classified, retried, and backoff is applied — is the highest-risk surface because it combines network unreliability with the new retry logic. The existing `tests/retry.test.mjs` and `tests/bigmodel-errors.test.mjs` test the modules in isolation, but the composition is unverified.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":99,\"confidence\":0.8,\"recommendation\":\"Add integration tests for glm-client that exercise retry behavior: simulate transient 429/500 responses, verify correct backoff, verify abort signal propagation, and verify that non-retryable errors surface immediately without retry attempts.\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors.mjs classifyError returns generic fallback for unexpected HTTP status codes, silently swallowing diagnostic information\",\"body\":\"The error classifier handles known BigModel status codes but falls back to a generic 'unknown' classification for any unhandled status code. In production, if BigModel introduces a new error code (e.g., 451 or 418), the retry layer will treat it based on the unknown category's retryability setting. If `unknown` is retryable, the system will waste retries on what might be a permanent error. If not retryable, a transient new error code will fail fast without diagnosis. The error message should preserve the original status code and response body for debugging.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.7,\"recommendation\":\"Ensure the unknown/default error classification preserves the full HTTP status code, response headers, and body in the returned error object. Consider logging a warning when an unclassified status code is encountered, so it surfaces in observability rather than being silently categorized.\"},{\"severity\":\"medium\",\"title\":\"retry.mjs sleep function does not clean up the timer if the abort signal fires, leaking the setTimeout reference\",\"body\":\"The `sleep` helper in retry.mjs creates a `setTimeout` and wires up an abort handler that calls `reject()`. However, when abort fires and the promise rejects, the original `setTimeout` timer is never cleared via `clearTimeout`. It will eventually fire and call `resolve()` on an already-rejected promise (which is a no-op in JS but keeps the timer alive until it expires). For large `maxDelay` values (e.g., 60s), this means a dangling timer holds a closure referencing the reject function and any captured state for the full delay duration, potentially causing unexpected GC retention and wasted scheduler slots under high concurrency.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":50,\"confidence\":0.75,\"recommendation\":\"In the abort handler, call `clearTimeout(timerId)` before rejecting. Store the timer ID in a variable accessible to the abort handler closure.\"},{\"severity\":\"low\",\"title\":\"check-release-ready.sh does not validate that CHANGELOG entries follow a consistent format or version ordering\",\"body\":\"The new `scripts/ci/check-release-ready.sh` script checks release readiness but appears to validate only structural properties (file existence, version match). It does not verify that CHANGELOG.md entries are in chronological order or that the unreleased section has been properly updated. A malformed CHANGELOG (e.g., duplicate version headers, entries placed under the wrong version) would pass the check but cause confusing release notes.\",\"file\":\"scripts/ci/check-release-ready.sh\",\"line_start\":1,\"line_end\":84,\"confidence\":0.5,\"recommendation\":\"Add a validation step that parses CHANGELOG.md and verifies version headers are in descending semver order and that no duplicate version headers exist.\"}],\"next_steps\":[\"Add integration tests for glm-client.mjs covering retry + error classification composition\",\"Fix the timer leak in retry.mjs sleep by calling clearTimeout in the abort handler\",\"Guard retry.mjs against invalid delay parameters (0, negative, NaN, Infinity)\",\"Add settled-flag guard in retry.mjs to prevent spurious abort-side rejections after the main loop resolves\",\"Verify bigmodel-errors.mjs unknown-category handling preserves diagnostic information\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T13:21:55.084Z"
+}

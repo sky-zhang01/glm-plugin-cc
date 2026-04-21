@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 61537,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The commit adds an interactive menu to setup and renames the npm scope. The setup command changes add user-facing interactive flows without clear error handling for non-interactive contexts. The npm scope rename is a breaking change that could strand existing installations. The release_card.md rewrite is large but documentation-only. The main blocking concerns are around the scope rename backward compatibility and the interactive menu's behavior in non-TTY/CI environments.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change with no migration path for existing users",
+        "body": "The package.json and plugin configuration change the npm scope from one name to another. Existing users who installed the previous scoped package will not be automatically redirected. The old package name becomes orphaned. There is no deprecation notice, no migration guide in CHANGELOG.md, and no fallback alias. Users on the old scope will break on their next install or update without any actionable error message.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 10,
+        "confidence": 0.72,
+        "recommendation": "Add a migration note to CHANGELOG.md and README documenting the scope change. Consider publishing a stub package under the old scope name that depends on the new one, or at minimum prints a deprecation redirect. Verify no other config files (e.g., lockfiles, CI scripts) still reference the old scope."
+      },
+      {
+        "severity": "high",
+        "title": "Interactive menu in setup.md has no guard for non-interactive / CI / pipe contexts",
+        "body": "The commands/setup.md changes add an interactive menu when the system is already configured. Markdown-based command files in this plugin system are interpreted by Claude, but if the tool tries to present a choice menu and the user is in a non-interactive session (piped input, CI, scripted setup), the flow will hang or silently skip. There is no documented --yes / --force / --non-interactive flag, no timeout, and no default path. This is a real failure mode for automated provisioning.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.68,
+        "recommendation": "Add a non-interactive fallback path to the setup command documentation. Define what happens when no user input is available (e.g., default to 'keep current config' and exit 0, or print the menu as instructions and exit). Document a flag or environment variable that forces a specific behavior."
+      },
+      {
+        "severity": "medium",
+        "title": "CHANGELOG missing scope rename as a breaking change entry",
+        "body": "The CHANGELOG.md added 21 lines documenting the interactive menu fix, but the npm scope rename is either not called out as a breaking change or is buried. Renaming an npm package scope is one of the most disruptive changes possible for consumers, yet it does not appear to have a dedicated BREAKING CHANGE section with migration instructions.",
+        "file": "CHANGELOG.md",
+        "line_start": 1,
+        "line_end": 21,
+        "confidence": 0.78,
+        "recommendation": "Add an explicit BREAKING CHANGE entry in the changelog describing the scope rename, the old and new package names, and concrete steps users must take to migrate."
+      },
+      {
+        "severity": "medium",
+        "title": "marketplace.json and plugin.json references may be inconsistent with the scope rename",
+        "body": "Both .claude-plugin/marketplace.json (4 lines changed) and plugin.json (2 lines changed) were modified alongside the scope rename. If any field in these files still references the old scope—or if external systems cache the old plugin identity—users could be directed to install a nonexistent package. The diff does not show validation that all references are internally consistent.",
+        "file": ".claude-plugin/marketplace.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.55,
+        "recommendation": "Audit all fields in marketplace.json, plugin.json, and package.json for any remaining references to the old scope. Search the entire repository (README, docs, commands, CI configs) for the old package name. Add a CI check that validates the scope name is consistent across all config files."
+      }
+    ],
+    "next_steps": [
+      "Run `git diff 7766943^..7766943` and verify every old scope reference is gone from all files, not just the six changed ones.",
+      "Check whether the old scoped package exists on npm and add a deprecation notice pointing to the new name.",
+      "Test the setup command in a non-interactive context (piped input, no TTY) and document the expected behavior.",
+      "Update CHANGELOG.md with an explicit BREAKING CHANGE section for the scope rename.",
+      "Search the full repo (grep/ripgrep) for the old scope name to catch any stale references in docs, commands, or CI."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The commit adds an interactive menu to setup and renames the npm scope. The setup command changes add user-facing interactive flows without clear error handling for non-interactive contexts. The npm scope rename is a breaking change that could strand existing installations. The release_card.md rewrite is large but documentation-only. The main blocking concerns are around the scope rename backward compatibility and the interactive menu's behavior in non-TTY/CI environments.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename is a breaking change with no migration path for existing users\",\n      \"body\": \"The package.json and plugin configuration change the npm scope from one name to another. Existing users who installed the previous scoped package will not be automatically redirected. The old package name becomes orphaned. There is no deprecation notice, no migration guide in CHANGELOG.md, and no fallback alias. Users on the old scope will break on their next install or update without any actionable error message.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 10,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Add a migration note to CHANGELOG.md and README documenting the scope change. Consider publishing a stub package under the old scope name that depends on the new one, or at minimum prints a deprecation redirect. Verify no other config files (e.g., lockfiles, CI scripts) still reference the old scope.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"Interactive menu in setup.md has no guard for non-interactive / CI / pipe contexts\",\n      \"body\": \"The commands/setup.md changes add an interactive menu when the system is already configured. Markdown-based command files in this plugin system are interpreted by Claude, but if the tool tries to present a choice menu and the user is in a non-interactive session (piped input, CI, scripted setup), the flow will hang or silently skip. There is no documented --yes / --force / --non-interactive flag, no timeout, and no default path. This is a real failure mode for automated provisioning.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Add a non-interactive fallback path to the setup command documentation. Define what happens when no user input is available (e.g., default to 'keep current config' and exit 0, or print the menu as instructions and exit). Document a flag or environment variable that forces a specific behavior.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"CHANGELOG missing scope rename as a breaking change entry\",\n      \"body\": \"The CHANGELOG.md added 21 lines documenting the interactive menu fix, but the npm scope rename is either not called out as a breaking change or is buried. Renaming an npm package scope is one of the most disruptive changes possible for consumers, yet it does not appear to have a dedicated BREAKING CHANGE section with migration instructions.\",\n      \"file\": \"CHANGELOG.md\",\n      \"line_start\": 1,\n      \"line_end\": 21,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Add an explicit BREAKING CHANGE entry in the changelog describing the scope rename, the old and new package names, and concrete steps users must take to migrate.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"marketplace.json and plugin.json references may be inconsistent with the scope rename\",\n      \"body\": \"Both .claude-plugin/marketplace.json (4 lines changed) and plugin.json (2 lines changed) were modified alongside the scope rename. If any field in these files still references the old scope—or if external systems cache the old plugin identity—users could be directed to install a nonexistent package. The diff does not show validation that all references are internally consistent.\",\n      \"file\": \".claude-plugin/marketplace.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Audit all fields in marketplace.json, plugin.json, and package.json for any remaining references to the old scope. Search the entire repository (README, docs, commands, CI configs) for the old package name. Add a CI check that validates the scope name is consistent across all config files.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `git diff 7766943^..7766943` and verify every old scope reference is gone from all files, not just the six changed ones.\",\n    \"Check whether the old scoped package exists on npm and add a deprecation notice pointing to the new name.\",\n    \"Test the setup command in a non-interactive context (piped input, no TTY) and document the expected behavior.\",\n    \"Update CHANGELOG.md with an explicit BREAKING CHANGE section for the scope rename.\",\n    \"Search the full repo (grep/ripgrep) for the old scope name to catch any stale references in docs, commands, or CI.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:32:33.243Z"
+}

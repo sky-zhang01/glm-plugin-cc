@@ -1,0 +1,58 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 6
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 2,
+    "citation_accuracy": 0.5,
+    "citation_false_file_hits": 0,
+    "latency_ms": 30698,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The commit renames the npm scope from @anthropics to @anthropic-ai and adds an interactive menu to /glm:setup. The npm scope rename is a breaking change with no migration path or version guidance for existing users. The setup command adds an interactive prompt that will silently break or hang in non-interactive (piped/headless) environments with no fallback. These are user-visible regressions that deserve a release note and a guard respectively.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is an unversioned breaking change for existing installations",
+        "body": "The package scope changes from @anthropics to @anthropic-ai across package.json, .claude-plugin/marketplace.json, and .claude-plugin/plugin.json. Existing users who installed under the old @anthropics scope will not be seamlessly updated; npm treats scoped packages as entirely different packages. There is no migration guide, no deprecation notice on the old scope, and no minimum version bump signaling a breaking change (the diff shows the version bump is only patch-level to 0.4.7). This can leave existing installations stale or broken with no clear remediation path.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 6,
+        "confidence": 0.78,
+        "recommendation": "Either (a) publish a deprecation release under the old @anthropics scope pointing users to @anthropic-ai, or (b) treat this as a major version bump and document the migration step clearly in CHANGELOG.md and release_card.md. Do not ship a scope rename as a patch-level change."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive setup menu has no guard for non-interactive/CI environments",
+        "body": "commands/setup.md now includes an interactive menu (select_option / user_input blocks) that prompts the user to choose between reconfiguring, showing current config, or exiting. If the command is run in a non-interactive context (piped input, CI, or an environment where Claude cannot present interactive prompts), the command will either hang waiting for input or silently fail with no useful error message. There is no explicit branching for 'if no interactive input available, print current config and exit' or similar degraded behavior.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.72,
+        "recommendation": "Add an early guard clause: detect or document that in non-interactive contexts the command should default to displaying the current configuration rather than blocking on user input. At minimum, add a note in the command preamble about non-interactive behavior."
+      }
+    ],
+    "next_steps": [
+      "Verify whether the old @anthropics package has been deprecated on npm and confirm a migration path exists before releasing.",
+      "Test the interactive setup command in a non-interactive/piped context and confirm expected degraded behavior.",
+      "Bump version to 0.5.0 if the scope rename is intentional, since it breaks the install contract for existing users."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The commit renames the npm scope from @anthropics to @anthropic-ai and adds an interactive menu to /glm:setup. The npm scope rename is a breaking change with no migration path or version guidance for existing users. The setup command adds an interactive prompt that will silently break or hang in non-interactive (piped/headless) environments with no fallback. These are user-visible regressions that deserve a release note and a guard respectively.\",\"findings\":[{\"severity\":\"high\",\"title\":\"npm scope rename is an unversioned breaking change for existing installations\",\"body\":\"The package scope changes from @anthropics to @anthropic-ai across package.json, .claude-plugin/marketplace.json, and .claude-plugin/plugin.json. Existing users who installed under the old @anthropics scope will not be seamlessly updated; npm treats scoped packages as entirely different packages. There is no migration guide, no deprecation notice on the old scope, and no minimum version bump signaling a breaking change (the diff shows the version bump is only patch-level to 0.4.7). This can leave existing installations stale or broken with no clear remediation path.\",\"file\":\"package.json\",\"line_start\":1,\"line_end\":6,\"confidence\":0.78,\"recommendation\":\"Either (a) publish a deprecation release under the old @anthropics scope pointing users to @anthropic-ai, or (b) treat this as a major version bump and document the migration step clearly in CHANGELOG.md and release_card.md. Do not ship a scope rename as a patch-level change.\"},{\"severity\":\"medium\",\"title\":\"Interactive setup menu has no guard for non-interactive/CI environments\",\"body\":\"commands/setup.md now includes an interactive menu (select_option / user_input blocks) that prompts the user to choose between reconfiguring, showing current config, or exiting. If the command is run in a non-interactive context (piped input, CI, or an environment where Claude cannot present interactive prompts), the command will either hang waiting for input or silently fail with no useful error message. There is no explicit branching for 'if no interactive input available, print current config and exit' or similar degraded behavior.\",\"file\":\"commands/setup.md\",\"line_start\":1,\"line_end\":19,\"confidence\":0.72,\"recommendation\":\"Add an early guard clause: detect or document that in non-interactive contexts the command should default to displaying the current configuration rather than blocking on user input. At minimum, add a note in the command preamble about non-interactive behavior.\"}],\"next_steps\":[\"Verify whether the old @anthropics package has been deprecated on npm and confirm a migration path exists before releasing.\",\"Test the interactive setup command in a non-interactive/piped context and confirm expected degraded behavior.\",\"Bump version to 0.5.0 if the scope rename is intentional, since it breaks the install contract for existing users.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:25:51.833Z"
+}

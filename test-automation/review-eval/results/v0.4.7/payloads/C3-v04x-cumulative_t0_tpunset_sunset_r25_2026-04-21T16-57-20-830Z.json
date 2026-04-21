@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 25
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 90865,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces 6600+ lines across 84 files, including a deleted module (process.mjs), a new retry subsystem, new error-dispatch logic, and significant state/job-tracking changes. The breadth alone is a shipping risk: several of these modules interact (retry feeds into glm-client, error classification feeds into retry, state feeds into job-control), and a misclassification or dangling dependency in any one of them can produce silent failures that the existing test surface may not catch. The deletion of process.mjs without verifiable evidence that no consumer imports it is the most concrete blocker.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Deleted process.mjs may leave dangling imports at runtime",
+        "body": "scripts/lib/process.mjs (67 lines) was entirely removed. If any remaining file in the codebase (or a user's cached/installed copy from v0.4.0–v0.4.3) imports from './process.mjs' or '../lib/process.mjs', the import will throw ERR_MODULE_NOT_FOUND at runtime. The check-imports.mjs script was modified (5 lines), suggesting awareness, but a static import check does not protect against: (a) dynamic imports, (b) user-installed older versions where the companion script is cached, or (c) symlinks/aliases. A deleted module in a shared lib/ directory is a classic silent-break vector.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.72,
+        "recommendation": "Run `grep -rn 'process\\.mjs' scripts/` against the full tree and confirm zero hits. Add a defensive re-export shim at the old path that throws a helpful deprecation error instead of an opaque MODULE_NOT_FOUND. Add a CI gate that greps for imports of deleted files."
+      },
+      {
+        "severity": "high",
+        "title": "New retry.mjs subsystem (203 lines) likely lacks thundering-herd and Retry-After protection",
+        "body": "A 203-line retry module was added as new code. Retry logic is one of the highest-defect-density areas in distributed systems. Common failures in hand-rolled retry: (1) no jitter on exponential backoff → all clients retry simultaneously against the same downstream; (2) not respecting Retry-After headers from HTTP 429/503 → aggressive clients get rate-limited harder; (3) retrying non-idempotent operations (POST/partial-writes) causing duplication. The companion glm-client.mjs was also heavily modified (155 lines), suggesting retry is wired directly into API calls. Without seeing the implementation, the risk profile is elevated by default for any new retry system of this size.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.65,
+        "recommendation": "Verify that: (1) backoff includes random jitter (e.g., full jitter or decorrelated jitter), (2) HTTP 429 responses parse Retry-After and respect it, (3) only idempotent HTTP methods are retried automatically, (4) a max-wall-clock-time cap exists in addition to max-attempts, (5) the retry.test.mjs (352 lines) covers concurrent-retry, zero-retry, and negative-retry edge cases."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error classification can silently swallow unknown errors",
+        "body": "A new 168-line error-dispatch module classifies errors from the BigModel API. The danger: any error that doesn't match a known classification pattern must still propagate correctly. A catch-all that returns a generic 'retryable: false' will silently drop information; a catch-all that returns 'retryable: true' will cause infinite retry loops on permanent errors. Error classification modules are a known silent-failure vector because they sit between the throw site and the caller, and callers trust the classification blindly.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.6,
+        "recommendation": "Audit the catch-all/default branch of the error classifier: (1) unknown errors must preserve the original error as a cause/wrapped error, (2) unknown errors must be logged at warn/error level, (3) the default classification should be conservative (non-retryable) to avoid amplifying failures, (4) the bigmodel-errors.test.mjs should have explicit test cases for unrecognised error shapes."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs + tracked-jobs.mjs concurrent modification risk with no locking",
+        "body": "state.mjs (32 lines changed) and tracked-jobs.mjs (78 lines changed) manage persistent job state, likely via filesystem reads/writes. If two companion processes run concurrently (e.g., two terminal windows), they can race on state file writes: read-modify-write without advisory locking → lost updates → jobs disappear or get duplicated. This is the classic 'two tabs open' failure mode for CLI tools with file-backed state.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.55,
+        "recommendation": "Verify that state.mjs uses atomic writes (write-to-temp + rename) and that tracked-jobs.mjs acquires a file lock (e.g., lockfile, flock, or pid-based mutex) before read-modify-write cycles. If no locking exists, document the single-process assumption or add advisory locking."
+      },
+      {
+        "severity": "low",
+        "title": "fs.mjs changes (44 lines) may have altered error semantics for callers",
+        "body": "scripts/lib/fs.mjs had 44 lines changed. If error handling was tightened (e.g., throw where it previously returned null/undefined), downstream callers in glm-client.mjs, state.mjs, or render.mjs may now encounter unhandled exceptions on edge cases like missing files, permission errors, or ENOSPC. Filesystem utility changes are easy to overlook in review because the happy path is identical.",
+        "file": "scripts/lib/fs.mjs",
+        "line_start": 1,
+        "line_end": 44,
+        "confidence": 0.45,
+        "recommendation": "Compare the exported function signatures and return types of fs.mjs between v0.4.0 and v0.4.6. Confirm that every caller handles both the old and new error shapes. Run the existing fs.test.mjs (92 lines) and verify it covers permission-denied, ENOENT, and ENOSPC scenarios."
+      }
+    ],
+    "next_steps": [
+      "Run `git diff v0.4.0..HEAD -- scripts/lib/process.mjs` to confirm full deletion, then `grep -rn 'process\\.mjs' scripts/` to verify no dangling imports exist anywhere in the tree.",
+      "Read scripts/lib/retry.mjs in full and verify jitter, Retry-After handling, idempotency guards, and wall-clock timeout caps. Cross-reference with retry.test.mjs coverage.",
+      "Read the default/catch-all branch of scripts/lib/bigmodel-errors.mjs and confirm unknown errors are not silently swallowed or classified as retryable without logging.",
+      "Inspect scripts/lib/state.mjs for atomicity guarantees: confirm write-to-temp-then-rename pattern and assess whether concurrent process access is safe.",
+      "Run the full test suite (`npm test` or equivalent) against the diff target and confirm zero failures before considering ship."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff introduces 6600+ lines across 84 files, including a deleted module (process.mjs), a new retry subsystem, new error-dispatch logic, and significant state/job-tracking changes. The breadth alone is a shipping risk: several of these modules interact (retry feeds into glm-client, error classification feeds into retry, state feeds into job-control), and a misclassification or dangling dependency in any one of them can produce silent failures that the existing test surface may not catch. The deletion of process.mjs without verifiable evidence that no consumer imports it is the most concrete blocker.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Deleted process.mjs may leave dangling imports at runtime\",\n      \"body\": \"scripts/lib/process.mjs (67 lines) was entirely removed. If any remaining file in the codebase (or a user's cached/installed copy from v0.4.0–v0.4.3) imports from './process.mjs' or '../lib/process.mjs', the import will throw ERR_MODULE_NOT_FOUND at runtime. The check-imports.mjs script was modified (5 lines), suggesting awareness, but a static import check does not protect against: (a) dynamic imports, (b) user-installed older versions where the companion script is cached, or (c) symlinks/aliases. A deleted module in a shared lib/ directory is a classic silent-break vector.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Run `grep -rn 'process\\\\.mjs' scripts/` against the full tree and confirm zero hits. Add a defensive re-export shim at the old path that throws a helpful deprecation error instead of an opaque MODULE_NOT_FOUND. Add a CI gate that greps for imports of deleted files.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"New retry.mjs subsystem (203 lines) likely lacks thundering-herd and Retry-After protection\",\n      \"body\": \"A 203-line retry module was added as new code. Retry logic is one of the highest-defect-density areas in distributed systems. Common failures in hand-rolled retry: (1) no jitter on exponential backoff → all clients retry simultaneously against the same downstream; (2) not respecting Retry-After headers from HTTP 429/503 → aggressive clients get rate-limited harder; (3) retrying non-idempotent operations (POST/partial-writes) causing duplication. The companion glm-client.mjs was also heavily modified (155 lines), suggesting retry is wired directly into API calls. Without seeing the implementation, the risk profile is elevated by default for any new retry system of this size.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Verify that: (1) backoff includes random jitter (e.g., full jitter or decorrelated jitter), (2) HTTP 429 responses parse Retry-After and respect it, (3) only idempotent HTTP methods are retried automatically, (4) a max-wall-clock-time cap exists in addition to max-attempts, (5) the retry.test.mjs (352 lines) covers concurrent-retry, zero-retry, and negative-retry edge cases.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"bigmodel-errors.mjs error classification can silently swallow unknown errors\",\n      \"body\": \"A new 168-line error-dispatch module classifies errors from the BigModel API. The danger: any error that doesn't match a known classification pattern must still propagate correctly. A catch-all that returns a generic 'retryable: false' will silently drop information; a catch-all that returns 'retryable: true' will cause infinite retry loops on permanent errors. Error classification modules are a known silent-failure vector because they sit between the throw site and the caller, and callers trust the classification blindly.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Audit the catch-all/default branch of the error classifier: (1) unknown errors must preserve the original error as a cause/wrapped error, (2) unknown errors must be logged at warn/error level, (3) the default classification should be conservative (non-retryable) to avoid amplifying failures, (4) the bigmodel-errors.test.mjs should have explicit test cases for unrecognised error shapes.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"state.mjs + tracked-jobs.mjs concurrent modification risk with no locking\",\n      \"body\": \"state.mjs (32 lines changed) and tracked-jobs.mjs (78 lines changed) manage persistent job state, likely via filesystem reads/writes. If two companion processes run concurrently (e.g., two terminal windows), they can race on state file writes: read-modify-write without advisory locking → lost updates → jobs disappear or get duplicated. This is the classic 'two tabs open' failure mode for CLI tools with file-backed state.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Verify that state.mjs uses atomic writes (write-to-temp + rename) and that tracked-jobs.mjs acquires a file lock (e.g., lockfile, flock, or pid-based mutex) before read-modify-write cycles. If no locking exists, document the single-process assumption or add advisory locking.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"fs.mjs changes (44 lines) may have altered error semantics for callers\",\n      \"body\": \"scripts/lib/fs.mjs had 44 lines changed. If error handling was tightened (e.g., throw where it previously returned null/undefined), downstream callers in glm-client.mjs, state.mjs, or render.mjs may now encounter unhandled exceptions on edge cases like missing files, permission errors, or ENOSPC. Filesystem utility changes are easy to overlook in review because the happy path is identical.\",\n      \"file\": \"scripts/lib/fs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 44,\n      \"confidence\": 0.45,\n      \"recommendation\": \"Compare the exported function signatures and return types of fs.mjs between v0.4.0 and v0.4.6. Confirm that every caller handles both the old and new error shapes. Run the existing fs.test.mjs (92 lines) and verify it covers permission-denied, ENOENT, and ENOSPC scenarios.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `git diff v0.4.0..HEAD -- scripts/lib/process.mjs` to confirm full deletion, then `grep -rn 'process\\\\.mjs' scripts/` to verify no dangling imports exist anywhere in the tree.\",\n    \"Read scripts/lib/retry.mjs in full and verify jitter, Retry-After handling, idempotency guards, and wall-clock timeout caps. Cross-reference with retry.test.mjs coverage.\",\n    \"Read the default/catch-all branch of scripts/lib/bigmodel-errors.mjs and confirm unknown errors are not silently swallowed or classified as retryable without logging.\",\n    \"Inspect scripts/lib/state.mjs for atomicity guarantees: confirm write-to-temp-then-rename pattern and assess whether concurrent process access is safe.\",\n    \"Run the full test suite (`npm test` or equivalent) against the diff target and confirm zero failures before considering ship.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:57:20.870Z"
+}

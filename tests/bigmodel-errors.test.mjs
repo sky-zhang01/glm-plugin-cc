@@ -2,9 +2,11 @@
  * Unit tests for scripts/lib/bigmodel-errors.mjs
  *
  * Guards the BigModel error-code dispatch table so:
- * - Known vendor codes 1301/1302/1304/1305/1308/1309/1310 map to the
- *   correct internal errorCode per official docs at
- *   https://docs.bigmodel.cn/cn/faq/api-code
+ * - Known vendor codes 500/1234/1301/1302/1304/1305/1308/1309/1310/
+ *   1311/1312/1313 map to the correct internal errorCode per official
+ *   docs at https://docs.bigmodel.cn/cn/faq/api-code. The v0.4.7
+ *   expanded-sweep empirically caught 500 + 1234 + 1312 + 1313 in the
+ *   wild that the v0.4.6 snapshot missed.
  * - Recovery semantic (retry: immediate | after-cooldown | never) is
  *   accurate for each code (drives retry.mjs decisions)
  * - User-visible messages reference the actual condition, not a
@@ -156,12 +158,17 @@ describe("BIG_MODEL_ERROR_CODES table integrity", () => {
     assert.equal(Object.isFrozen(BIG_MODEL_ERROR_CODES), true);
   });
 
-  it("covers the three retry semantics across the 7 known codes", () => {
+  it("covers the three retry semantics across the 12 known codes", () => {
     const retries = new Set(Object.values(BIG_MODEL_ERROR_CODES).map((e) => e.retry));
     assert.deepEqual(
       [...retries].sort(),
       ["after-cooldown", "immediate", "never"],
       "expected all three retry semantics represented"
+    );
+    assert.equal(
+      Object.keys(BIG_MODEL_ERROR_CODES).length,
+      12,
+      "v0.4.7 expanded the table from 7 to 12 codes after empirical sweep"
     );
   });
 
@@ -178,12 +185,84 @@ describe("BIG_MODEL_ERROR_CODES table integrity", () => {
     assert.equal(new Set(codes).size, codes.length, "errorCode collisions would break caller pattern-match");
   });
 
-  it("only immediate-retry codes exist for transient server conditions (1302, 1305)", () => {
+  it("immediate-retry codes: 500 + 1234 + 1302 + 1305 + 1312", () => {
+    // v0.4.7 expanded sweep added 500 (upstream internal), 1234 (upstream
+    // network hiccup), 1312 (model-specific overload). All transient +
+    // retryable with backoff.
     const immediateCodes = Object.entries(BIG_MODEL_ERROR_CODES)
       .filter(([, v]) => v.retry === "immediate")
       .map(([k]) => k)
       .sort();
-    assert.deepEqual(immediateCodes, ["1302", "1305"],
-      "only 1302 (account rate limit) and 1305 (shared pool) are transient per official docs");
+    assert.deepEqual(immediateCodes, ["1234", "1302", "1305", "1312", "500"],
+      "transient codes per official docs: 500 (upstream internal), 1234 (upstream network), " +
+      "1302 (account rate limit), 1305 (shared-pool overload), 1312 (model overload)");
+  });
+
+  it("never-retry codes: 1301 + 1304 + 1309 + 1311 + 1313", () => {
+    const neverCodes = Object.entries(BIG_MODEL_ERROR_CODES)
+      .filter(([, v]) => v.retry === "never")
+      .map(([k]) => k)
+      .sort();
+    assert.deepEqual(neverCodes, ["1301", "1304", "1309", "1311", "1313"],
+      "user-action-required codes: 1301 content blocked, 1304 daily quota, " +
+      "1309 plan expired, 1311 model not in plan, 1313 fair-use policy trip");
+  });
+
+  it("after-cooldown codes: 1308 + 1310", () => {
+    const cooldownCodes = Object.entries(BIG_MODEL_ERROR_CODES)
+      .filter(([, v]) => v.retry === "after-cooldown")
+      .map(([k]) => k)
+      .sort();
+    assert.deepEqual(cooldownCodes, ["1308", "1310"],
+      "reset-window codes: 1308 (plan quota, 5h/token cap), 1310 (weekly/monthly cap)");
+  });
+});
+
+describe("classifyBigModelError — v0.4.7 expanded codes", () => {
+  it("500 UPSTREAM_INTERNAL_ERROR retry=immediate", () => {
+    const result = classifyBigModelError("500", JSON.stringify({ error: { code: "500", message: "内部错误" } }));
+    assert.equal(result.errorCode, "UPSTREAM_INTERNAL_ERROR");
+    assert.equal(result.retry, "immediate");
+    assert.equal(result.vendorCode, "500");
+    assert.match(result.message, /upstream internal/i);
+  });
+
+  it("1234 UPSTREAM_NETWORK_ERROR retry=immediate", () => {
+    const result = classifyBigModelError(
+      "1234",
+      JSON.stringify({ error: { code: "1234", message: "网络错误，错误id:xyz123" } })
+    );
+    assert.equal(result.errorCode, "UPSTREAM_NETWORK_ERROR");
+    assert.equal(result.retry, "immediate");
+    assert.match(result.message, /network hiccup/i);
+  });
+
+  it("1311 MODEL_NOT_IN_PLAN retry=never references model in message", () => {
+    const result = classifyBigModelError(
+      "1311",
+      JSON.stringify({ error: { code: "1311" } }),
+      { model: "glm-5.1" }
+    );
+    assert.equal(result.errorCode, "MODEL_NOT_IN_PLAN");
+    assert.equal(result.retry, "never");
+    assert.match(result.message, /glm-5\.1/);
+  });
+
+  it("1312 MODEL_OVERLOADED retry=immediate suggests alternative model", () => {
+    const result = classifyBigModelError(
+      "1312",
+      JSON.stringify({ error: { code: "1312" } }),
+      { model: "glm-5.1" }
+    );
+    assert.equal(result.errorCode, "MODEL_OVERLOADED");
+    assert.equal(result.retry, "immediate");
+    assert.match(result.message, /glm-4\.6|alternative model/i);
+  });
+
+  it("1313 FAIR_USE_LIMIT retry=never references personal center", () => {
+    const result = classifyBigModelError("1313", JSON.stringify({ error: { code: "1313" } }));
+    assert.equal(result.errorCode, "FAIR_USE_LIMIT");
+    assert.equal(result.retry, "never");
+    assert.match(result.message, /fair-use|personal center|usercenter/i);
   });
 });

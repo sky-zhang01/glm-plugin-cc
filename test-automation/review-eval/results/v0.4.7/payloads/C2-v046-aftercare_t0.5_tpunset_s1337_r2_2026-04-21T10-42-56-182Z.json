@@ -1,0 +1,68 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": 1337,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 45694,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 aftercare branch adds retry logic, error classification, and CI hardening. While well-structured, there are material concerns: the retry module's maxAttempts validation allows edge-case off-by-one behavior, the GLM client's error integration has a potential unhandled path for non-standard error shapes, and the pre-push hook lacks error handling for missing dependencies. These are not theoretical—under real CI or contributor push conditions they can cause silent wrong behavior or confusing failures.",
+    "findings": [
+      {
+        "severity": "medium",
+        "title": "retry.mjs maxAttempts=0 allows infinite-looking loop to proceed before guard fires",
+        "body": "The retry module validates maxAttempts after the initial attempt in the retry loop, but if maxAttempts is set to 0, the do-while loop will execute at least one attempt, and then the guard `if (attempt >= maxAttempts)` immediately triggers, causing a misleading error about exhausting retries when the caller's intent was 'do not retry'. The validation at function entry should catch maxAttempts < 1 explicitly. A caller passing maxAttempts=0 (perhaps from a config default or dynamic calculation) gets one attempt and then a confusing retry-exhausted error instead of an upfront parameter error.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 50,
+        "confidence": 0.72,
+        "recommendation": "Add an upfront guard at the top of the withRetry function: if (maxAttempts < 1) throw new RangeError('maxAttempts must be >= 1'). This makes misuse fail fast and clearly."
+      },
+      {
+        "severity": "medium",
+        "title": "pre-push hook will fail silently or cryptically if scripts/lib/ dependencies are missing",
+        "body": "The pre-push hook sources scripts/hooks/pre-push which likely invokes node scripts that import from scripts/lib/retry.mjs or scripts/lib/bigmodel-errors.mjs. If a contributor clones fresh and hasn't run install, or if the hook runs in an environment where the ESM imports fail (e.g., Node version mismatch), the hook will emit a raw module error rather than a user-friendly message. Unlike the CI script which has explicit checks, the hook has no dependency-existence or Node-version guard. This can block pushes with an opaque stack trace, wasting contributor time.",
+        "file": "scripts/hooks/pre-push",
+        "line_start": 1,
+        "line_end": 22,
+        "confidence": 0.65,
+        "recommendation": "Add a guard at the top of the pre-push hook to check that node is available and that key scripts exist before executing. Emit a clear message like 'Pre-push checks require Node.js >= 18. Skipping checks.' if dependencies are missing, or exit non-zero with actionable guidance."
+      },
+      {
+        "severity": "low",
+        "title": "classifyError returns generic classification for errors with numeric code property but no status",
+        "body": "The bigmodel-errors classifyError function checks for known HTTP status codes (400, 401, 403, 429, 500, 502, 503) on error.response.status. If an upstream library throws an error with error.code set to a numeric value like 'ECONNRESET' or a string like 'ETIMEDOUT' that doesn't map to the status-based classification, the function falls through to the default catch-all 'UNKNOWN'. This means transient network errors (DNS failure, socket hang-up, timeout) are classified as UNKNOWN and will use whatever the default retry policy is for unknown errors—potentially not retrying when they should be, or retrying when they shouldn't. Under real network instability, this misclassification could cause user-visible failures that look like API errors rather than transient issues.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 80,
+        "confidence": 0.6,
+        "recommendation": "Add explicit handling for common Node.js network error codes (ECONNRESET, ETIMEDOUT, ENOTFOUND, EAI_AGAIN) by checking error.code before falling through to UNKNOWN. Classify these as TRANSIENT with appropriate retry eligibility."
+      }
+    ],
+    "next_steps": [
+      "Run the existing test suite (tests/retry.test.mjs, tests/bigmodel-errors.test.mjs) and confirm all pass with current Node LTS.",
+      "Add a unit test for withRetry called with maxAttempts=0 and maxAttempts=-1 to confirm the behavior is clearly an error, not a silent wrong-attempt count.",
+      "Verify the pre-push hook behavior in a clean clone environment where node_modules may not be installed yet."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.6 aftercare branch adds retry logic, error classification, and CI hardening. While well-structured, there are material concerns: the retry module's maxAttempts validation allows edge-case off-by-one behavior, the GLM client's error integration has a potential unhandled path for non-standard error shapes, and the pre-push hook lacks error handling for missing dependencies. These are not theoretical—under real CI or contributor push conditions they can cause silent wrong behavior or confusing failures.\",\"findings\":[{\"severity\":\"medium\",\"title\":\"retry.mjs maxAttempts=0 allows infinite-looking loop to proceed before guard fires\",\"body\":\"The retry module validates maxAttempts after the initial attempt in the retry loop, but if maxAttempts is set to 0, the do-while loop will execute at least one attempt, and then the guard `if (attempt >= maxAttempts)` immediately triggers, causing a misleading error about exhausting retries when the caller's intent was 'do not retry'. The validation at function entry should catch maxAttempts < 1 explicitly. A caller passing maxAttempts=0 (perhaps from a config default or dynamic calculation) gets one attempt and then a confusing retry-exhausted error instead of an upfront parameter error.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":50,\"confidence\":0.72,\"recommendation\":\"Add an upfront guard at the top of the withRetry function: if (maxAttempts < 1) throw new RangeError('maxAttempts must be >= 1'). This makes misuse fail fast and clearly.\"},{\"severity\":\"medium\",\"title\":\"pre-push hook will fail silently or cryptically if scripts/lib/ dependencies are missing\",\"body\":\"The pre-push hook sources scripts/hooks/pre-push which likely invokes node scripts that import from scripts/lib/retry.mjs or scripts/lib/bigmodel-errors.mjs. If a contributor clones fresh and hasn't run install, or if the hook runs in an environment where the ESM imports fail (e.g., Node version mismatch), the hook will emit a raw module error rather than a user-friendly message. Unlike the CI script which has explicit checks, the hook has no dependency-existence or Node-version guard. This can block pushes with an opaque stack trace, wasting contributor time.\",\"file\":\"scripts/hooks/pre-push\",\"line_start\":1,\"line_end\":22,\"confidence\":0.65,\"recommendation\":\"Add a guard at the top of the pre-push hook to check that node is available and that key scripts exist before executing. Emit a clear message like 'Pre-push checks require Node.js >= 18. Skipping checks.' if dependencies are missing, or exit non-zero with actionable guidance.\"},{\"severity\":\"low\",\"title\":\"classifyError returns generic classification for errors with numeric code property but no status\",\"body\":\"The bigmodel-errors classifyError function checks for known HTTP status codes (400, 401, 403, 429, 500, 502, 503) on error.response.status. If an upstream library throws an error with error.code set to a numeric value like 'ECONNRESET' or a string like 'ETIMEDOUT' that doesn't map to the status-based classification, the function falls through to the default catch-all 'UNKNOWN'. This means transient network errors (DNS failure, socket hang-up, timeout) are classified as UNKNOWN and will use whatever the default retry policy is for unknown errors—potentially not retrying when they should be, or retrying when they shouldn't. Under real network instability, this misclassification could cause user-visible failures that look like API errors rather than transient issues.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":80,\"confidence\":0.6,\"recommendation\":\"Add explicit handling for common Node.js network error codes (ECONNRESET, ETIMEDOUT, ENOTFOUND, EAI_AGAIN) by checking error.code before falling through to UNKNOWN. Classify these as TRANSIENT with appropriate retry eligibility.\"}],\"next_steps\":[\"Run the existing test suite (tests/retry.test.mjs, tests/bigmodel-errors.test.mjs) and confirm all pass with current Node LTS.\",\"Add a unit test for withRetry called with maxAttempts=0 and maxAttempts=-1 to confirm the behavior is clearly an error, not a silent wrong-attempt count.\",\"Verify the pre-push hook behavior in a clean clone environment where node_modules may not be installed yet.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:42:56.209Z"
+}

@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 18
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 121757,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces 6,600+ lines across 84 files with several systemic risks: a deleted module (process.mjs) that may leave dangling imports, 203 lines of new retry logic in retry.mjs that could replay non-idempotent API calls, and 168 lines of new error classification in bigmodel-errors.mjs that could silently swallow failures. The user focus on v0.4.7 is misaligned with the actual latest tag (v0.4.6), suggesting unvalidated changes may exist between HEAD and the user's expected baseline. These risks are not mitigated by the existing test coverage.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Deleted scripts/lib/process.mjs may leave dangling imports causing runtime crashes",
+        "body": "The diff removes scripts/lib/process.mjs entirely (−67 lines). Multiple other modules were modified in the same diff (glm-companion.mjs ±139, render.mjs ±79, state.mjs ±32, tracked-jobs.mjs ±78). If any of these or their transitive dependents still contain static or dynamic imports to process.mjs, the runtime will throw MODULE_NOT_FOUND on invocation. This is a classic deletion hazard in large-batch diffs where import refactoring is assumed complete but not mechanically verified. The impact is an unrecoverable crash at startup or on first code-path exercise.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.8,
+        "recommendation": "Run `grep -r \"process\\.mjs\" scripts/` and `grep -r \"from.*['\\\"].*process\" scripts/` against the full tree to confirm zero remaining references. Add a CI gate that runs `node --check` or a smoke import on all entry points."
+      },
+      {
+        "severity": "high",
+        "title": "New retry.mjs (203 lines) may replay non-idempotent GLM API calls causing duplication",
+        "body": "A new 203-line retry module is introduced, likely consumed by the significantly modified glm-client.mjs (±155 lines). If the retry logic wraps POST/PUT/PATCH requests to the GLM/BigModel API without idempotency keys or deduplication guards, transient failures will cause duplicate job submissions, duplicate reviews, or duplicated state mutations. The tracked-jobs.mjs changes (±78 lines) suggest jobs are being tracked, but retrying a job creation request that actually succeeded on the server (network timeout before response) would create orphan or duplicate tracked jobs. This is a data integrity risk that is silent under normal operation and only manifests under network stress.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.7,
+        "recommendation": "Audit retry.mjs to confirm: (1) retries are limited to idempotent HTTP methods or guarded by idempotency keys, (2) there is a maximum retry budget with exponential backoff + jitter, (3) job-creating calls are not retried without deduplication, (4) the retry wrapper is not applied globally to all glm-client methods. Add integration tests that simulate network timeouts mid-request."
+      },
+      {
+        "severity": "medium",
+        "title": "New bigmodel-errors.mjs error classification may silently swallow unclassified errors",
+        "body": "168 lines of new error dispatch/classification logic for BigModel API errors. If the error taxonomy does not cover all response codes or error shapes the API can return, unclassified errors will fall through to a default handler. The concern is that the default handler may log-and-continue rather than propagate, turning hard failures into silent degradation. This is especially dangerous if the error dispatch feeds into retry.mjs — an unclassified permanent error (e.g., 403 Forbidden due to credential rotation) could be retried indefinitely or silently dropped.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.65,
+        "recommendation": "Verify that the error dispatch has a strict default branch that throws/propagates unknown errors rather than swallowing them. Confirm that non-retryable status codes (4xx) are explicitly excluded from retry. Add a test case for an unrecognized error shape to ensure it is not silently handled."
+      },
+      {
+        "severity": "medium",
+        "title": "7 new CI shell scripts have no corresponding automated tests",
+        "body": "scripts/ci/ adds 7 new shell scripts (check-ai-quality-gate.sh, check-all.sh, check-changelog-updated.sh, check-coauthored-by.sh, check-cross-ai-review.mjs, check-no-local-paths.sh, check-plugin-manifest.sh, check-release-ready.sh) totaling hundreds of lines. None have corresponding test files in tests/. Shell scripts are notoriously fragile to edge cases (special characters in filenames, missing tools, unexpected exit codes). A false-positive or false-negative in check-no-local-paths.sh could leak internal paths in a release or block a legitimate PR. A bug in check-changelog-updated.sh could allow unversioned changes to ship.",
+        "file": "scripts/ci/check-no-local-paths.sh",
+        "line_start": 1,
+        "line_end": 97,
+        "confidence": 0.7,
+        "recommendation": "Add at minimum contract tests for each CI script: invoke with known-good and known-bad inputs and assert exit codes. Prioritize check-no-local-paths.sh (path leakage risk) and check-changelog-updated.sh (release integrity risk)."
+      }
+    ],
+    "next_steps": [
+      "Run `grep -r 'process\\.mjs\\|from.*process' scripts/` to verify no dangling imports after deletion",
+      "Audit retry.mjs for idempotency: confirm POST/PUT calls are not retried without guards",
+      "Verify bigmodel-errors.mjs default branch propagates unknown errors rather than swallowing them",
+      "Add test contracts for the 7 new CI shell scripts, prioritizing path-leak and changelog guards",
+      "Confirm the v0.4.7 baseline the user expects vs. the v0.4.6 tag at HEAD — clarify if there are untagged commits that need validation"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 diff introduces 6,600+ lines across 84 files with several systemic risks: a deleted module (process.mjs) that may leave dangling imports, 203 lines of new retry logic in retry.mjs that could replay non-idempotent API calls, and 168 lines of new error classification in bigmodel-errors.mjs that could silently swallow failures. The user focus on v0.4.7 is misaligned with the actual latest tag (v0.4.6), suggesting unvalidated changes may exist between HEAD and the user's expected baseline. These risks are not mitigated by the existing test coverage.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Deleted scripts/lib/process.mjs may leave dangling imports causing runtime crashes\",\"body\":\"The diff removes scripts/lib/process.mjs entirely (−67 lines). Multiple other modules were modified in the same diff (glm-companion.mjs ±139, render.mjs ±79, state.mjs ±32, tracked-jobs.mjs ±78). If any of these or their transitive dependents still contain static or dynamic imports to process.mjs, the runtime will throw MODULE_NOT_FOUND on invocation. This is a classic deletion hazard in large-batch diffs where import refactoring is assumed complete but not mechanically verified. The impact is an unrecoverable crash at startup or on first code-path exercise.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":67,\"confidence\":0.8,\"recommendation\":\"Run `grep -r \\\"process\\\\.mjs\\\" scripts/` and `grep -r \\\"from.*['\\\\\\\"].*process\\\" scripts/` against the full tree to confirm zero remaining references. Add a CI gate that runs `node --check` or a smoke import on all entry points.\"},{\"severity\":\"high\",\"title\":\"New retry.mjs (203 lines) may replay non-idempotent GLM API calls causing duplication\",\"body\":\"A new 203-line retry module is introduced, likely consumed by the significantly modified glm-client.mjs (±155 lines). If the retry logic wraps POST/PUT/PATCH requests to the GLM/BigModel API without idempotency keys or deduplication guards, transient failures will cause duplicate job submissions, duplicate reviews, or duplicated state mutations. The tracked-jobs.mjs changes (±78 lines) suggest jobs are being tracked, but retrying a job creation request that actually succeeded on the server (network timeout before response) would create orphan or duplicate tracked jobs. This is a data integrity risk that is silent under normal operation and only manifests under network stress.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.7,\"recommendation\":\"Audit retry.mjs to confirm: (1) retries are limited to idempotent HTTP methods or guarded by idempotency keys, (2) there is a maximum retry budget with exponential backoff + jitter, (3) job-creating calls are not retried without deduplication, (4) the retry wrapper is not applied globally to all glm-client methods. Add integration tests that simulate network timeouts mid-request.\"},{\"severity\":\"medium\",\"title\":\"New bigmodel-errors.mjs error classification may silently swallow unclassified errors\",\"body\":\"168 lines of new error dispatch/classification logic for BigModel API errors. If the error taxonomy does not cover all response codes or error shapes the API can return, unclassified errors will fall through to a default handler. The concern is that the default handler may log-and-continue rather than propagate, turning hard failures into silent degradation. This is especially dangerous if the error dispatch feeds into retry.mjs — an unclassified permanent error (e.g., 403 Forbidden due to credential rotation) could be retried indefinitely or silently dropped.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.65,\"recommendation\":\"Verify that the error dispatch has a strict default branch that throws/propagates unknown errors rather than swallowing them. Confirm that non-retryable status codes (4xx) are explicitly excluded from retry. Add a test case for an unrecognized error shape to ensure it is not silently handled.\"},{\"severity\":\"medium\",\"title\":\"7 new CI shell scripts have no corresponding automated tests\",\"body\":\"scripts/ci/ adds 7 new shell scripts (check-ai-quality-gate.sh, check-all.sh, check-changelog-updated.sh, check-coauthored-by.sh, check-cross-ai-review.mjs, check-no-local-paths.sh, check-plugin-manifest.sh, check-release-ready.sh) totaling hundreds of lines. None have corresponding test files in tests/. Shell scripts are notoriously fragile to edge cases (special characters in filenames, missing tools, unexpected exit codes). A false-positive or false-negative in check-no-local-paths.sh could leak internal paths in a release or block a legitimate PR. A bug in check-changelog-updated.sh could allow unversioned changes to ship.\",\"file\":\"scripts/ci/check-no-local-paths.sh\",\"line_start\":1,\"line_end\":97,\"confidence\":0.7,\"recommendation\":\"Add at minimum contract tests for each CI script: invoke with known-good and known-bad inputs and assert exit codes. Prioritize check-no-local-paths.sh (path leakage risk) and check-changelog-updated.sh (release integrity risk).\"}],\"next_steps\":[\"Run `grep -r 'process\\\\.mjs\\\\|from.*process' scripts/` to verify no dangling imports after deletion\",\"Audit retry.mjs for idempotency: confirm POST/PUT calls are not retried without guards\",\"Verify bigmodel-errors.mjs default branch propagates unknown errors rather than swallowing them\",\"Add test contracts for the 7 new CI shell scripts, prioritizing path-leak and changelog guards\",\"Confirm the v0.4.7 baseline the user expects vs. the v0.4.6 tag at HEAD — clarify if there are untagged commits that need validation\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T16:48:55.625Z"
+}

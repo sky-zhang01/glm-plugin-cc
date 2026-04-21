@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 10
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 60321,
+    "error_code": ""
+  },
+  "parsed": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces a retry/backoff system, BigModel error dispatch, and job-tracking changes with several material risks: (1) the retry module uses wall-clock Date.now() comparisons that can break under clock skew or suspension, (2) error-classification logic in bigmodel-errors.mjs can silently misclassify unexpected error shapes, causing retry to give up too early or loop, and (3) state.mjs and tracked-jobs.mjs changes lack atomicity guarantees for concurrent job state mutations. These are the kinds of silent failures that pass happy-path testing but bite in production under load or transient faults.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry backoff uses Date.now() wall-clock for delay decisions, vulnerable to clock skew and system suspend",
+        "body": "The retry.mjs module (203 lines added) computes backoff delays and elapsed timeouts using Date.now() wall-clock timestamps. If the process is suspended (e.g., laptop sleep, container preemption) or NTP adjusts the clock backward, the retry logic can either (a) skip retries entirely because it believes the deadline has passed, or (b) retry far too aggressively because it believes no time has elapsed. This is a silent failure mode — the caller gets a 'timed out' result with no indication the clock was unreliable. Under the stated focus on sampling-sweep runs, long-running batch jobs are exactly the scenario where system suspend is most likely.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Use monotonic time (performance.now() or process.hrtime.bigint()) for all elapsed/delay calculations. Reserve Date.now() only for human-readable logging. Add a defensive clamp so a single sleep iteration never exceeds the configured max backoff even if wall-clock jumps."
+      },
+      {
+        "severity": "high",
+        "title": "bigmodel-errors.mjs error classification silently returns 'no-retry' for unexpected error shapes, causing premature job failure",
+        "body": "The new bigmodel-errors.mjs module (168 lines) classifies API errors into retryable vs non-retryable categories. If the upstream BigModel API returns an unexpected error structure (e.g., a new error code, a changed response schema, or a network-layer error that doesn't match the expected shape), the classifier falls through to a default 'non-retryable' classification. This means any novel or evolving API error will cause the entire job to fail immediately instead of retrying. For a sampling-sweep workload, this would silently drop runs and produce incomplete results without any clear signal that the failures were classification errors rather than genuine terminal failures.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.78,
+        "recommendation": "Invert the default: classify unrecognized error shapes as retryable with a bounded attempt count, not as terminal. Log the unrecognized error structure at warning level so operators can identify new error types. Add a test case for a completely unexpected error shape to verify the fallback behavior."
+      },
+      {
+        "severity": "medium",
+        "title": "Tracked jobs state mutations lack atomicity — concurrent status updates can silently lose state",
+        "body": "The tracked-jobs.mjs module (78 lines changed) and state.mjs (32 lines changed) manage job lifecycle state in what appears to be file-based storage. Multiple concurrent job completions or status updates can race: two processes reading the same state file, both modifying, and both writing back. The later write silently overwrites the earlier one. In a sampling-sweep with parallel runs, this could cause job results to be lost or jobs to appear stuck in a 'running' state when they have actually completed.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.65,
+        "recommendation": "Use atomic file write (write-to-temp + rename) for state updates. Add a read-modify-write lock or at minimum an optimistic concurrency check (compare mtime/contents before write). If file locking is too heavy, at least log when a write would overwrite a different state than expected so the condition is observable."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs retry integration may double-fire requests on transient network errors with partial response",
+        "body": "The glm-client.mjs module (155 lines changed) integrates with the new retry module. If a request is sent successfully but the response is interrupted mid-stream (e.g., TCP reset after server received the request), the retry layer will re-send the full request. For non-idempotent operations (e.g., submitting a batch of prompts that the server already partially processed), this causes duplicate work. The diff shows no idempotency key or request dedup mechanism.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.58,
+        "recommendation": "Classify which API operations are idempotent vs not. For non-idempotent operations, either (a) do not retry on partial-response errors, or (b) add an idempotency key header so the server can deduplicate. At minimum, document which retry scenarios are safe and which carry duplication risk."
+      },
+      {
+        "severity": "low",
+        "title": "No integration test for the retry + bigmodel-errors + glm-client interaction under simulated failures",
+        "body": "While there are unit tests for retry.mjs (352 lines) and bigmodel-errors.test.mjs (189 lines), the diff does not include an integration test that wires all three modules together and simulates a realistic failure sequence (e.g., rate limit → server error → success). The sampling-sweep focus area depends on this stack working correctly end-to-end under fault conditions. Unit tests on isolated modules cannot catch interaction bugs like the retry module passing an unexpected error shape to the classifier.",
+        "file": "tests/retry.test.mjs",
+        "line_start": 1,
+        "line_end": 352,
+        "confidence": 0.55,
+        "recommendation": "Add at least one integration test that mocks the HTTP layer, sends a multi-step failure sequence (rate limit, 500, timeout, then success), and verifies the final result, retry count, and backoff behavior. This is the cheapest way to gain confidence in the stack before a sweep run."
+      }
+    ],
+    "next_steps": [
+      "Audit retry.mjs for Date.now() vs monotonic time usage and replace all delay/elapsed calculations with performance.now() or hrtime.",
+      "Change the default error classification in bigmodel-errors.mjs to retryable for unrecognized shapes and add logging.",
+      "Verify tracked-jobs.mjs uses atomic writes for state file updates under concurrent access.",
+      "Add an integration test covering retry + error classification + client under a simulated multi-failure sequence before running the v0.4.7 sampling-sweep."
+    ]
+  },
+  "rawOutputHead": "{\n  \"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff introduces a retry/backoff system, BigModel error dispatch, and job-tracking changes with several material risks: (1) the retry module uses wall-clock Date.now() comparisons that can break under clock skew or suspension, (2) error-classification logic in bigmodel-errors.mjs can silently misclassify unexpected error shapes, causing retry to give up too early or loop, and (3) state.mjs and tracked-jobs.mjs changes lack atomicity guarantees for concurrent job state mutations. These are the kinds of silent failures that pass happy-path testing but bite in production under load or transient faults.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Retry backoff uses Date.now() wall-clock for delay decisions, vulnerable to clock skew and system suspend\",\n      \"body\": \"The retry.mjs module (203 lines added) computes backoff delays and elapsed timeouts using Date.now() wall-clock timestamps. If the process is suspended (e.g., laptop sleep, container preemption) or NTP adjusts the clock backward, the retry logic can either (a) skip retries entirely because it believes the deadline has passed, or (b) retry far too aggressively because it believes no time has elapsed. This is a silent failure mode — the caller gets a 'timed out' result with no indication the clock was unreliable. Under the stated focus on sampling-sweep runs, long-running batch jobs are exactly the scenario where system suspend is most likely.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Use monotonic time (performance.now() or process.hrtime.bigint()) for all elapsed/delay calculations. Reserve Date.now() only for human-readable logging. Add a defensive clamp so a single sleep iteration never exceeds the configured max backoff even if wall-clock jumps.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"bigmodel-errors.mjs error classification silently returns 'no-retry' for unexpected error shapes, causing premature job failure\",\n      \"body\": \"The new bigmodel-errors.mjs module (168 lines) classifies API errors into retryable vs non-retryable categories. If the upstream BigModel API returns an unexpected error structure (e.g., a new error code, a changed response schema, or a network-layer error that doesn't match the expected shape), the classifier falls through to a default 'non-retryable' classification. This means any novel or evolving API error will cause the entire job to fail immediately instead of retrying. For a sampling-sweep workload, this would silently drop runs and produce incomplete results without any clear signal that the failures were classification errors rather than genuine terminal failures.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Invert the default: classify unrecognized error shapes as retryable with a bounded attempt count, not as terminal. Log the unrecognized error structure at warning level so operators can identify new error types. Add a test case for a completely unexpected error shape to verify the fallback behavior.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Tracked jobs state mutations lack atomicity — concurrent status updates can silently lose state\",\n      \"body\": \"The tracked-jobs.mjs module (78 lines changed) and state.mjs (32 lines changed) manage job lifecycle state in what appears to be file-based storage. Multiple concurrent job completions or status updates can race: two processes reading the same state file, both modifying, and both writing back. The later write silently overwrites the earlier one. In a sampling-sweep with parallel runs, this could cause job results to be lost or jobs to appear stuck in a 'running' state when they have actually completed.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Use atomic file write (write-to-temp + rename) for state updates. Add a read-modify-write lock or at minimum an optimistic concurrency check (compare mtime/contents before write). If file locking is too heavy, at least log when a write would overwrite a different state than expected so the condition is observable.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client.mjs retry integration may double-fire requests on transient network errors with partial response\",\n      \"body\": \"The glm-client.mjs module (155 lines changed) integrates with the new retry module. If a request is sent successfully but the response is interrupted mid-stream (e.g., TCP reset after server received the request), the retry layer will re-send the full request. For non-idempotent operations (e.g., submitting a batch of prompts that the server already partially processed), this causes duplicate work. The diff shows no idempotency key or request dedup mechanism.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.58,\n      \"recommendation\": \"Classify which API operations are idempotent vs not. For non-idempotent operations, either (a) do not retry on partial-response errors, or (b) add an idempotency key header so the server can deduplicate. At minimum, document which retry scenarios are safe and which carry duplication risk.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"No integration test for the retry + bigmodel-errors + glm-client interaction under simulated failures\",\n      \"body\": \"While there are unit tests for retry.mjs (352 lines) and bigmodel-errors.test.mjs (189 lines), the diff does not include an integration test that wires all three modules together and simulates a realistic failure sequence (e.g., rate limit → server error → success). The sampling-sweep focus area depends on this stack working correctly end-to-end under fault conditions. Unit tests on isolated modules cannot catch interaction bugs like the retry module passing an unexpected error shape to the classifier.\",\n      \"file\": \"tests/retry.test.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 352,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Add at least one integration test that mocks the HTTP layer, sends a multi-step failure sequence (rate limit, 500, timeout, then success), and verifies the final result, retry count, and backoff behavior. This is the cheapest way to gain confidence in the stack before a sweep run.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Audit retry.mjs for Date.now() vs monotonic time usage and replace all delay/elapsed calculations with performance.now() or hrtime.\",\n    \"Change the default error classification in bigmodel-errors.mjs to retryable for unrecognized shapes and add logging.\",\n    \"Verify tracked-jobs.mjs uses atomic writes for state file updates under concurrent access.\",\n    \"Add an integration test covering retry + error classification + client under a simulated multi-failure sequence before running the v0.4.7 sampling-sweep.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:41:04.342Z"
+}

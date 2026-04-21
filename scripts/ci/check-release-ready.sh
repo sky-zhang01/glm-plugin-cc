@@ -6,13 +6,19 @@
 # but locally + synchronously, so errors surface BEFORE `git push <tag>`
 # rather than as a post-hoc CI red mark.
 #
-# Usage: bash scripts/ci/check-release-ready.sh vX.Y.Z
+# Usage: bash scripts/ci/check-release-ready.sh vX.Y.Z[-<prerelease>]
+#
+# Accepts semver prerelease suffixes (e.g. v0.4.7-beta1, v1.0.0-rc.2)
+# per the SemVer 2.0 prerelease grammar. Prereleases intentionally
+# use the same gate — they still need a matching CHANGELOG section,
+# manifest parity, and a READY release_card. The caller is responsible
+# for NOT marking the Gitea/GitHub release as Latest.
 #
 # Exits non-zero (with a specific message) if:
-#   1. tag argument missing or malformed (expected vX.Y.Z)
+#   1. tag argument missing or malformed (expected vX.Y.Z or vX.Y.Z-<prerelease>)
 #   2. package.json version != tag version
 #   3. plugin manifest parity check fails (re-uses check-plugin-manifest.sh)
-#   4. CHANGELOG.md has no `## vX.Y.Z` section
+#   4. CHANGELOG.md has no `## vX.Y.Z[-<prerelease>]` section
 #   5. release_card.md missing OR not `Status: READY`
 #
 # Intended invocation: called manually by the release driver immediately
@@ -27,12 +33,17 @@ cd "$REPO_ROOT"
 
 TAG="${1:-}"
 if [[ -z "$TAG" ]]; then
-  echo "✗ Usage: bash scripts/ci/check-release-ready.sh vX.Y.Z" >&2
+  echo "✗ Usage: bash scripts/ci/check-release-ready.sh vX.Y.Z[-<prerelease>]" >&2
   exit 2
 fi
 
-if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "✗ Tag '$TAG' does not match vX.Y.Z pattern." >&2
+# SemVer 2.0: prerelease is a dot-separated series of alphanumerics and
+# hyphens following a `-`. We use a slightly loose but practical match:
+# [A-Za-z0-9.-]+ after a single `-`. Stricter validation would reject
+# things like `--` or empty prerelease segments, but the downstream
+# `grep` and version-parity checks will fail-fast on those anyway.
+if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]; then
+  echo "✗ Tag '$TAG' does not match vX.Y.Z or vX.Y.Z-<prerelease> pattern." >&2
   exit 2
 fi
 

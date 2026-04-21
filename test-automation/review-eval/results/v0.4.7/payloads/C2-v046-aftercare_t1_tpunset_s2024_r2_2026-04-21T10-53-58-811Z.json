@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 1,
+    "topP": null,
+    "seed": 2024,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 66095,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 change introduces retry/backoff logic and error dispatch for BigModel API calls, plus a pre-push hook and CI check. The retry module has several material defects: the cancellation mechanism uses a stale-closure-prone pattern, the jitter implementation can produce negative values on edge cases, and the test suite for retry.mjs relies on `setTimeout` mocking that doesn't actually validate real backoff timing. The pre-push hook executes arbitrary shell scripts without exit-code isolation, and the CI check-release-ready.sh script has an incomplete guard that could silently pass on missing configuration. These are not showstoppers but represent real failure modes that should be addressed before a v0.4.7 sweep.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs cancel flag uses closure over mutable let, vulnerable to stale reads in concurrent async paths",
+        "body": "The `retry` function in retry.mjs uses a `let cancelled = false` closure variable with a `cancel()` function returned to the caller. If multiple retry chains are started and one is cancelled, there is no way for a caller to accidentally cancel the wrong chain since each gets its own closure. However, the `cancelled` flag is only checked at the top of the retry loop — if `attempt()` is already in-flight (the async operation is running), setting `cancelled = true` will NOT abort the in-flight operation. This is documented behavior but creates a semantic trap: callers who expect `cancel()` to immediately stop work will instead see the current attempt complete and its result potentially used. In a multi-step pipeline where cancellation means 'abort this generation request', the side-effect of completing the operation (e.g., writing output) may still occur before cancellation takes effect.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 50,
+        "confidence": 0.72,
+        "recommendation": "Document explicitly that cancel is cooperative and only prevents *next* retry, not in-flight operations. If true cancellation is needed, consider accepting an AbortSignal and passing it through to the underlying fetch call in glm-client.mjs."
+      },
+      {
+        "severity": "medium",
+        "title": "pre-push hook sources user-controlled script without exit-code safety or sandboxing",
+        "body": "scripts/hooks/pre-push runs `source \"${HOOK_DIR}/../../scripts/ci/check-release-ready.sh\"` and then calls functions from it. If check-release-ready.sh ever calls `exit` instead of `return`, it will terminate the user's entire shell session rather than just the hook. Additionally, the hook runs unconditionally on every push regardless of branch, meaning WIP branches will also be blocked by release-readiness checks. The `exec 3>&1` redirection for TTY detection could fail silently in non-interactive CI environments and the fallback path is not well-tested.",
+        "file": "scripts/hooks/pre-push",
+        "line_start": 1,
+        "line_end": 22,
+        "confidence": 0.78,
+        "recommendation": "Add `set -e` and wrap the source in a subshell or use `return` guard pattern. Consider gating the check behind a branch-name or environment-variable check so it only runs on release branches, not every push."
+      },
+      {
+        "severity": "medium",
+        "title": "check-release-ready.sh silently passes when CHANGELOG sections are empty but structurally present",
+        "body": "The CI check script validates that CHANGELOG.md has certain sections, but if the sections exist with no actual content (e.g., '### Fixed' followed immediately by '### Added'), the grep-based validation would still pass. This means a developer could push a release with an empty changelog that passes the gate check, resulting in a released version with no documented changes. The script also doesn't validate that the version in package.json matches the version heading in CHANGELOG.md, allowing version skew.",
+        "file": "scripts/ci/check-release-ready.sh",
+        "line_start": 1,
+        "line_end": 84,
+        "confidence": 0.75,
+        "recommendation": "Add a check that each CHANGELOG section has at least one entry, and add a version-consistency check between package.json version and the latest CHANGELOG.md heading."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs retry integration may double-report errors to callers",
+        "body": "glm-client.mjs wraps API calls with retry logic from retry.mjs, but the error classification in bigmodel-errors.mjs maps some errors as retryable. If a retryable error exhausts all retries, the final error thrown may be a generic wrapper that loses the original error's structured metadata. Callers downstream who depend on error codes (like rate-limit specifics or auth failure details) to make decisions will receive an opaque error. Additionally, if the classify function in bigmodel-errors.mjs encounters an unexpected response shape (e.g., a new API error format), it falls through to a default that may be incorrectly classified as non-retryable, silently preventing recovery from transient failures.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.68,
+        "recommendation": "Ensure the final error from retry.mjs preserves the original error's classification and metadata. Add a catch-all in classify() that defaults to retryable (with low retry count) rather than non-retryable, so transient unknown errors get at least one retry attempt."
+      },
+      {
+        "severity": "low",
+        "title": "verify-release.yml deleted without migration of release-gating logic to replacement workflow",
+        "body": "The verify-release.yml workflow (102 lines) was deleted entirely. The replacement check-release-ready.sh script is only invoked from a local pre-push hook, meaning CI-level release gating has been removed. If a developer bypasses the pre-push hook (via --no-verify), there is no CI safety net to catch release-readiness issues. The old workflow may have provided checks that are not fully replicated in the new script.",
+        "file": ".github/workflows/verify-release.yml",
+        "line_start": 1,
+        "line_end": 102,
+        "confidence": 0.82,
+        "recommendation": "Either add a new GitHub Actions workflow that runs check-release-ready.sh on push to release branches, or document explicitly that release gating is now purely local and depends on the pre-push hook."
+      }
+    ],
+    "next_steps": [
+      "Review retry.mjs cancellation semantics and decide if AbortSignal integration is needed for v0.4.7",
+      "Audit check-release-ready.sh for version-skew and empty-section pass-through gaps",
+      "Verify that deleted verify-release.yml checks are fully covered by the new local hook + script approach",
+      "Confirm bigmodel-errors.mjs classify() default behavior is intentionally non-retryable and document the rationale",
+      "Add a CI workflow equivalent for check-release-ready.sh to prevent --no-verify bypass"
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.6 change introduces retry/backoff logic and error dispatch for BigModel API calls, plus a pre-push hook and CI check. The retry module has several material defects: the cancellation mechanism uses a stale-closure-prone pattern, the jitter implementation can produce negative values on edge cases, and the test suite for retry.mjs relies on `setTimeout` mocking that doesn't actually validate real backoff timing. The pre-push hook executes arbitrary shell scripts without exit-code isolation, and the CI check-release-ready.sh script has an incomplete guard that could silently pass on missing configuration. These are not showstoppers but represent real failure modes that should be addressed before a v0.4.7 sweep.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"retry.mjs cancel flag uses closure over mutable let, vulnerable to stale reads in concurrent async paths\",\n      \"body\": \"The `retry` function in retry.mjs uses a `let cancelled = false` closure variable with a `cancel()` function returned to the caller. If multiple retry chains are started and one is cancelled, there is no way for a caller to accidentally cancel the wrong chain since each gets its own closure. However, the `cancelled` flag is only checked at the top of the retry loop — if `attempt()` is already in-flight (the async operation is running), setting `cancelled = true` will NOT abort the in-flight operation. This is documented behavior but creates a semantic trap: callers who expect `cancel()` to immediately stop work will instead see the current attempt complete and its result potentially used. In a multi-step pipeline where cancellation means 'abort this generation request', the side-effect of completing the operation (e.g., writing output) may still occur before cancellation takes effect.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 50,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Document explicitly that cancel is cooperative and only prevents *next* retry, not in-flight operations. If true cancellation is needed, consider accepting an AbortSignal and passing it through to the underlying fetch call in glm-client.mjs.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"pre-push hook sources user-controlled script without exit-code safety or sandboxing\",\n      \"body\": \"scripts/hooks/pre-push runs `source \\\"${HOOK_DIR}/../../scripts/ci/check-release-ready.sh\\\"` and then calls functions from it. If check-release-ready.sh ever calls `exit` instead of `return`, it will terminate the user's entire shell session rather than just the hook. Additionally, the hook runs unconditionally on every push regardless of branch, meaning WIP branches will also be blocked by release-readiness checks. The `exec 3>&1` redirection for TTY detection could fail silently in non-interactive CI environments and the fallback path is not well-tested.\",\n      \"file\": \"scripts/hooks/pre-push\",\n      \"line_start\": 1,\n      \"line_end\": 22,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Add `set -e` and wrap the source in a subshell or use `return` guard pattern. Consider gating the check behind a branch-name or environment-variable check so it only runs on release branches, not every push.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"check-release-ready.sh silently passes when CHANGELOG sections are empty but structurally present\",\n      \"body\": \"The CI check script validates that CHANGELOG.md has certain sections, but if the sections exist with no actual content (e.g., '### Fixed' followed immediately by '### Added'), the grep-based validation would still pass. This means a developer could push a release with an empty changelog that passes the gate check, resulting in a released version with no documented changes. The script also doesn't validate that the version in package.json matches the version heading in CHANGELOG.md, allowing version skew.\",\n      \"file\": \"scripts/ci/check-release-ready.sh\",\n      \"line_start\": 1,\n      \"line_end\": 84,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Add a check that each CHANGELOG section has at least one entry, and add a version-consistency check between package.json version and the latest CHANGELOG.md heading.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client.mjs retry integration may double-report errors to callers\",\n      \"body\": \"glm-client.mjs wraps API calls with retry logic from retry.mjs, but the error classification in bigmodel-errors.mjs maps some errors as retryable. If a retryable error exhausts all retries, the final error thrown may be a generic wrapper that loses the original error's structured metadata. Callers downstream who depend on error codes (like rate-limit specifics or auth failure details) to make decisions will receive an opaque error. Additionally, if the classify function in bigmodel-errors.mjs encounters an unexpected response shape (e.g., a new API error format), it falls through to a default that may be incorrectly classified as non-retryable, silently preventing recovery from transient failures.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Ensure the final error from retry.mjs preserves the original error's classification and metadata. Add a catch-all in classify() that defaults to retryable (with low retry count) rather than non-retryable, so transient unknown errors get at least one retry attempt.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"verify-release.yml deleted without migration of release-gating logic to replacement workflow\",\n      \"body\": \"The verify-release.yml workflow (102 lines) was deleted entirely. The replacement check-release-ready.sh script is only invoked from a local pre-push hook, meaning CI-level release gating has been removed. If a developer bypasses the pre-push hook (via --no-verify), there is no CI safety net to catch release-readiness issues. The old workflow may have provided checks that are not fully replicated in the new script.\",\n      \"file\": \".github/workflows/verify-release.yml\",\n      \"line_start\": 1,\n      \"line_end\": 102,\n      \"confidence\": 0.82,\n      \"recommendation\": \"Either add a new GitHub Actions workflow that runs check-release-ready.sh on push to release branches, or document explicitly that release gating is now purely local and depends on the pre-push hook.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Review retry.mjs cancellation semantics and decide if AbortSignal integration is needed for v0.4.7\",\n    \"Audit check-release-ready.sh for version-skew and empty-section pass-through gaps\",\n    \"Verify that deleted verify-release.yml checks are fully covered by the new local hook + script approach\",\n    \"Confirm bigmodel-errors.mjs classify() default behavior is intentionally non-retryable and document the rationale\",\n    \"Add a CI workflow equivalent for check-release-ready.sh to prevent --no-verify bypass\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:53:58.845Z"
+}

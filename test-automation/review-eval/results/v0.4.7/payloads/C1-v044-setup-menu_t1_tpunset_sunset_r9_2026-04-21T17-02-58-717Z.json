@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 9
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.333,
+    "citation_false_file_hits": 0,
+    "latency_ms": 27570,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit adds an interactive menu to the /glm:setup command and renames the npm scope. The setup command changes introduce a menu flow that appears to lack error handling for edge cases around user input, state detection, and partial configuration states. The release_card.md bulk rewrite and scope rename to '@anthropic' raise compatibility concerns for existing installations.",
+    "findings": [
+      {
+        "severity": "medium",
+        "title": "Setup menu lacks guard for non-interactive or headless environments",
+        "body": "The interactive menu added to commands/setup.md relies on user prompts (select_from_menu pattern) when the system is already configured. If this command is invoked in a non-interactive context (CI, script, headless terminal), there is no visible fallback or early-exit guard. The menu will hang or fail silently, leaving the user without a configured state or clear error message.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.7,
+        "recommendation": "Add an explicit guard clause that detects non-interactive environments and either exits with a clear message or proceeds with sensible defaults. Document the expected behavior for scripted/headless invocation."
+      },
+      {
+        "severity": "medium",
+        "title": "Scope rename to '@anthropic' may break existing installations referencing old package name",
+        "body": "package.json changes the npm scope. Any existing installation, lockfile, or downstream reference to the previous scope will fail to resolve after this rename. There is no visible migration path, alias, or deprecation notice for users on the old package name. Users who update without a clean install will hit resolution failures.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 6,
+        "confidence": 0.75,
+        "recommendation": "Verify the old package name is either deprecated with a pointer to the new name, or add a postinstall/migration note in CHANGELOG.md and release_card.md. Ensure lockfile transitions are documented."
+      },
+      {
+        "severity": "low",
+        "title": "release_card.md bulk rewrite may hide regressions from prior release notes",
+        "body": "release_card.md has 326 lines changed (major rewrite). Bulk rewrites of release documentation risk silently dropping or misrepresenting prior release commitments, known issues, or compatibility notes. Without a careful diff review of what was removed vs reworded, this could hide important user-facing information.",
+        "file": "release_card.md",
+        "line_start": 1,
+        "line_end": 326,
+        "confidence": 0.5,
+        "recommendation": "Perform a line-by-line diff of release_card.md to confirm no prior compatibility notes, known issues, or breaking change warnings were accidentally removed or softened in the rewrite."
+      }
+    ],
+    "next_steps": [
+      "Inspect the full diff of commands/setup.md to verify all menu branches have defined outcomes and error paths.",
+      "Confirm the npm scope rename does not orphan existing users — check if the old package name still resolves or redirects.",
+      "Diff release_card.md carefully to ensure no prior breaking-change advisories were lost in the rewrite.",
+      "Test the setup command in a non-interactive terminal to verify graceful handling."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"This commit adds an interactive menu to the /glm:setup command and renames the npm scope. The setup command changes introduce a menu flow that appears to lack error handling for edge cases around user input, state detection, and partial configuration states. The release_card.md bulk rewrite and scope rename to '@anthropic' raise compatibility concerns for existing installations.\",\n  \"findings\": [\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Setup menu lacks guard for non-interactive or headless environments\",\n      \"body\": \"The interactive menu added to commands/setup.md relies on user prompts (select_from_menu pattern) when the system is already configured. If this command is invoked in a non-interactive context (CI, script, headless terminal), there is no visible fallback or early-exit guard. The menu will hang or fail silently, leaving the user without a configured state or clear error message.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Add an explicit guard clause that detects non-interactive environments and either exits with a clear message or proceeds with sensible defaults. Document the expected behavior for scripted/headless invocation.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Scope rename to '@anthropic' may break existing installations referencing old package name\",\n      \"body\": \"package.json changes the npm scope. Any existing installation, lockfile, or downstream reference to the previous scope will fail to resolve after this rename. There is no visible migration path, alias, or deprecation notice for users on the old package name. Users who update without a clean install will hit resolution failures.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 6,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Verify the old package name is either deprecated with a pointer to the new name, or add a postinstall/migration note in CHANGELOG.md and release_card.md. Ensure lockfile transitions are documented.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"release_card.md bulk rewrite may hide regressions from prior release notes\",\n      \"body\": \"release_card.md has 326 lines changed (major rewrite). Bulk rewrites of release documentation risk silently dropping or misrepresenting prior release commitments, known issues, or compatibility notes. Without a careful diff review of what was removed vs reworded, this could hide important user-facing information.\",\n      \"file\": \"release_card.md\",\n      \"line_start\": 1,\n      \"line_end\": 326,\n      \"confidence\": 0.5,\n      \"recommendation\": \"Perform a line-by-line diff of release_card.md to confirm no prior compatibility notes, known issues, or breaking change warnings were accidentally removed or softened in the rewrite.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect the full diff of commands/setup.md to verify all menu branches have defined outcomes and error paths.\",\n    \"Confirm the npm scope rename does not orphan existing users — check if the old package name still resolves or redirects.\",\n    \"Diff release_card.md carefully to ensure no prior breaking-change advisories were lost in the rewrite.\",\n    \"Test the setup command in a non-interactive terminal to verify graceful handling.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T17:02:58.738Z"
+}

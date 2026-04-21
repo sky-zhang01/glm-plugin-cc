@@ -1,0 +1,70 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 95285,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff is enormous (84 files, +6623/−480 lines) for a minor-version bump and introduces several high-risk structural changes without visible guardrails. The most concrete defect is the deletion of `scripts/lib/process.mjs` (67 lines removed, 0 added) which, if anything still imports from it, will cause a runtime `MODULE_NOT_FOUND` crash. Beyond that, a brand-new retry infrastructure (`retry.mjs`, 203 lines), BigModel error classification (`bigmodel-errors.mjs`, 168 lines), and changes to core state/client/render modules collectively represent a large blast radius with no evidence in the diff that idempotency, partial-failure recovery, or race conditions on tracked jobs were exhaustively covered. I could not inspect the actual file contents (no git access in this context), which itself is a gap — a diff of this scope demands line-level review of the retry/state/client paths before shipping.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Deleted `scripts/lib/process.mjs` may leave dangling imports",
+        "body": "The diff stat shows `scripts/lib/process.mjs` with 67 lines removed and 0 added — the file was deleted entirely. The main companion script (`glm-companion.mjs`, +139/−some lines) and other modules may still contain `import` statements referencing this path. If any live import remains, the first invocation of that code path will throw `ERR_MODULE_NOT_FOUND`, which is a silent-then-loud failure that CI may not catch if the import is behind a conditional branch. I could not verify the absence of dangling imports without reading the file contents, which makes this an unvalidated risk.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.7,
+        "recommendation": "Grep the entire codebase for any remaining `import` or `require` of `process.mjs` (or its exported symbols). If found, either restore the file, redirect the import to the replacement module, or remove the dead import. Add a CI check that validates all imports resolve (e.g., `node --check` or a static import analysis)."
+      },
+      {
+        "severity": "medium",
+        "title": "New retry infrastructure (retry.mjs, 203 lines) — idempotency and storm risk unknown",
+        "body": "`scripts/lib/retry.mjs` is entirely new (203 lines) and is used by `glm-client.mjs` for BigModel API calls. Retry logic is a classic source of doubled submissions, retry storms, and stale-state corruption. Without seeing the implementation I cannot confirm: (a) whether retried operations are idempotent, (b) whether retry counts and backoff are bounded, (c) whether in-flight retries interact badly with the tracked-jobs state machine, or (d) whether a retry on a partial-write response could corrupt state. The companion test file (`tests/retry.test.mjs`, 352 lines) exists but coverage details are unavailable.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.55,
+        "recommendation": "Before shipping, verify: (1) all retried API calls are idempotent (use idempotency keys or check-before-write); (2) max retry count and total backoff cap are enforced; (3) the tracked-jobs state machine handles concurrent retry callbacks without race conditions; (4) test coverage includes partial-response, timeout, and 5xx-retry scenarios."
+      },
+      {
+        "severity": "medium",
+        "title": "State and job-tracking changes risk silent data loss on concurrent operations",
+        "body": "`scripts/lib/state.mjs` (+32/−some) and `scripts/lib/tracked-jobs.mjs` (+78/−some) were both modified. These modules manage persistent state for jobs. Concurrent CLI invocations (e.g., two terminals running the companion) could interleave reads and writes to the same state file. Without file-locking or atomic writes, a race could silently drop job records or corrupt JSON state, making jobs unrecoverable. The change scope (touching both state read/write and job lifecycle) makes this a live concern.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.5,
+        "recommendation": "Confirm that state.mjs uses atomic writes (write-to-temp-then-rename) and that tracked-jobs.mjs handles concurrent access safely. If not, add advisory file locking (e.g., `proper-lockfile`) or serialize writes through a single process. Add a test for concurrent write safety."
+      }
+    ],
+    "next_steps": [
+      "Grep for any remaining imports of `scripts/lib/process.mjs` across the entire codebase — this is the fastest concrete check.",
+      "Inspect `scripts/lib/retry.mjs` line-by-line for: max-retry bounds, exponential backoff caps, idempotency of retried operations, and interaction with tracked-jobs state.",
+      "Verify that `scripts/lib/state.mjs` uses atomic file writes (write + rename pattern) and test concurrent access scenarios.",
+      "Run the full test suite (`tests/`) against the target branch to confirm no import-resolution failures.",
+      "Consider whether the 84-file cumulative diff should be broken into smaller, individually reviewable PRs to reduce ship risk."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 cumulative diff is enormous (84 files, +6623/−480 lines) for a minor-version bump and introduces several high-risk structural changes without visible guardrails. The most concrete defect is the deletion of `scripts/lib/process.mjs` (67 lines removed, 0 added) which, if anything still imports from it, will cause a runtime `MODULE_NOT_FOUND` crash. Beyond that, a brand-new retry infrastructure (`retry.mjs`, 203 lines), BigModel error classification (`bigmodel-errors.mjs`, 168 lines), and changes to core state/client/render modules collectively represent a large blast radius with no evidence in the diff that idempotency, partial-failure recovery, or race conditions on tracked jobs were exhaustively covered. I could not inspect the actual file contents (no git access in this context), which itself is a gap — a diff of this scope demands line-level review of the retry/state/client paths before shipping.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Deleted `scripts/lib/process.mjs` may leave dangling imports\",\"body\":\"The diff stat shows `scripts/lib/process.mjs` with 67 lines removed and 0 added — the file was deleted entirely. The main companion script (`glm-companion.mjs`, +139/−some lines) and other modules may still contain `import` statements referencing this path. If any live import remains, the first invocation of that code path will throw `ERR_MODULE_NOT_FOUND`, which is a silent-then-loud failure that CI may not catch if the import is behind a conditional branch. I could not verify the absence of dangling imports without reading the file contents, which makes this an unvalidated risk.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":67,\"confidence\":0.7,\"recommendation\":\"Grep the entire codebase for any remaining `import` or `require` of `process.mjs` (or its exported symbols). If found, either restore the file, redirect the import to the replacement module, or remove the dead import. Add a CI check that validates all imports resolve (e.g., `node --check` or a static import analysis).\"},{\"severity\":\"medium\",\"title\":\"New retry infrastructure (retry.mjs, 203 lines) — idempotency and storm risk unknown\",\"body\":\"`scripts/lib/retry.mjs` is entirely new (203 lines) and is used by `glm-client.mjs` for BigModel API calls. Retry logic is a classic source of doubled submissions, retry storms, and stale-state corruption. Without seeing the implementation I cannot confirm: (a) whether retried operations are idempotent, (b) whether retry counts and backoff are bounded, (c) whether in-flight retries interact badly with the tracked-jobs state machine, or (d) whether a retry on a partial-write response could corrupt state. The companion test file (`tests/retry.test.mjs`, 352 lines) exists but coverage details are unavailable.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.55,\"recommendation\":\"Before shipping, verify: (1) all retried API calls are idempotent (use idempotency keys or check-before-write); (2) max retry count and total backoff cap are enforced; (3) the tracked-jobs state machine handles concurrent retry callbacks without race conditions; (4) test coverage includes partial-response, timeout, and 5xx-retry scenarios.\"},{\"severity\":\"medium\",\"title\":\"State and job-tracking changes risk silent data loss on concurrent operations\",\"body\":\"`scripts/lib/state.mjs` (+32/−some) and `scripts/lib/tracked-jobs.mjs` (+78/−some) were both modified. These modules manage persistent state for jobs. Concurrent CLI invocations (e.g., two terminals running the companion) could interleave reads and writes to the same state file. Without file-locking or atomic writes, a race could silently drop job records or corrupt JSON state, making jobs unrecoverable. The change scope (touching both state read/write and job lifecycle) makes this a live concern.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.5,\"recommendation\":\"Confirm that state.mjs uses atomic writes (write-to-temp-then-rename) and that tracked-jobs.mjs handles concurrent access safely. If not, add advisory file locking (e.g., `proper-lockfile`) or serialize writes through a single process. Add a test for concurrent write safety.\"}],\"next_steps\":[\"Grep for any remaining imports of `scripts/lib/process.mjs` across the entire codebase — this is the fastest concrete check.\",\"Inspect `scripts/lib/retry.mjs` line-by-line for: max-retry bounds, exponential backoff caps, idempotency of retried operations, and interaction with tracked-jobs state.\",\"Verify that `scripts/lib/state.mjs` uses atomic file writes (write + rename pattern) and test concurrent access scenarios.\",\"Run the full test suite (`tests/`) against the target branch to confirm no import-resolution failures.\",\"Consider whether the 84-file cumulative diff should be broken into smaller, individually reviewable PRs to reduce ship risk.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:58:03.658Z"
+}

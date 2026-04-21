@@ -1,0 +1,79 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 42187,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "v0.4.6 adds retry/backoff and BigModel error dispatch, but the retry logic has multiple weaknesses: unprotected AbortSignal handling can mask aborts as retries, the backoff timer is not cancelable on module teardown, and tests only exercise time-frozen happy paths. These are silent-failure risks under real production conditions. The change should not ship without at least addressing the AbortSignal confusion and ensuring backoff timers are properly cleaned up.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry withBackoff swallows AbortErrors by default",
+        "body": "In retry.mjs, withBackoff wraps the callback but does not inspect the error for AbortError or check signal.aborted before deciding to retry. If the caller passes an AbortSignal and the fetch is aborted, the raised AbortError is treated like any other retryable error. The retries will burn through the entire budget (up to ~45 seconds of wall-clock delay for default settings) before surfacing the abort to the caller. This makes cancellation via AbortController effectively broken — the user or test harness thinks the operation was cancelled, but the retry loop keeps running silently. Under concurrent load or test timeouts, this causes mysterious hangs rather than fast failures.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 60,
+        "confidence": 0.85,
+        "recommendation": "At the top of the retry loop, before calling wait, check if signal?.aborted is true and throw immediately. Also, in the catch block, check if the error is an AbortError (error.name === 'AbortError') and re-throw without retrying. This ensures aborts are instant rather than delayed by the full retry budget."
+      },
+      {
+        "severity": "medium",
+        "title": "setTimeout in withBackoff is not cancelable — timers leak on early return or abort",
+        "body": "The retry.mjs withBackoff function uses `await new Promise(r => setTimeout(r, delay))` for the backoff wait. This timer cannot be canceled. If the caller's AbortSignal fires during the backoff wait, the promise will not resolve until the timer expires, leaving the coroutine suspended. Similarly, if the retry loop is running inside a test or CLI invocation that times out, the dangling timer keeps the event loop alive. In production, rapid abort-retry cycles under heavy load would accumulate leaked timers, increasing memory pressure and delaying process shutdown.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 30,
+        "line_end": 55,
+        "confidence": 0.8,
+        "recommendation": "Refactor the delay to use a cancelable pattern: create the setTimeout and clear it when the AbortSignal fires. For example:\n```\nawait new Promise((resolve, reject) => {\n  const timer = setTimeout(resolve, delay);\n  if (signal) {\n    const onAbort = () => { clearTimeout(timer); reject(new DOMException('Aborted','AbortError')); };\n    signal.addEventListener('abort', onAbort, { once: true });\n  }\n});\n```\nThis ensures the backoff wait is interrupted immediately on abort."
+      },
+      {
+        "severity": "medium",
+        "title": "retry.mjs jittered backoff can return zero delay on high base values",
+        "body": "The jitter calculation uses `Math.floor(...)` which can return 0 when the random component rounds down to zero. Combined with the base delay formula, a zero delay means no backoff at all on that attempt. Under rate-limiting scenarios (429s from BigModel), a zero-delay retry immediately hits the API again, compounding the rate-limit problem instead of respecting it. The tests mock timers and don't check actual delay distributions, so this edge case is invisible in the test suite.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 40,
+        "line_end": 50,
+        "confidence": 0.7,
+        "recommendation": "Ensure the minimum delay is always at least 1ms (or a meaningful floor like 100ms for API retries). Use `Math.max(1, Math.floor(jitteredDelay))` or clamp the final delay. Add a test that verifies the computed delay is always strictly positive for all attempt numbers up to maxAttempts."
+      },
+      {
+        "severity": "low",
+        "title": "glm-client.mjs retries all BigModel errors without distinguishing fatal vs transient",
+        "body": "The GLM client uses withRetry on API calls but the retry configuration does not differentiate between fatal errors (auth failures, invalid request, context length exceeded) and transient ones (rate limit, server error, timeout). Auth errors and invalid-request errors are not retryable — retrying them wastes the retry budget, adds latency, and produces confusing logs. The bigmodel-errors.mjs module classifies errors, but the classification is not wired into the retry decision in glm-client.mjs.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 99,
+        "confidence": 0.65,
+        "recommendation": "Wire the error classification from bigmodel-errors.mjs into the retry predicate. Only retry errors classified as retryable (e.g., rate-limited, server error, timeout). Fatal errors (auth, invalid request, context exceeded) should be thrown immediately without consuming retry budget."
+      }
+    ],
+    "next_steps": [
+      "Add AbortSignal awareness to retry.mjs — check signal.aborted before each retry and treat AbortError as non-retryable.",
+      "Refactor the backoff timer to be cancelable via the AbortSignal.",
+      "Add integration tests that exercise abort-during-retry and abort-during-backoff-wait scenarios.",
+      "Wire bigmodel-errors.mjs error classification into glm-client.mjs so only retryable errors trigger retries."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"v0.4.6 adds retry/backoff and BigModel error dispatch, but the retry logic has multiple weaknesses: unprotected AbortSignal handling can mask aborts as retries, the backoff timer is not cancelable on module teardown, and tests only exercise time-frozen happy paths. These are silent-failure risks under real production conditions. The change should not ship without at least addressing the AbortSignal confusion and ensuring backoff timers are properly cleaned up.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Retry withBackoff swallows AbortErrors by default\",\"body\":\"In retry.mjs, withBackoff wraps the callback but does not inspect the error for AbortError or check signal.aborted before deciding to retry. If the caller passes an AbortSignal and the fetch is aborted, the raised AbortError is treated like any other retryable error. The retries will burn through the entire budget (up to ~45 seconds of wall-clock delay for default settings) before surfacing the abort to the caller. This makes cancellation via AbortController effectively broken — the user or test harness thinks the operation was cancelled, but the retry loop keeps running silently. Under concurrent load or test timeouts, this causes mysterious hangs rather than fast failures.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":60,\"confidence\":0.85,\"recommendation\":\"At the top of the retry loop, before calling wait, check if signal?.aborted is true and throw immediately. Also, in the catch block, check if the error is an AbortError (error.name === 'AbortError') and re-throw without retrying. This ensures aborts are instant rather than delayed by the full retry budget.\"},{\"severity\":\"medium\",\"title\":\"setTimeout in withBackoff is not cancelable — timers leak on early return or abort\",\"body\":\"The retry.mjs withBackoff function uses `await new Promise(r => setTimeout(r, delay))` for the backoff wait. This timer cannot be canceled. If the caller's AbortSignal fires during the backoff wait, the promise will not resolve until the timer expires, leaving the coroutine suspended. Similarly, if the retry loop is running inside a test or CLI invocation that times out, the dangling timer keeps the event loop alive. In production, rapid abort-retry cycles under heavy load would accumulate leaked timers, increasing memory pressure and delaying process shutdown.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":30,\"line_end\":55,\"confidence\":0.8,\"recommendation\":\"Refactor the delay to use a cancelable pattern: create the setTimeout and clear it when the AbortSignal fires. For example:\\n```\\nawait new Promise((resolve, reject) => {\\n  const timer = setTimeout(resolve, delay);\\n  if (signal) {\\n    const onAbort = () => { clearTimeout(timer); reject(new DOMException('Aborted','AbortError')); };\\n    signal.addEventListener('abort', onAbort, { once: true });\\n  }\\n});\\n```\\nThis ensures the backoff wait is interrupted immediately on abort.\"},{\"severity\":\"medium\",\"title\":\"retry.mjs jittered backoff can return zero delay on high base values\",\"body\":\"The jitter calculation uses `Math.floor(...)` which can return 0 when the random component rounds down to zero. Combined with the base delay formula, a zero delay means no backoff at all on that attempt. Under rate-limiting scenarios (429s from BigModel), a zero-delay retry immediately hits the API again, compounding the rate-limit problem instead of respecting it. The tests mock timers and don't check actual delay distributions, so this edge case is invisible in the test suite.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":40,\"line_end\":50,\"confidence\":0.7,\"recommendation\":\"Ensure the minimum delay is always at least 1ms (or a meaningful floor like 100ms for API retries). Use `Math.max(1, Math.floor(jitteredDelay))` or clamp the final delay. Add a test that verifies the computed delay is always strictly positive for all attempt numbers up to maxAttempts.\"},{\"severity\":\"low\",\"title\":\"glm-client.mjs retries all BigModel errors without distinguishing fatal vs transient\",\"body\":\"The GLM client uses withRetry on API calls but the retry configuration does not differentiate between fatal errors (auth failures, invalid request, context length exceeded) and transient ones (rate limit, server error, timeout). Auth errors and invalid-request errors are not retryable — retrying them wastes the retry budget, adds latency, and produces confusing logs. The bigmodel-errors.mjs module classifies errors, but the classification is not wired into the retry decision in glm-client.mjs.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":99,\"confidence\":0.65,\"recommendation\":\"Wire the error classification from bigmodel-errors.mjs into the retry predicate. Only retry errors classified as retryable (e.g., rate-limited, server error, timeout). Fatal errors (auth, invalid request, context exceeded) should be thrown immediately without consuming retry budget.\"}],\"next_steps\":[\"Add AbortSignal awareness to retry.mjs — check signal.aborted before each retry and treat AbortError as non-retryable.\",\"Refactor the backoff timer to be cancelable via the AbortSignal.\",\"Add integration tests that exercise abort-during-retry and abort-during-backoff-wait scenarios.\",\"Wire bigmodel-errors.mjs error classification into glm-client.mjs so only retryable errors trigger retries.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:24:16.974Z"
+}

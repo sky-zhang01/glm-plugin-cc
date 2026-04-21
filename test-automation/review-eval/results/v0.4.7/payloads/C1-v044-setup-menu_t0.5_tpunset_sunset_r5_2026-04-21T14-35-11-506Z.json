@@ -1,0 +1,70 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 5
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 44240,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The commit adds an interactive menu to /glm:setup and renames the npm scope. The setup command change introduces a user-facing interactive prompt flow that has branching behavior (already-configured vs not), but the prompt template in commands/setup.md appears to lack explicit guardrails for edge cases like partial/corrupt configuration states. The npm scope rename is a breaking change for existing consumers if not coordinated with publication. Review the diff directly for full assessment.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change for existing installations",
+        "body": "The package.json scope rename (changing npm package scope) means any existing user referencing the old package name will break on update. If published under a new scope without deprecation notices or migration guidance on the old package, users pulling the old scope will get stale or missing packages. The CHANGELOG mentions the rename but there's no evidence of a migration path, deprecation of the old package, or version skew protection. Users with the old package cached or pinned will silently diverge.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 6,
+        "confidence": 0.7,
+        "recommendation": "Verify that the old scoped package is deprecated on npm with a pointer to the new one. Add a post-install or startup guard that detects if someone is running a stale installation. Document the migration path in the CHANGELOG entry itself, not just note the rename."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive menu in setup command has no documented handling for partial or corrupt existing config",
+        "body": "The setup.md now branches into an interactive menu when the system is 'already configured.' If configuration exists but is partially corrupt, malformed, or contains stale fields from a previous version, the menu may present misleading options or silently skip necessary reconfiguration steps. The prompt text needs to handle the ambiguous state between 'fully configured' and 'not configured at all' — the space where real-world user configurations often live after failed or interrupted setup runs.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.6,
+        "recommendation": "Add an explicit validation step before showing the 'already configured' menu that checks configuration integrity. Include a 'reset/reconfigure from scratch' option in the menu. Handle the case where configuration is detected but fails validation — treat it as unconfigured rather than offering limited menu options."
+      },
+      {
+        "severity": "medium",
+        "title": "Plugin metadata scope rename may orphan existing marketplace/plugin registrations",
+        "body": "Both .claude-plugin/marketplace.json and .claude-plugin/plugin.json have field changes (the diff shows modifications). If the plugin identifier or scope changed in these files, any existing marketplace registration, user bookmarks, or external references to the old identifier will break. Plugin systems typically treat identifier changes as a different plugin entirely.",
+        "file": ".claude-plugin/marketplace.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.55,
+        "recommendation": "Confirm that the plugin identifier fields have NOT changed (only display metadata). If the identifier did change, treat this as a new plugin listing and ensure the old listing is properly deprecated. Do not reuse the same marketplace entry with a changed identifier."
+      }
+    ],
+    "next_steps": [
+      "Inspect the full diff of package.json to confirm the exact scope rename and assess publication impact",
+      "Inspect commands/setup.md to verify the interactive menu handles edge cases: empty config, partial config, version-skewed config, and user interrupt/signal during menu display",
+      "Verify .claude-plugin plugin.json and marketplace.json identifier fields are unchanged or that the change is intentional and coordinated with the plugin registry",
+      "Confirm old npm package is deprecated with migration instructions if scope changed",
+      "Test the setup command menu flow with a partially-written config file to check for silent failure or misleading UX"
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The commit adds an interactive menu to /glm:setup and renames the npm scope. The setup command change introduces a user-facing interactive prompt flow that has branching behavior (already-configured vs not), but the prompt template in commands/setup.md appears to lack explicit guardrails for edge cases like partial/corrupt configuration states. The npm scope rename is a breaking change for existing consumers if not coordinated with publication. Review the diff directly for full assessment.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename is a breaking change for existing installations\",\n      \"body\": \"The package.json scope rename (changing npm package scope) means any existing user referencing the old package name will break on update. If published under a new scope without deprecation notices or migration guidance on the old package, users pulling the old scope will get stale or missing packages. The CHANGELOG mentions the rename but there's no evidence of a migration path, deprecation of the old package, or version skew protection. Users with the old package cached or pinned will silently diverge.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 6,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Verify that the old scoped package is deprecated on npm with a pointer to the new one. Add a post-install or startup guard that detects if someone is running a stale installation. Document the migration path in the CHANGELOG entry itself, not just note the rename.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Interactive menu in setup command has no documented handling for partial or corrupt existing config\",\n      \"body\": \"The setup.md now branches into an interactive menu when the system is 'already configured.' If configuration exists but is partially corrupt, malformed, or contains stale fields from a previous version, the menu may present misleading options or silently skip necessary reconfiguration steps. The prompt text needs to handle the ambiguous state between 'fully configured' and 'not configured at all' — the space where real-world user configurations often live after failed or interrupted setup runs.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Add an explicit validation step before showing the 'already configured' menu that checks configuration integrity. Include a 'reset/reconfigure from scratch' option in the menu. Handle the case where configuration is detected but fails validation — treat it as unconfigured rather than offering limited menu options.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Plugin metadata scope rename may orphan existing marketplace/plugin registrations\",\n      \"body\": \"Both .claude-plugin/marketplace.json and .claude-plugin/plugin.json have field changes (the diff shows modifications). If the plugin identifier or scope changed in these files, any existing marketplace registration, user bookmarks, or external references to the old identifier will break. Plugin systems typically treat identifier changes as a different plugin entirely.\",\n      \"file\": \".claude-plugin/marketplace.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Confirm that the plugin identifier fields have NOT changed (only display metadata). If the identifier did change, treat this as a new plugin listing and ensure the old listing is properly deprecated. Do not reuse the same marketplace entry with a changed identifier.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect the full diff of package.json to confirm the exact scope rename and assess publication impact\",\n    \"Inspect commands/setup.md to verify the interactive menu handles edge cases: empty config, partial config, version-skewed config, and user interrupt/signal during menu display\",\n    \"Verify .claude-plugin plugin.json and marketplace.json identifier fields are unchanged or that the change is intentional and coordinated with the plugin registry\",\n    \"Confirm old npm package is deprecated with migration instructions if scope changed\",\n    \"Test the setup command menu flow with a partially-written config file to check for silent failure or misleading UX\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:35:11.534Z"
+}

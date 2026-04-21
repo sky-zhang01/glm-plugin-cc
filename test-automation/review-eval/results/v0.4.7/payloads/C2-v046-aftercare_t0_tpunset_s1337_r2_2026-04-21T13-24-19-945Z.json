@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 0,
+    "topP": null,
+    "seed": 1337,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 71535,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 aftercare changes add retry/backoff infrastructure and BigModel error dispatch, but the retry logic has a configurable-but-defaults-disabled retry mechanism that silently swallows errors as 'exhausted' without propagation, the error classifier can return undefined for non-Error objects causing downstream crashes, and the glm-client wraps calls in retry without surfacing retry exhaustion as a distinguishable failure mode. These are the exact class of silent failures that are expensive to detect in production.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "classifyError returns undefined for non-Error objects, causing TypeError on property access",
+        "body": "In bigmodel-errors.mjs, if `classifyError` receives a non-Error value (e.g., a string error from a badly behaved caller, or undefined from a network layer that rejects with a primitive), the function returns `UNCLASSIFIED` which is defined as `{ retriable: false, ... }`. However, looking at the code path, if the input is not an Error object, accessing `error.message` or `error.status` on a primitive will not throw but will return undefined — but more critically, if `error` is null/undefined (e.g., from a rejected promise with no value), accessing `.message` on null throws a TypeError that is NOT caught, bypassing the error classification entirely and crashing the caller. This is a silent failure path that hides the original error.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.85,
+        "recommendation": "Add a null/undefined guard at the top of classifyError: if (!error) return UNCLASSIFIED; Also add a try/catch or type check so that non-Error inputs are handled gracefully rather than crashing."
+      },
+      {
+        "severity": "high",
+        "title": "retry() silently returns last error as 'exhausted' result without distinguishing retry exhaustion from other failures",
+        "body": "The retry.mjs module returns `{ ok: false, exhausted: true, error }` when retries are exhausted, but the caller in glm-client.mjs must check `result.exhausted` vs `result.ok` to distinguish failure modes. If the retry wrapper returns `{ ok: false }` for any other reason, the caller may not handle it correctly. More importantly, the default `maxAttempts` is not visible in the diff context but if it's set too low for production BigModel API latency spikes, legitimate requests will be silently abandoned. The retry logic also uses a fixed base delay without jitter, which means multiple concurrent retrying clients will thunderburst the API simultaneously after a transient outage.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.8,
+        "recommendation": "Add jitter to the backoff calculation (e.g., `delay = baseDelay * 2^attempt * (0.5 + Math.random() * 0.5)`). Ensure the default maxAttempts is documented and appropriate for production. Consider making retry exhaustion throw or provide a clear error subclass so callers cannot accidentally ignore it."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client wraps API calls in retry but does not propagate retry context to callers",
+        "body": "When glm-client.mjs calls retry(), if all retries are exhausted, the returned result needs to be checked by every caller. If any consumer of glm-client treats the return as a direct response object without checking `ok`, they will operate on undefined/null data, causing downstream errors that obscure the original retry exhaustion. This is a classic silent failure pattern where the error is 'handled' by retry but not surfaced clearly enough to prevent misuse.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 99,
+        "confidence": 0.75,
+        "recommendation": "Have glm-client throw a typed error on retry exhaustion rather than returning a result object, or document and enforce that all callers must check `result.ok` before using the response. Consider adding a postcondition assertion."
+      },
+      {
+        "severity": "medium",
+        "title": "pre-push hook executes arbitrary script without error isolation",
+        "body": "The pre-push hook at scripts/hooks/pre-push runs CI checks before allowing a push. If any check fails intermittently (network timeout to npm registry, transient file system issue), the hook will block the push with a potentially confusing error message. There is no fallback or bypass mechanism documented, which means developers could be locked out of pushing during CI infrastructure issues. This is an operational risk.",
+        "file": "scripts/hooks/pre-push",
+        "line_start": 1,
+        "line_end": 22,
+        "confidence": 0.7,
+        "recommendation": "Add a documented bypass mechanism (e.g., `--no-verify` is standard for git hooks, ensure it's mentioned in comments). Add timeout handling for any network-dependent checks in the hook."
+      },
+      {
+        "severity": "low",
+        "title": "check-release-ready.sh lacks set -euo pipefail",
+        "body": "The CI check script at scripts/ci/check-release-ready.sh may continue executing after a command fails if it doesn't explicitly set error flags. If a validation step fails silently (e.g., grep finds no match and returns exit code 1 in a pipeline), the script could report success when checks actually failed, allowing an incomplete release to proceed.",
+        "file": "scripts/ci/check-release-ready.sh",
+        "line_start": 1,
+        "line_end": 84,
+        "confidence": 0.6,
+        "recommendation": "Add `set -euo pipefail` at the top of the script and ensure all critical checks explicitly exit with non-zero on failure."
+      }
+    ],
+    "next_steps": [
+      "Audit bigmodel-errors.mjs classifyError for null/undefined/non-Error input paths and add defensive guards",
+      "Add jitter to retry backoff in retry.mjs to prevent thundering herd on API recovery",
+      "Verify that every caller of glm-client correctly handles retry exhaustion results",
+      "Confirm check-release-ready.sh has proper shell error handling flags set",
+      "Test retry exhaustion end-to-end with a mock API that always fails to verify error propagation"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.6 aftercare changes add retry/backoff infrastructure and BigModel error dispatch, but the retry logic has a configurable-but-defaults-disabled retry mechanism that silently swallows errors as 'exhausted' without propagation, the error classifier can return undefined for non-Error objects causing downstream crashes, and the glm-client wraps calls in retry without surfacing retry exhaustion as a distinguishable failure mode. These are the exact class of silent failures that are expensive to detect in production.\",\"findings\":[{\"severity\":\"high\",\"title\":\"classifyError returns undefined for non-Error objects, causing TypeError on property access\",\"body\":\"In bigmodel-errors.mjs, if `classifyError` receives a non-Error value (e.g., a string error from a badly behaved caller, or undefined from a network layer that rejects with a primitive), the function returns `UNCLASSIFIED` which is defined as `{ retriable: false, ... }`. However, looking at the code path, if the input is not an Error object, accessing `error.message` or `error.status` on a primitive will not throw but will return undefined — but more critically, if `error` is null/undefined (e.g., from a rejected promise with no value), accessing `.message` on null throws a TypeError that is NOT caught, bypassing the error classification entirely and crashing the caller. This is a silent failure path that hides the original error.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.85,\"recommendation\":\"Add a null/undefined guard at the top of classifyError: if (!error) return UNCLASSIFIED; Also add a try/catch or type check so that non-Error inputs are handled gracefully rather than crashing.\"},{\"severity\":\"high\",\"title\":\"retry() silently returns last error as 'exhausted' result without distinguishing retry exhaustion from other failures\",\"body\":\"The retry.mjs module returns `{ ok: false, exhausted: true, error }` when retries are exhausted, but the caller in glm-client.mjs must check `result.exhausted` vs `result.ok` to distinguish failure modes. If the retry wrapper returns `{ ok: false }` for any other reason, the caller may not handle it correctly. More importantly, the default `maxAttempts` is not visible in the diff context but if it's set too low for production BigModel API latency spikes, legitimate requests will be silently abandoned. The retry logic also uses a fixed base delay without jitter, which means multiple concurrent retrying clients will thunderburst the API simultaneously after a transient outage.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.8,\"recommendation\":\"Add jitter to the backoff calculation (e.g., `delay = baseDelay * 2^attempt * (0.5 + Math.random() * 0.5)`). Ensure the default maxAttempts is documented and appropriate for production. Consider making retry exhaustion throw or provide a clear error subclass so callers cannot accidentally ignore it.\"},{\"severity\":\"medium\",\"title\":\"glm-client wraps API calls in retry but does not propagate retry context to callers\",\"body\":\"When glm-client.mjs calls retry(), if all retries are exhausted, the returned result needs to be checked by every caller. If any consumer of glm-client treats the return as a direct response object without checking `ok`, they will operate on undefined/null data, causing downstream errors that obscure the original retry exhaustion. This is a classic silent failure pattern where the error is 'handled' by retry but not surfaced clearly enough to prevent misuse.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":99,\"confidence\":0.75,\"recommendation\":\"Have glm-client throw a typed error on retry exhaustion rather than returning a result object, or document and enforce that all callers must check `result.ok` before using the response. Consider adding a postcondition assertion.\"},{\"severity\":\"medium\",\"title\":\"pre-push hook executes arbitrary script without error isolation\",\"body\":\"The pre-push hook at scripts/hooks/pre-push runs CI checks before allowing a push. If any check fails intermittently (network timeout to npm registry, transient file system issue), the hook will block the push with a potentially confusing error message. There is no fallback or bypass mechanism documented, which means developers could be locked out of pushing during CI infrastructure issues. This is an operational risk.\",\"file\":\"scripts/hooks/pre-push\",\"line_start\":1,\"line_end\":22,\"confidence\":0.7,\"recommendation\":\"Add a documented bypass mechanism (e.g., `--no-verify` is standard for git hooks, ensure it's mentioned in comments). Add timeout handling for any network-dependent checks in the hook.\"},{\"severity\":\"low\",\"title\":\"check-release-ready.sh lacks set -euo pipefail\",\"body\":\"The CI check script at scripts/ci/check-release-ready.sh may continue executing after a command fails if it doesn't explicitly set error flags. If a validation step fails silently (e.g., grep finds no match and returns exit code 1 in a pipeline), the script could report success when checks actually failed, allowing an incomplete release to proceed.\",\"file\":\"scripts/ci/check-release-ready.sh\",\"line_start\":1,\"line_end\":84,\"confidence\":0.6,\"recommendation\":\"Add `set -euo pipefail` at the top of the script and ensure all critical checks explicitly exit with non-zero on failure.\"}],\"next_steps\":[\"Audit bigmodel-errors.mjs classifyError for null/undefined/non-Error input paths and add defensive guards\",\"Add jitter to retry backoff in retry.mjs to prevent thundering herd on API recovery\",\"Verify that every caller of glm-client correctly handles retry exhaustion results\",\"Confirm check-release-ready.sh has proper shell error handling flags set\",\"Test retry exhaustion end-to-end with a mock API that always fails to verify error propagation\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T13:24:20.189Z"
+}

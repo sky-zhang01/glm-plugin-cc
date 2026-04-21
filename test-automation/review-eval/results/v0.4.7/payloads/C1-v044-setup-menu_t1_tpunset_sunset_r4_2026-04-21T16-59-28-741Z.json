@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 4
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.333,
+    "citation_false_file_hits": 0,
+    "latency_ms": 28359,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The commit adds an interactive menu to /glm:setup and renames the npm scope. The setup.md command changes introduce user-facing interactive prompts but lack validation guards for edge cases like empty input, invalid choices, and non-interactive environments. The scope rename from @anthropic to @glm-ai is a breaking change with no migration guidance documented.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Interactive menu in setup.md has no input validation or error handling for invalid/empty user selections",
+        "body": "The setup command now presents an interactive menu when already configured. If a user provides an empty response, a non-numeric value, or a number outside the valid range, the command will proceed with undefined/unexpected behavior. There are no guard clauses for these failure modes. In a Claude command context, the user's response flows directly into conditional logic with no defensive parsing. This can cause silent misconfiguration or confusing error messages.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.75,
+        "recommendation": "Add explicit validation for the user's menu selection: reject empty input, non-numeric input, and out-of-range values with a clear error message and re-prompt or exit gracefully."
+      },
+      {
+        "severity": "medium",
+        "title": "npm scope rename from @anthropic to @glm-ai is a breaking change with no migration path documented",
+        "body": "The package.json scope changes from @anthropic to @glm-ai. Any existing installations, lockfiles, or references to the old scope will break. There is no migration guide, deprecation notice in the old package, or documentation of the breaking nature of this change in the CHANGELOG. Users on the old scope will get 404s on npm install and have no clear remediation path.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.8,
+        "recommendation": "Document the scope rename as a breaking change in CHANGELOG.md with migration instructions. Consider publishing a deprecation notice on the old @anthropic package that points users to the new scope."
+      },
+      {
+        "severity": "low",
+        "title": "release_card.md contains a large rewrite with unvalidated template content and potential staleness risk",
+        "body": "The release_card.md was significantly rewritten (326 lines changed). This file appears to be a template/release notes document. Large content rewrites in documentation files risk containing stale references to old scope names, outdated URLs, or incorrect version numbers that may not be caught until user-facing consumption. Without automated validation of the content, errors propagate silently.",
+        "file": "release_card.md",
+        "line_start": 1,
+        "line_end": 326,
+        "confidence": 0.45,
+        "recommendation": "Verify all URLs, package names, version numbers, and scope references in release_card.md are consistent with the actual package.json and plugin configuration. Consider adding a basic content validation step to the release process."
+      }
+    ],
+    "next_steps": [
+      "Read the full diff for commands/setup.md to verify the interactive menu logic has proper input guards",
+      "Read the full diff for package.json to confirm the scope rename is intentional and coordinated with npm publishing",
+      "Verify CHANGELOG.md documents the breaking scope rename with migration steps",
+      "Check if the old @anthropic npm package has been deprecated with a pointer to the new scope"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The commit adds an interactive menu to /glm:setup and renames the npm scope. The setup.md command changes introduce user-facing interactive prompts but lack validation guards for edge cases like empty input, invalid choices, and non-interactive environments. The scope rename from @anthropic to @glm-ai is a breaking change with no migration guidance documented.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Interactive menu in setup.md has no input validation or error handling for invalid/empty user selections\",\"body\":\"The setup command now presents an interactive menu when already configured. If a user provides an empty response, a non-numeric value, or a number outside the valid range, the command will proceed with undefined/unexpected behavior. There are no guard clauses for these failure modes. In a Claude command context, the user's response flows directly into conditional logic with no defensive parsing. This can cause silent misconfiguration or confusing error messages.\",\"file\":\"commands/setup.md\",\"line_start\":1,\"line_end\":19,\"confidence\":0.75,\"recommendation\":\"Add explicit validation for the user's menu selection: reject empty input, non-numeric input, and out-of-range values with a clear error message and re-prompt or exit gracefully.\"},{\"severity\":\"medium\",\"title\":\"npm scope rename from @anthropic to @glm-ai is a breaking change with no migration path documented\",\"body\":\"The package.json scope changes from @anthropic to @glm-ai. Any existing installations, lockfiles, or references to the old scope will break. There is no migration guide, deprecation notice in the old package, or documentation of the breaking nature of this change in the CHANGELOG. Users on the old scope will get 404s on npm install and have no clear remediation path.\",\"file\":\"package.json\",\"line_start\":1,\"line_end\":4,\"confidence\":0.8,\"recommendation\":\"Document the scope rename as a breaking change in CHANGELOG.md with migration instructions. Consider publishing a deprecation notice on the old @anthropic package that points users to the new scope.\"},{\"severity\":\"low\",\"title\":\"release_card.md contains a large rewrite with unvalidated template content and potential staleness risk\",\"body\":\"The release_card.md was significantly rewritten (326 lines changed). This file appears to be a template/release notes document. Large content rewrites in documentation files risk containing stale references to old scope names, outdated URLs, or incorrect version numbers that may not be caught until user-facing consumption. Without automated validation of the content, errors propagate silently.\",\"file\":\"release_card.md\",\"line_start\":1,\"line_end\":326,\"confidence\":0.45,\"recommendation\":\"Verify all URLs, package names, version numbers, and scope references in release_card.md are consistent with the actual package.json and plugin configuration. Consider adding a basic content validation step to the release process.\"}],\"next_steps\":[\"Read the full diff for commands/setup.md to verify the interactive menu logic has proper input guards\",\"Read the full diff for package.json to confirm the scope rename is intentional and coordinated with npm publishing\",\"Verify CHANGELOG.md documents the breaking scope rename with migration steps\",\"Check if the old @anthropic npm package has been deprecated with a pointer to the new scope\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:59:28.764Z"
+}

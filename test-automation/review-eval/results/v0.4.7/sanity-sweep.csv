@@ -1,0 +1,10 @@
+timestamp_utc,fixture_id,temperature,top_p,seed,thinking,run_index,schema_compliance,schema_echo,invalid_shape,findings_count,citation_accuracy,citation_false_file_hits,input_tokens,output_tokens,latency_ms,error_code,correction_attempted
+2026-04-21T09:49:39.331Z,C2-v046-aftercare,0,,,on,1,1,0,0,5,1,0,0,0,51203,,0
+2026-04-21T09:50:05.975Z,C2-v046-aftercare,0,,,on,2,0,0,0,0,1,0,0,0,26641,,0
+2026-04-21T09:51:03.580Z,C2-v046-aftercare,0,,,on,3,1,0,0,6,0.833,0,0,0,57573,,0
+2026-04-21T09:52:06.865Z,C2-v046-aftercare,0.5,,,on,1,1,0,0,4,1,0,0,0,51762,,0
+2026-04-21T09:52:57.241Z,C2-v046-aftercare,0.5,,,on,2,1,0,0,3,1,0,0,0,50349,,0
+2026-04-21T09:54:01.849Z,C2-v046-aftercare,0.5,,,on,3,1,0,0,4,1,0,0,0,64580,,0
+2026-04-21T09:54:59.555Z,C2-v046-aftercare,1,,,on,1,1,0,0,4,1,0,0,0,51815,,0
+2026-04-21T09:56:04.250Z,C2-v046-aftercare,1,,,on,2,1,0,0,5,1,0,0,0,64648,,0
+2026-04-21T09:57:09.912Z,C2-v046-aftercare,1,,,on,3,1,0,0,5,1,0,0,0,65614,,0

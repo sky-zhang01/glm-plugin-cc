@@ -1,0 +1,59 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 21
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 2,
+    "citation_accuracy": 0.5,
+    "citation_false_file_hits": 0,
+    "latency_ms": 23316,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit bundles an interactive menu for /glm:setup re-configuration with an npm scope rename. The scope rename (likely changing the package scope from one name to another) is a high-impact operational change that could break existing installations, CI pipelines, and published package references. The setup command changes introduce interactive prompting behavior that may not handle non-interactive/TUI-constrained environments gracefully. These two concerns — a scope rename mixed with feature work in a single commit — create risk of silent breakage for existing users.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename bundled with feature work risks breaking existing installs",
+        "body": "The commit message explicitly mentions 'rename npm scope' alongside the interactive menu feature. A scope rename in package.json means any existing installation referencing the old scoped package name will fail to resolve after this change. This includes: pinned references in other projects, CI caches, lockfiles, and any documentation or scripts referencing the old scope. Bundling this breaking change with unrelated feature work in a single commit makes rollback and bisecting harder — if the menu change has a bug, reverting also reverts the scope rename, and vice versa. There is no evidence of a migration path, deprecation notice, or compatibility shim for the old scope name.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 10,
+        "confidence": 0.75,
+        "recommendation": "Separate the npm scope rename into its own commit with an accompanying migration plan. Ensure the old scoped package either continues to publish as a redirect/alias or that a clear deprecation and migration guide is provided. Verify that no CI/CD pipelines, documentation, or downstream consumers reference the old scope."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive menu in setup command may fail or hang in non-interactive environments",
+        "body": "The setup command now presents an interactive menu when already configured. If this command is invoked in a non-interactive context (CI, scripting, piped input), the prompt may hang indefinitely waiting for user input, or produce unexpected behavior. There is no visible guard for detecting TTY availability or a --yes/--force flag to skip the interactive prompt. This can silently block automation pipelines.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.7,
+        "recommendation": "Add a TTY detection guard or a non-interactive fallback (e.g., exit with status 0 and a message, or accept a flag like --reconfigure to explicitly opt into the interactive flow). Document the expected behavior in headless/CI environments."
+      }
+    ],
+    "next_steps": [
+      "Inspect the full diff of package.json to confirm the old and new scope names and assess blast radius of the rename.",
+      "Check if commands/setup.md contains any TTY detection, timeout, or non-interactive mode handling in the prompt logic.",
+      "Verify whether the .claude-plugin/plugin.json and marketplace.json changes are consistent with the new scope name and don't reference stale identifiers.",
+      "Consider splitting this into two commits: one for the scope rename (with migration docs) and one for the interactive menu feature."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"This commit bundles an interactive menu for /glm:setup re-configuration with an npm scope rename. The scope rename (likely changing the package scope from one name to another) is a high-impact operational change that could break existing installations, CI pipelines, and published package references. The setup command changes introduce interactive prompting behavior that may not handle non-interactive/TUI-constrained environments gracefully. These two concerns — a scope rename mixed with feature work in a single commit — create risk of silent breakage for existing users.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename bundled with feature work risks breaking existing installs\",\n      \"body\": \"The commit message explicitly mentions 'rename npm scope' alongside the interactive menu feature. A scope rename in package.json means any existing installation referencing the old scoped package name will fail to resolve after this change. This includes: pinned references in other projects, CI caches, lockfiles, and any documentation or scripts referencing the old scope. Bundling this breaking change with unrelated feature work in a single commit makes rollback and bisecting harder — if the menu change has a bug, reverting also reverts the scope rename, and vice versa. There is no evidence of a migration path, deprecation notice, or compatibility shim for the old scope name.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 10,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Separate the npm scope rename into its own commit with an accompanying migration plan. Ensure the old scoped package either continues to publish as a redirect/alias or that a clear deprecation and migration guide is provided. Verify that no CI/CD pipelines, documentation, or downstream consumers reference the old scope.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Interactive menu in setup command may fail or hang in non-interactive environments\",\n      \"body\": \"The setup command now presents an interactive menu when already configured. If this command is invoked in a non-interactive context (CI, scripting, piped input), the prompt may hang indefinitely waiting for user input, or produce unexpected behavior. There is no visible guard for detecting TTY availability or a --yes/--force flag to skip the interactive prompt. This can silently block automation pipelines.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Add a TTY detection guard or a non-interactive fallback (e.g., exit with status 0 and a message, or accept a flag like --reconfigure to explicitly opt into the interactive flow). Document the expected behavior in headless/CI environments.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect the full diff of package.json to confirm the old and new scope names and assess blast radius of the rename.\",\n    \"Check if commands/setup.md contains any TTY detection, timeout, or non-interactive mode handling in the prompt logic.\",\n    \"Verify whether the .claude-plugin/plugin.json and marketplace.json changes are consistent with the new scope name and don't reference stale identifiers.\",\n    \"Consider splitting this into two commits: one for the scope rename (with migration docs) and one for the interactive menu feature.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:38:54.872Z"
+}

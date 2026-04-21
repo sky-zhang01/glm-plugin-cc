@@ -1,0 +1,70 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.333,
+    "citation_false_file_hits": 0,
+    "latency_ms": 111101,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit introduces an npm scope rename alongside a functional change to the setup command. The scope rename is a breaking change for existing installations that lacks any visible migration path or deprecation notice. The interactive menu addition to setup cannot be fully assessed without the full diff content, but the combination of a breaking distribution change with functional changes in a single commit increases rollback risk.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change with no visible migration path",
+        "body": "The commit message explicitly states 'rename npm scope' and package.json shows 4 lines changed. Changing an npm package scope (e.g., @old-scope/name → @new-scope/name) effectively creates a new, unrelated package on the registry. Existing users who installed under the old scope will not receive this or future updates. Their lockfiles, CI pipelines, and any automated tooling referencing the old scoped name will silently resolve to the stale package. No deprecation of the old scope or migration guide is evident from the changed files. Combined with the plugin metadata changes in .claude-plugin/plugin.json and marketplace.json (which likely reference the new scope), users on the old scope may also see mismatched plugin registry entries. This is a version-skew / compatibility regression that is expensive to recover from once published.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.78,
+        "recommendation": "Either (a) revert the scope rename and defer it to a major version bump with a published migration guide and deprecation of the old scope, or (b) publish the package under both scopes with the old scope pointing to the new one as a redirect/deprecation alias. At minimum, add explicit migration instructions to CHANGELOG.md and verify that the old scope package on npm is either deprecated or redirects correctly."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive menu added to setup without visible error handling for corrupted or partial config states",
+        "body": "commands/setup.md was modified (19 lines changed) to add an interactive menu when the system is 'already configured.' The commit message frames this as a fix, but the logic path for 'already configured' is being expanded. If a user's configuration exists but is corrupted, partially written, or in an inconsistent state (e.g., from a prior failed setup), the interactive menu may present misleading options or fail silently. Without visibility into the full diff, the risk cannot be fully quantified, but setup commands are a trust boundary where bad state handling leads to support burdens and user confusion.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.55,
+        "recommendation": "Verify the setup command explicitly handles edge cases: empty config file, malformed JSON/config, partial configuration from a previous failed run, and permission errors on the config file. Ensure the interactive menu has a 'start fresh / reset' option that fully cleans up before re-running."
+      },
+      {
+        "severity": "medium",
+        "title": "Breaking scope rename co-committed with functional changes increases rollback risk",
+        "body": "The npm scope rename (package.json, .claude-plugin/plugin.json, .claude-plugin/marketplace.json) and the interactive menu feature (commands/setup.md) are in the same commit. If the interactive menu introduces a regression after release, rolling back the commit also rolls back the scope rename, breaking any users who already installed under the new scope. These are two orthogonal changes that should be isolated to allow independent rollback.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.72,
+        "recommendation": "Split the scope rename and the setup menu feature into separate commits or PRs. Ship the scope rename first with only the metadata changes, verify distribution works under the new scope, then ship the functional change independently."
+      }
+    ],
+    "next_steps": [
+      "Run `git show 7766943 -- package.json` to confirm the exact scope change and assess blast radius on existing installations.",
+      "Run `git show 7766943 -- commands/setup.md` to inspect the interactive menu logic and verify edge-case handling for partial/corrupted config states.",
+      "Verify whether the old npm scope package has been deprecated or if it remains published and stale.",
+      "Split the scope rename from the functional change into separate commits to enable independent rollback.",
+      "Add a migration section to CHANGELOG.md if the scope rename must ship."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"This commit introduces an npm scope rename alongside a functional change to the setup command. The scope rename is a breaking change for existing installations that lacks any visible migration path or deprecation notice. The interactive menu addition to setup cannot be fully assessed without the full diff content, but the combination of a breaking distribution change with functional changes in a single commit increases rollback risk.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename is a breaking change with no visible migration path\",\n      \"body\": \"The commit message explicitly states 'rename npm scope' and package.json shows 4 lines changed. Changing an npm package scope (e.g., @old-scope/name → @new-scope/name) effectively creates a new, unrelated package on the registry. Existing users who installed under the old scope will not receive this or future updates. Their lockfiles, CI pipelines, and any automated tooling referencing the old scoped name will silently resolve to the stale package. No deprecation of the old scope or migration guide is evident from the changed files. Combined with the plugin metadata changes in .claude-plugin/plugin.json and marketplace.json (which likely reference the new scope), users on the old scope may also see mismatched plugin registry entries. This is a version-skew / compatibility regression that is expensive to recover from once published.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Either (a) revert the scope rename and defer it to a major version bump with a published migration guide and deprecation of the old scope, or (b) publish the package under both scopes with the old scope pointing to the new one as a redirect/deprecation alias. At minimum, add explicit migration instructions to CHANGELOG.md and verify that the old scope package on npm is either deprecated or redirects correctly.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Interactive menu added to setup without visible error handling for corrupted or partial config states\",\n      \"body\": \"commands/setup.md was modified (19 lines changed) to add an interactive menu when the system is 'already configured.' The commit message frames this as a fix, but the logic path for 'already configured' is being expanded. If a user's configuration exists but is corrupted, partially written, or in an inconsistent state (e.g., from a prior failed setup), the interactive menu may present misleading options or fail silently. Without visibility into the full diff, the risk cannot be fully quantified, but setup commands are a trust boundary where bad state handling leads to support burdens and user confusion.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Verify the setup command explicitly handles edge cases: empty config file, malformed JSON/config, partial configuration from a previous failed run, and permission errors on the config file. Ensure the interactive menu has a 'start fresh / reset' option that fully cleans up before re-running.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Breaking scope rename co-committed with functional changes increases rollback risk\",\n      \"body\": \"The npm scope rename (package.json, .claude-plugin/plugin.json, .claude-plugin/marketplace.json) and the interactive menu feature (commands/setup.md) are in the same commit. If the interactive menu introduces a regression after release, rolling back the commit also rolls back the scope rename, breaking any users who already installed under the new scope. These are two orthogonal changes that should be isolated to allow independent rollback.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Split the scope rename and the setup menu feature into separate commits or PRs. Ship the scope rename first with only the metadata changes, verify distribution works under the new scope, then ship the functional change independently.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `git show 7766943 -- package.json` to confirm the exact scope change and assess blast radius on existing installations.\",\n    \"Run `git show 7766943 -- commands/setup.md` to inspect the interactive menu logic and verify edge-case handling for partial/corrupted config states.\",\n    \"Verify whether the old npm scope package has been deprecated or if it remains published and stale.\",\n    \"Split the scope rename from the functional change into separate commits to enable independent rollback.\",\n    \"Add a migration section to CHANGELOG.md if the scope rename must ship.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:31:31.679Z"
+}

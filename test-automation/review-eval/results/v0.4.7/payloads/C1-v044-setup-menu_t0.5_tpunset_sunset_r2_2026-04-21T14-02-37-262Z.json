@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 41880,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The commit renames the npm scope and restructures setup flows, but the diff introduces an interactive menu path in commands/setup.md that lacks explicit guard rails for non-interactive or headless environments. Given the user focus on 'sampling-sweep run 2 (C1-v044-setup-menu)', the setup menu logic is the primary concern. The changes are mostly documentation and configuration, which limits the attack surface, but the scope rename in package.json could break existing installs if not coordinated with npm publication, and the interactive menu addition may silently fail or produce confusing behavior in environments that don't support interactivity.",
+    "findings": [
+      {
+        "severity": "medium",
+        "title": "npm scope rename creates install continuity break for existing users",
+        "body": "The package.json `name` field and related references appear to change the npm scope. If the new package hasn't been published under the new scope yet, or if users have existing installations referencing the old scope, `npm install` or update flows will fail silently or 404. This is a coordination hazard: the code change and the publication must be atomic, but there's no evidence of a migration path or deprecation notice for the old package name.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.7,
+        "recommendation": "Verify the new scoped package is published before merging. Add a deprecation notice to the old package name if it exists on npm. Consider documenting the migration step in CHANGELOG.md or a migration guide."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive setup menu may hang or misbehave in non-TTY/headless contexts",
+        "body": "commands/setup.md introduces an interactive menu when the tool is already configured. Claude plugin commands may execute in contexts where interactive prompts cannot be displayed or answered (e.g., CI, programmatic invocation, constrained terminals). There is no documented fallback or non-interactive flag, which means the setup command could block indefinitely or produce an unreadable prompt state.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.65,
+        "recommendation": "Document or implement a non-interactive mode or default behavior when interactivity is unavailable. At minimum, clarify in the command documentation what happens in headless environments and provide a skip/force flag."
+      },
+      {
+        "severity": "low",
+        "title": "CHANGELOG entry references version that may not match actual release tag",
+        "body": "CHANGELOG.md adds a v0.4.7 entry but the commit message and branch context reference 'v0.4.7 sampling-sweep run 2 (C1-v044-setup-menu)'. If this CHANGELOG is committed before the version in package.json is bumped to match, or if the tag is never created, the changelog becomes misleading. This is a minor coherence issue but can cause confusion during release audits.",
+        "file": "CHANGELOG.md",
+        "line_start": 1,
+        "line_end": 21,
+        "confidence": 0.5,
+        "recommendation": "Ensure the version in package.json matches the CHANGELOG entry before tagging. Consider automating version sync as part of the release process."
+      }
+    ],
+    "next_steps": [
+      "Confirm the new npm scope package is published and discoverable before this commit lands on main.",
+      "Test the /glm:setup command in a non-interactive environment to verify graceful degradation or clear error messaging.",
+      "Verify that the interactive menu in commands/setup.md handles all edge cases: already configured, partially configured, and first-run states.",
+      "Synchronize the CHANGELOG version with the actual package.json version before release."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The commit renames the npm scope and restructures setup flows, but the diff introduces an interactive menu path in commands/setup.md that lacks explicit guard rails for non-interactive or headless environments. Given the user focus on 'sampling-sweep run 2 (C1-v044-setup-menu)', the setup menu logic is the primary concern. The changes are mostly documentation and configuration, which limits the attack surface, but the scope rename in package.json could break existing installs if not coordinated with npm publication, and the interactive menu addition may silently fail or produce confusing behavior in environments that don't support interactivity.\",\"findings\":[{\"severity\":\"medium\",\"title\":\"npm scope rename creates install continuity break for existing users\",\"body\":\"The package.json `name` field and related references appear to change the npm scope. If the new package hasn't been published under the new scope yet, or if users have existing installations referencing the old scope, `npm install` or update flows will fail silently or 404. This is a coordination hazard: the code change and the publication must be atomic, but there's no evidence of a migration path or deprecation notice for the old package name.\",\"file\":\"package.json\",\"line_start\":1,\"line_end\":4,\"confidence\":0.7,\"recommendation\":\"Verify the new scoped package is published before merging. Add a deprecation notice to the old package name if it exists on npm. Consider documenting the migration step in CHANGELOG.md or a migration guide.\"},{\"severity\":\"medium\",\"title\":\"Interactive setup menu may hang or misbehave in non-TTY/headless contexts\",\"body\":\"commands/setup.md introduces an interactive menu when the tool is already configured. Claude plugin commands may execute in contexts where interactive prompts cannot be displayed or answered (e.g., CI, programmatic invocation, constrained terminals). There is no documented fallback or non-interactive flag, which means the setup command could block indefinitely or produce an unreadable prompt state.\",\"file\":\"commands/setup.md\",\"line_start\":1,\"line_end\":19,\"confidence\":0.65,\"recommendation\":\"Document or implement a non-interactive mode or default behavior when interactivity is unavailable. At minimum, clarify in the command documentation what happens in headless environments and provide a skip/force flag.\"},{\"severity\":\"low\",\"title\":\"CHANGELOG entry references version that may not match actual release tag\",\"body\":\"CHANGELOG.md adds a v0.4.7 entry but the commit message and branch context reference 'v0.4.7 sampling-sweep run 2 (C1-v044-setup-menu)'. If this CHANGELOG is committed before the version in package.json is bumped to match, or if the tag is never created, the changelog becomes misleading. This is a minor coherence issue but can cause confusion during release audits.\",\"file\":\"CHANGELOG.md\",\"line_start\":1,\"line_end\":21,\"confidence\":0.5,\"recommendation\":\"Ensure the version in package.json matches the CHANGELOG entry before tagging. Consider automating version sync as part of the release process.\"}],\"next_steps\":[\"Confirm the new npm scope package is published and discoverable before this commit lands on main.\",\"Test the /glm:setup command in a non-interactive environment to verify graceful degradation or clear error messaging.\",\"Verify that the interactive menu in commands/setup.md handles all edge cases: already configured, partially configured, and first-run states.\",\"Synchronize the CHANGELOG version with the actual package.json version before release.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:02:37.284Z"
+}

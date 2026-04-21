@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 7
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 80569,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit introduces an interactive menu to the /glm:setup command and renames the npm scope. The npm scope rename is a breaking change for any existing consumers referencing the old package name, and there is no evidence of migration guidance or backward compatibility in the diff. The setup command changes add interactive branching logic, but without clarity on how partial configurations or malformed existing state are handled, there is risk of silent misconfiguration.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change with no migration path visible",
+        "body": "The commit message explicitly states 'rename npm scope' and package.json is modified. Changing the npm package scope breaks all existing import/require paths, installation scripts, and lockfiles that reference the old scope. The CHANGELOG and release_card.md updates should contain explicit migration instructions and version bump rationale. If consumers have 'npm install @old-scope/package' in CI or docs, those will 404 post-publish. This is the kind of change that silently breaks downstream users who pin or cache old URLs.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.7,
+        "recommendation": "Verify that: (1) the old scope package is either deprecated with a redirect or republished as a stub pointing to the new scope, (2) all internal and external documentation references are updated, (3) the CHANGELOG entry explicitly calls out the breaking rename with before/after package names, and (4) a major version bump accompanies this if semver is followed."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive setup menu lacks documented handling for partially-configured or corrupt state",
+        "body": "The commit adds an interactive menu to /glm:setup 'when already configured.' This implies branching logic based on detecting prior configuration. If the existing configuration is partially written, corrupt, or in an unexpected format (e.g., from a prior version with a different schema), the detection logic may incorrectly classify the state as 'configured' and present the wrong menu options, or silently overwrite without preserving recoverable state. The setup.md command file is the authority here, and its error/skip paths for edge cases are not auditable from the stat alone.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.55,
+        "recommendation": "Explicitly document and test the following states: (1) no config exists, (2) fully valid config exists, (3) partially written/corrupt config exists, (4) config exists but with an outdated schema version. Ensure the menu gracefully degrades or offers repair, not just skip-or-overwrite."
+      },
+      {
+        "severity": "low",
+        "title": "Plugin metadata files modified but consistency between marketplace.json and plugin.json not verified",
+        "body": "Both .claude-plugin/marketplace.json and .claude-plugin/plugin.json are modified. If these files contain duplicated metadata (name, version, description) that must stay in sync, a partial update could cause the plugin to appear with mismatched identity in the marketplace vs. runtime, leading to user confusion or failed installation.",
+        "file": ".claude-plugin/marketplace.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.4,
+        "recommendation": "Cross-check that name, version, and scope values in marketplace.json match plugin.json exactly. Consider a CI check or build script that validates consistency between these two files."
+      }
+    ],
+    "next_steps": [
+      "Inspect the full diff of package.json to confirm the exact scope change and verify the new scope is already registered/published on npm.",
+      "Read commands/setup.md in full to audit the interactive menu branching logic for edge cases (partial config, corrupt config, version skew).",
+      "Verify CHANGELOG.md contains explicit breaking-change callout for the scope rename with migration instructions.",
+      "Confirm .claude-plugin/marketplace.json and plugin.json have consistent name/version/scope values after the rename."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"This commit introduces an interactive menu to the /glm:setup command and renames the npm scope. The npm scope rename is a breaking change for any existing consumers referencing the old package name, and there is no evidence of migration guidance or backward compatibility in the diff. The setup command changes add interactive branching logic, but without clarity on how partial configurations or malformed existing state are handled, there is risk of silent misconfiguration.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename is a breaking change with no migration path visible\",\n      \"body\": \"The commit message explicitly states 'rename npm scope' and package.json is modified. Changing the npm package scope breaks all existing import/require paths, installation scripts, and lockfiles that reference the old scope. The CHANGELOG and release_card.md updates should contain explicit migration instructions and version bump rationale. If consumers have 'npm install @old-scope/package' in CI or docs, those will 404 post-publish. This is the kind of change that silently breaks downstream users who pin or cache old URLs.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Verify that: (1) the old scope package is either deprecated with a redirect or republished as a stub pointing to the new scope, (2) all internal and external documentation references are updated, (3) the CHANGELOG entry explicitly calls out the breaking rename with before/after package names, and (4) a major version bump accompanies this if semver is followed.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Interactive setup menu lacks documented handling for partially-configured or corrupt state\",\n      \"body\": \"The commit adds an interactive menu to /glm:setup 'when already configured.' This implies branching logic based on detecting prior configuration. If the existing configuration is partially written, corrupt, or in an unexpected format (e.g., from a prior version with a different schema), the detection logic may incorrectly classify the state as 'configured' and present the wrong menu options, or silently overwrite without preserving recoverable state. The setup.md command file is the authority here, and its error/skip paths for edge cases are not auditable from the stat alone.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Explicitly document and test the following states: (1) no config exists, (2) fully valid config exists, (3) partially written/corrupt config exists, (4) config exists but with an outdated schema version. Ensure the menu gracefully degrades or offers repair, not just skip-or-overwrite.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"Plugin metadata files modified but consistency between marketplace.json and plugin.json not verified\",\n      \"body\": \"Both .claude-plugin/marketplace.json and .claude-plugin/plugin.json are modified. If these files contain duplicated metadata (name, version, description) that must stay in sync, a partial update could cause the plugin to appear with mismatched identity in the marketplace vs. runtime, leading to user confusion or failed installation.\",\n      \"file\": \".claude-plugin/marketplace.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.4,\n      \"recommendation\": \"Cross-check that name, version, and scope values in marketplace.json match plugin.json exactly. Consider a CI check or build script that validates consistency between these two files.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect the full diff of package.json to confirm the exact scope change and verify the new scope is already registered/published on npm.\",\n    \"Read commands/setup.md in full to audit the interactive menu branching logic for edge cases (partial config, corrupt config, version skew).\",\n    \"Verify CHANGELOG.md contains explicit breaking-change callout for the scope rename with migration instructions.\",\n    \"Confirm .claude-plugin/marketplace.json and plugin.json have consistent name/version/scope values after the rename.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T17:02:22.774Z"
+}

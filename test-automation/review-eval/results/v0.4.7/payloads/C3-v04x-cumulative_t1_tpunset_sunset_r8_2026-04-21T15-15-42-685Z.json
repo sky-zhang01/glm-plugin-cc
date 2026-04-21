@@ -1,0 +1,81 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 8
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 133035,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6+ cumulative diff introduces 6,600+ lines across 84 files including a deleted module (process.mjs), a new retry/backoff subsystem (retry.mjs, bigmodel-errors.mjs), and significant client/state changes. Without runtime verification of the process.mjs deletion and validation of the retry subsystem's edge-case handling, this change carries material risk of silent failures and import-breakage regressions. The concentration of new critical-path code without observable integration evidence is the primary blocker.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Deleted process.mjs may leave dangling imports at runtime",
+        "body": "The diff stat shows scripts/lib/process.mjs was removed (67 deletions, 0 additions). The commit log references 'full thread/resume scaffolding purge' (Bundle F). If any surviving module — glm-companion.mjs, state.mjs, tracked-jobs.mjs, job-control.mjs, or any test file — still contains a dynamic or static import of process.mjs, the application will throw ERR_MODULE_NOT_FOUND at runtime. Static analysis CI cannot catch dynamic imports or conditional requires. The risk is elevated because this deletion was bundled with other refactors, making it easy to miss a consumer.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.65,
+        "recommendation": "Run `grep -r 'process\\.mjs' scripts/ tests/ commands/ --include='*.mjs' --include='*.js' --include='*.md'` against the HEAD tree. If any hit is a runtime import (not just a comment or changelog reference), this is a shipping blocker. Add a CI gate that greps for imports of deleted modules."
+      },
+      {
+        "severity": "high",
+        "title": "New retry.mjs (203 LOC) + bigmodel-errors.mjs (168 LOC) form an unvalidated critical path for all API calls",
+        "body": "v0.4.6 added 'BigModel error dispatch + auto retry/backoff.' retry.mjs and bigmodel-errors.mjs together decide whether a failed API call is retried, how many times, with what backoff, and when to give up. This is now on the critical path for every glm-client.mjs call. The risks: (1) Misclassified errors may be retried when they shouldn't be (e.g., 4xx auth errors retried until rate-limit lockout), (2) Idempotency is assumed but not guaranteed — a retried POST that already succeeded server-side causes duplication, (3) Retry exhaustion may be surfaced silently, hiding the root cause from the user, (4) The 352-line test file covers unit scenarios but cannot validate the combined retry+dispatch+client behavior under real API failures. No integration or UAT evidence exists in the repo for v0.4.6 retry behavior.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "1. Verify that bigmodel-errors.mjs classifies 4xx authentication/authorization errors as non-retryable. 2. Audit glm-client.mjs to confirm retried operations are idempotent (GET/HEAD only, or POST with idempotency keys). 3. Add a UAT scenario that simulates a transient 5xx followed by success, and a persistent 5xx that exhausts retries, validating both user-visible output and final exit code. 4. Add retry-count observability (log or stderr) so silent exhaustion is detectable."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs changes (155 LOC modified) combined with retry create a compound risk surface with no UAT coverage",
+        "body": "glm-client.mjs had 155 lines modified and now depends on both the new retry subsystem and bigmodel-errors error dispatch. The UAT reports in the repo cover v0.4.4 and v0.4.5 but not v0.4.6. This means the exact version shipping has no recorded end-to-end validation of the client+retry+error-dispatch integration. Any regression in how the client handles timeouts, partial responses, or connection resets will only surface in production.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.6,
+        "recommendation": "Create a v0.4.6 UAT report that exercises: (a) successful API call, (b) transient failure with automatic retry success, (c) persistent failure with retry exhaustion and clear error output, (d) authentication error that is NOT retried, (e) concurrent job submissions that may trigger overlapping retries. Do not ship without at least scenarios (a), (b), (c) passing."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs and tracked-jobs.mjs changes risk race conditions on concurrent job operations",
+        "body": "state.mjs (32 LOC changed) and tracked-jobs.mjs (78 LOC changed) manage persistent job state. The v0.4.5 addition of --wait/--background flags means two execution modes can now operate on the same state files concurrently. If state writes are not atomic (write-to-temp + rename) and reads are not protected against partial reads, a background job writing state while a foreground --wait polls can corrupt the state file. This would cause silent job tracking loss or incorrect status reporting.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.55,
+        "recommendation": "Audit state.mjs write operations to confirm they use atomic file replacement (write to .tmp, then rename). Audit tracked-jobs.mjs for file-locking or serialization when multiple processes access the same state file. Add a test that writes and reads state concurrently to expose corruption."
+      }
+    ],
+    "next_steps": [
+      "Run `grep -rn 'process\\.mjs\\|from.*process' scripts/ tests/` against HEAD to confirm no dangling imports from the deleted module.",
+      "Read retry.mjs and confirm 4xx auth errors are classified as non-retryable in bigmodel-errors.mjs.",
+      "Read glm-client.mjs call sites that use retry and verify each retried operation is safe to repeat (idempotent).",
+      "Verify state.mjs write operations use atomic file replacement (write-then-rename pattern).",
+      "Execute at minimum a manual smoke test of: successful call, retried transient failure, and auth-error-no-retry before cutting v0.4.7.",
+      "Produce a v0.4.6 UAT report covering the retry/backoff integration before promoting to v0.4.7."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6+ cumulative diff introduces 6,600+ lines across 84 files including a deleted module (process.mjs), a new retry/backoff subsystem (retry.mjs, bigmodel-errors.mjs), and significant client/state changes. Without runtime verification of the process.mjs deletion and validation of the retry subsystem's edge-case handling, this change carries material risk of silent failures and import-breakage regressions. The concentration of new critical-path code without observable integration evidence is the primary blocker.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Deleted process.mjs may leave dangling imports at runtime\",\n      \"body\": \"The diff stat shows scripts/lib/process.mjs was removed (67 deletions, 0 additions). The commit log references 'full thread/resume scaffolding purge' (Bundle F). If any surviving module — glm-companion.mjs, state.mjs, tracked-jobs.mjs, job-control.mjs, or any test file — still contains a dynamic or static import of process.mjs, the application will throw ERR_MODULE_NOT_FOUND at runtime. Static analysis CI cannot catch dynamic imports or conditional requires. The risk is elevated because this deletion was bundled with other refactors, making it easy to miss a consumer.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Run `grep -r 'process\\\\.mjs' scripts/ tests/ commands/ --include='*.mjs' --include='*.js' --include='*.md'` against the HEAD tree. If any hit is a runtime import (not just a comment or changelog reference), this is a shipping blocker. Add a CI gate that greps for imports of deleted modules.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"New retry.mjs (203 LOC) + bigmodel-errors.mjs (168 LOC) form an unvalidated critical path for all API calls\",\n      \"body\": \"v0.4.6 added 'BigModel error dispatch + auto retry/backoff.' retry.mjs and bigmodel-errors.mjs together decide whether a failed API call is retried, how many times, with what backoff, and when to give up. This is now on the critical path for every glm-client.mjs call. The risks: (1) Misclassified errors may be retried when they shouldn't be (e.g., 4xx auth errors retried until rate-limit lockout), (2) Idempotency is assumed but not guaranteed — a retried POST that already succeeded server-side causes duplication, (3) Retry exhaustion may be surfaced silently, hiding the root cause from the user, (4) The 352-line test file covers unit scenarios but cannot validate the combined retry+dispatch+client behavior under real API failures. No integration or UAT evidence exists in the repo for v0.4.6 retry behavior.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.72,\n      \"recommendation\": \"1. Verify that bigmodel-errors.mjs classifies 4xx authentication/authorization errors as non-retryable. 2. Audit glm-client.mjs to confirm retried operations are idempotent (GET/HEAD only, or POST with idempotency keys). 3. Add a UAT scenario that simulates a transient 5xx followed by success, and a persistent 5xx that exhausts retries, validating both user-visible output and final exit code. 4. Add retry-count observability (log or stderr) so silent exhaustion is detectable.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client.mjs changes (155 LOC modified) combined with retry create a compound risk surface with no UAT coverage\",\n      \"body\": \"glm-client.mjs had 155 lines modified and now depends on both the new retry subsystem and bigmodel-errors error dispatch. The UAT reports in the repo cover v0.4.4 and v0.4.5 but not v0.4.6. This means the exact version shipping has no recorded end-to-end validation of the client+retry+error-dispatch integration. Any regression in how the client handles timeouts, partial responses, or connection resets will only surface in production.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Create a v0.4.6 UAT report that exercises: (a) successful API call, (b) transient failure with automatic retry success, (c) persistent failure with retry exhaustion and clear error output, (d) authentication error that is NOT retried, (e) concurrent job submissions that may trigger overlapping retries. Do not ship without at least scenarios (a), (b), (c) passing.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"state.mjs and tracked-jobs.mjs changes risk race conditions on concurrent job operations\",\n      \"body\": \"state.mjs (32 LOC changed) and tracked-jobs.mjs (78 LOC changed) manage persistent job state. The v0.4.5 addition of --wait/--background flags means two execution modes can now operate on the same state files concurrently. If state writes are not atomic (write-to-temp + rename) and reads are not protected against partial reads, a background job writing state while a foreground --wait polls can corrupt the state file. This would cause silent job tracking loss or incorrect status reporting.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Audit state.mjs write operations to confirm they use atomic file replacement (write to .tmp, then rename). Audit tracked-jobs.mjs for file-locking or serialization when multiple processes access the same state file. Add a test that writes and reads state concurrently to expose corruption.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `grep -rn 'process\\\\.mjs\\\\|from.*process' scripts/ tests/` against HEAD to confirm no dangling imports from the deleted module.\",\n    \"Read retry.mjs and confirm 4xx auth errors are classified as non-retryable in bigmodel-errors.mjs.\",\n    \"Read glm-client.mjs call sites that use retry and verify each retried operation is safe to repeat (idempotent).\",\n    \"Verify state.mjs write operations use atomic file replacement (write-then-rename pattern).\",\n    \"Execute at minimum a manual smoke test of: successful call, retried transient failure, and auth-error-no-retry before cutting v0.4.7.\",\n    \"Produce a v0.4.6 UAT report covering the retry/backoff integration before promoting to v0.4.7.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T15:15:42.712Z"
+}

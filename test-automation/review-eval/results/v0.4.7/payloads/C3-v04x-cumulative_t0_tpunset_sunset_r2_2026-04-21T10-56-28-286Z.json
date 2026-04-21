@@ -1,0 +1,111 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 7,
+    "citation_accuracy": 0.857,
+    "citation_false_file_hits": 0,
+    "latency_ms": 83839,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces a substantial surface of new runtime logic — retry with backoff, BigModel error dispatch, job tracking, and client refactoring — but several of these paths have silent-failure or partial-completion risks that would be invisible to users. The retry module, BigModel error classifier, and glm-client changes are the highest-concern areas. The diff has no automated unit-test evidence visible for the companion CLI main path or the tracked-jobs module under concurrent access, and the process.mjs deletion is a removal risk. Ship-blocking issues center on retry/state interactions and error-path observability gaps.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs retryWithBackoff may silently swallow the last error and return undefined",
+        "body": "The retry module (203 lines added) is central to the v0.4.6 auto-retry/backoff feature. If the final retry attempt fails and the error-handling path has a guard that catches without re-throwing, callers in glm-client.mjs will receive undefined instead of a result or thrown error. This would propagate as a silent failure in the sampling-sweep flow — the job would appear to complete without producing output, and no error would surface to the user. Without seeing the exact implementation, the risk is that the 'exhausted retries' branch does not guarantee a thrown error reaches the caller. The 352-line retry test file suggests coverage exists, but silent-failure on the final attempt is a classic blind spot.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Verify that retryWithBackoff guarantees a thrown error on exhaustion (never returns undefined). Add an explicit invariant check after the retry loop: if attempts exhausted, always throw the last error. Add a unit test that asserts the exact error thrown on final failure, not just that an error is thrown."
+      },
+      {
+        "severity": "high",
+        "title": "glm-client.mjs refactored with retry — potential double-submission on retryable errors that are not idempotent",
+        "body": "glm-client.mjs (155 lines changed) now integrates retry logic for BigModel API calls. If the original request mutates server-side state (e.g., job creation, task submission) and the response is lost due to a network timeout — triggering a retry — the retried request could create a duplicate job or submit duplicate work. The sampling-sweep context (v0.4.7 run 2) would amplify this: multiple concurrent requests with retries could produce ghost jobs that consume resources without visibility. There is no evidence of idempotency keys or deduplication guards in the diff.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.68,
+        "recommendation": "Audit every call site where glm-client issues mutating requests through retry. Either make those requests idempotent (e.g., include an idempotency key header) or mark them as non-retryable. Document which operations are safe to retry and which are not."
+      },
+      {
+        "severity": "high",
+        "title": "bigmodel-errors.mjs error classifier — unmapped error codes fall through to default that may misclassify",
+        "body": "The BigModel error dispatch module (168 lines) classifies API errors to determine retry eligibility. If an error response contains a status code or error type not covered by the classifier, the default branch determines whether to retry. A misclassification (retrying a non-retryable error like 401/403, or not retrying a retryable 503/429) wastes resources or silently abandons work. During sampling-sweep runs against production APIs, new error variants are likely to appear. The default case is the exact blind spot an adversarial reviewer should target.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.75,
+        "recommendation": "Ensure the default/fallback error classification is conservative (do NOT retry unknown errors). Add logging/metrics when an unmapped error type is encountered so new error variants are discoverable. Add a test for a completely unknown error shape asserting the safe default behavior."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs concurrent access — file-based state without locking",
+        "body": "The tracked-jobs module (78 lines changed) manages job state, likely via filesystem writes. Concurrent invocations of the companion CLI (plausible during sampling-sweep) could interleave reads and writes to the same state file, causing lost updates where one process overwrites another's job registration. This would manifest as 'disappearing' jobs — jobs that were submitted but never show in status checks. No file-locking primitive is visible in the diff.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.65,
+        "recommendation": "Add atomic write semantics (write-to-temp then rename) if not already present. For concurrent read-modify-write patterns, consider lockfile-based mutual exclusion or migrate to a JSONL-append-only format that doesn't require full file rewrites. Test with two concurrent processes writing simultaneously."
+      },
+      {
+        "severity": "medium",
+        "title": "process.mjs deleted — removal risk for callers not yet migrated",
+        "body": "scripts/lib/process.mjs (67 lines deleted) was removed entirely. If any runtime path or test still imports from this module, it would fail with a ModuleNotFoundError at execution time — not at load time for dynamically-imported paths. The check-imports.mjs script (5 lines changed) may catch static imports but not dynamic ones or eval-based patterns. This is a classic version-skew hazard when deploying incrementally.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.55,
+        "recommendation": "Run a full-text grep across the entire codebase (including test files, scripts, and markdown command templates) for any remaining reference to 'process.mjs' or 'lib/process'. The check-imports.mjs script should be run as part of CI to catch these. Consider leaving a re-export shim that throws a descriptive deprecation error instead of a bare removal."
+      },
+      {
+        "severity": "medium",
+        "title": "render.mjs refactored — error paths may produce incomplete or empty output silently",
+        "body": "The render module (79 lines changed) handles output formatting for job results. If rendering encounters a partial or malformed result object (e.g., from a retried request that returned incomplete data), the render path may produce empty or truncated output without raising an error. Users in the sampling-sweep would see a successful-looking result that is actually missing data. The 193-line render test file may cover happy paths but partial-input rendering is a common blind spot.",
+        "file": "scripts/lib/render.mjs",
+        "line_start": 1,
+        "line_end": 79,
+        "confidence": 0.6,
+        "recommendation": "Add explicit validation in the render path that checks for required fields in the result object before rendering. If fields are missing, emit a visible warning or error marker in the output rather than silently omitting content. Add tests for null/undefined/partial result objects."
+      },
+      {
+        "severity": "low",
+        "title": "state.mjs changes — no evidence of migration path for existing state files",
+        "body": "The state module (32 lines changed) presumably manages persisted state format. If the on-disk format changed between v0.4.0 and v0.4.6, existing user state files from v0.4.0 would fail to parse on upgrade with no migration path visible in the diff. This would manifest as a crash on first run after upgrade — a poor user experience with no recovery guidance.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.5,
+        "recommendation": "Verify that state.mjs can read both old (v0.4.0) and new (v0.4.6) state file formats. If the format changed, add a migration shim or a try/catch with a clear error message instructing the user to re-run setup. Document the state file format version."
+      }
+    ],
+    "next_steps": [
+      "Inspect scripts/lib/retry.mjs exhaust-failure branch: confirm it always throws, never returns undefined. This is the single highest-impact fix.",
+      "Audit scripts/lib/glm-client.mjs for every call site that goes through retry — identify which are mutating (job creation, task submission) and verify idempotency or mark non-retryable.",
+      "Read the default/fallback branch in scripts/lib/bigmodel-errors.mjs — confirm unknown errors are classified as non-retryable, and add observability (log/stderr) for unmapped error types.",
+      "Grep the entire repo for any remaining import or reference to 'lib/process' to confirm the process.mjs deletion is clean.",
+      "Run tests with NODE_OPTIONS='--experimental-vm-modules' to confirm no dynamic import paths break after process.mjs removal.",
+      "Verify tracked-jobs.mjs uses atomic writes (write-then-rename) and test concurrent access with two CLI invocations simultaneously."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 diff introduces a substantial surface of new runtime logic — retry with backoff, BigModel error dispatch, job tracking, and client refactoring — but several of these paths have silent-failure or partial-completion risks that would be invisible to users. The retry module, BigModel error classifier, and glm-client changes are the highest-concern areas. The diff has no automated unit-test evidence visible for the companion CLI main path or the tracked-jobs module under concurrent access, and the process.mjs deletion is a removal risk. Ship-blocking issues center on retry/state interactions and error-path observability gaps.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"retry.mjs retryWithBackoff may silently swallow the last error and return undefined\",\n      \"body\": \"The retry module (203 lines added) is central to the v0.4.6 auto-retry/backoff feature. If the final retry attempt fails and the error-handling path has a guard that catches without re-throwing, callers in glm-client.mjs will receive undefined instead of a result or thrown error. This would propagate as a silent failure in the sampling-sweep flow — the job would appear to complete without producing output, and no error would surface to the user. Without seeing the exact implementation, the risk is that the 'exhausted retries' branch does not guarantee a thrown error reaches the caller. The 352-line retry test file suggests coverage exists, but silent-failure on the final attempt is a classic blind spot.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Verify that retryWithBackoff guarantees a thrown error on exhaustion (never returns undefined). Add an explicit invariant check after the retry loop: if attempts exhausted, always throw the last error. Add a unit test that asserts the exact error thrown on final failure, not just that an error is thrown.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"glm-client.mjs refactored with retry — potential double-submission on retryable errors that are not idempotent\",\n      \"body\": \"glm-client.mjs (155 lines changed) now integrates retry logic for BigModel API calls. If the original request mutates server-side state (e.g., job creation, task submission) and the response is lost due to a network timeout — triggering a retry — the retried request could create a duplicate job or submit duplicate work. The sampling-sweep context (v0.4.7 run 2) would amplify this: multiple concurrent requests with retries could produce ghost jobs that consume resources without visibility. There is no evidence of idempotency keys or deduplication guards in the diff.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Audit every call site where glm-client issues mutating requests through retry. Either make those requests idempotent (e.g., include an idempotency key header) or mark them as non-retryable. Document which operations are safe to retry and which are not.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"bigmodel-errors.mjs error classifier — unmapped error codes fall through to default that may misclassify\",\n      \"body\": \"The BigModel error dispatch module (168 lines) classifies API errors to determine retry eligibility. If an error response contains a status code or error type not covered by the classifier, the default branch determines whether to retry. A misclassification (retrying a non-retryable error like 401/403, or not retrying a retryable 503/429) wastes resources or silently abandons work. During sampling-sweep runs against production APIs, new error variants are likely to appear. The default case is the exact blind spot an adversarial reviewer should target.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Ensure the default/fallback error classification is conservative (do NOT retry unknown errors). Add logging/metrics when an unmapped error type is encountered so new error variants are discoverable. Add a test for a completely unknown error shape asserting the safe default behavior.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"tracked-jobs.mjs concurrent access — file-based state without locking\",\n      \"body\": \"The tracked-jobs module (78 lines changed) manages job state, likely via filesystem writes. Concurrent invocations of the companion CLI (plausible during sampling-sweep) could interleave reads and writes to the same state file, causing lost updates where one process overwrites another's job registration. This would manifest as 'disappearing' jobs — jobs that were submitted but never show in status checks. No file-locking primitive is visible in the diff.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Add atomic write semantics (write-to-temp then rename) if not already present. For concurrent read-modify-write patterns, consider lockfile-based mutual exclusion or migrate to a JSONL-append-only format that doesn't require full file rewrites. Test with two concurrent processes writing simultaneously.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"process.mjs deleted — removal risk for callers not yet migrated\",\n      \"body\": \"scripts/lib/process.mjs (67 lines deleted) was removed entirely. If any runtime path or test still imports from this module, it would fail with a ModuleNotFoundError at execution time — not at load time for dynamically-imported paths. The check-imports.mjs script (5 lines changed) may catch static imports but not dynamic ones or eval-based patterns. This is a classic version-skew hazard when deploying incrementally.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Run a full-text grep across the entire codebase (including test files, scripts, and markdown command templates) for any remaining reference to 'process.mjs' or 'lib/process'. The check-imports.mjs script should be run as part of CI to catch these. Consider leaving a re-export shim that throws a descriptive deprecation error instead of a bare removal.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"render.mjs refactored — error paths may produce incomplete or empty output silently\",\n      \"body\": \"The render module (79 lines changed) handles output formatting for job results. If rendering encounters a partial or malformed result object (e.g., from a retried request that returned incomplete data), the render path may produce empty or truncated output without raising an error. Users in the sampling-sweep would see a successful-looking result that is actually missing data. The 193-line render test file may cover happy paths but partial-input rendering is a common blind spot.\",\n      \"file\": \"scripts/lib/render.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 79,\n      \"confidence\": 0.60,\n      \"recommendation\": \"Add explicit validation in the render path that checks for required fields in the result object before rendering. If fields are missing, emit a visible warning or error marker in the output rather than silently omitting content. Add tests for null/undefined/partial result objects.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"state.mjs changes — no evidence of migration path for existing state files\",\n      \"body\": \"The state module (32 lines changed) presumably manages persisted state format. If the on-disk format changed between v0.4.0 and v0.4.6, existing user state files from v0.4.0 would fail to parse on upgrade with no migration path visible in the diff. This would manifest as a crash on first run after upgrade — a poor user experience with no recovery guidance.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.50,\n      \"recommendation\": \"Verify that state.mjs can read both old (v0.",
+  "rawOutputTruncated": true,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:56:28.351Z"
+}

@@ -1,0 +1,79 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 16
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.25,
+    "citation_false_file_hits": 0,
+    "latency_ms": 73127,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit bundles two distinct changes—an interactive menu addition and an npm scope rename—into a single commit. The npm scope rename is a semver-breaking change that affects package identity, plugin discovery, and existing installations. There is no visible migration path, deprecation notice, or backward-compatibility shim for the old scope. The interactive menu addition to setup.md may break non-interactive or scripted invocations if no skip/bypass mechanism exists. Both changes ship together without clear separation of concerns, making rollback partial and risky.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change with no migration path visible in the diff",
+        "body": "The commit message explicitly states 'rename npm scope.' This alters the package identity in package.json (4 lines changed), .claude-plugin/marketplace.json (4 lines changed), and .claude-plugin/plugin.json (2 lines changed). Any existing installation referencing the old scope will break on update: imports, plugin discovery, and dependency resolution all target the old name. There is no evidence in this diff of a deprecation cycle, a compatibility shim, an install-time migration script, or even a README note warning existing users. For a plugin published to a marketplace, this effectively orphan existing installations—they will not receive updates and will fail if they try to reinstall.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.82,
+        "recommendation": "Publish the new scope as a separate package while maintaining the old scope as a deprecated wrapper that depends on the new one, or add a postinstall/migration script that warns users and updates references. At minimum, document the scope change prominently in CHANGELOG.md and add a breaking-change entry. Do not silently rename the scope in a patch-level commit."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive menu in setup may break non-interactive or CI usage",
+        "body": "The commands/setup.md change (19 lines) adds an interactive menu triggered 'when already configured.' If the setup command is invoked in a non-interactive context (CI, scripts, remote sessions), interactive prompts will hang or fail. There is no visible guard for TTY detection or a --non-interactive / --force flag. Existing users who re-run setup in automation will hit a new blocking prompt that did not exist before.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.65,
+        "recommendation": "Add a TTY/interactive-mode check before presenting the menu. Provide a --non-interactive or --yes flag that skips the menu and applies a default behavior. Document the new interactive flow and how to bypass it in scripted environments."
+      },
+      {
+        "severity": "medium",
+        "title": "Breaking scope rename and feature addition co-committed, complicating rollback",
+        "body": "The npm scope rename (breaking) and the interactive menu feature (behavioral change) are bundled in a single commit. If the menu introduces a regression, reverting also reverts the scope rename, or vice versa. This makes targeted rollback impossible without cherry-picking or splitting the commit after the fact.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.75,
+        "recommendation": "Split the scope rename and the interactive menu addition into separate commits so they can be independently reverted. The scope rename should be its own commit with appropriate BREAKING CHANGE footer in the commit message."
+      },
+      {
+        "severity": "low",
+        "title": "CHANGELOG entry may underrepresent the breaking nature of the scope rename",
+        "body": "CHANGELOG.md has 21 lines added. If the scope rename is not clearly marked as a breaking change with upgrade instructions, users browsing the changelog will not realize their existing installations are affected until they encounter runtime failures.",
+        "file": "CHANGELOG.md",
+        "line_start": 1,
+        "line_end": 21,
+        "confidence": 0.55,
+        "recommendation": "Ensure the CHANGELOG entry for this version explicitly marks the scope rename as BREAKING and includes migration steps (e.g., 'uninstall the old package and install the new one'). If the CHANGELOG already does this, disregard."
+      }
+    ],
+    "next_steps": [
+      "Inspect the actual diff with `git diff 7766943^..7766943 -- package.json` to confirm the old and new scope names and assess blast radius.",
+      "Check `commands/setup.md` diff to verify whether there is a non-interactive fallback before shipping.",
+      "Split the commit into two: one for the scope rename with a BREAKING CHANGE note, one for the interactive menu feature.",
+      "Verify that .claude-plugin/marketplace.json and plugin.json references are consistent with the new scope and that the old scope either redirects or is documented as deprecated."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"This commit bundles two distinct changes—an interactive menu addition and an npm scope rename—into a single commit. The npm scope rename is a semver-breaking change that affects package identity, plugin discovery, and existing installations. There is no visible migration path, deprecation notice, or backward-compatibility shim for the old scope. The interactive menu addition to setup.md may break non-interactive or scripted invocations if no skip/bypass mechanism exists. Both changes ship together without clear separation of concerns, making rollback partial and risky.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename is a breaking change with no migration path visible in the diff\",\n      \"body\": \"The commit message explicitly states 'rename npm scope.' This alters the package identity in package.json (4 lines changed), .claude-plugin/marketplace.json (4 lines changed), and .claude-plugin/plugin.json (2 lines changed). Any existing installation referencing the old scope will break on update: imports, plugin discovery, and dependency resolution all target the old name. There is no evidence in this diff of a deprecation cycle, a compatibility shim, an install-time migration script, or even a README note warning existing users. For a plugin published to a marketplace, this effectively orphan existing installations—they will not receive updates and will fail if they try to reinstall.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.82,\n      \"recommendation\": \"Publish the new scope as a separate package while maintaining the old scope as a deprecated wrapper that depends on the new one, or add a postinstall/migration script that warns users and updates references. At minimum, document the scope change prominently in CHANGELOG.md and add a breaking-change entry. Do not silently rename the scope in a patch-level commit.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Interactive menu in setup may break non-interactive or CI usage\",\n      \"body\": \"The commands/setup.md change (19 lines) adds an interactive menu triggered 'when already configured.' If the setup command is invoked in a non-interactive context (CI, scripts, remote sessions), interactive prompts will hang or fail. There is no visible guard for TTY detection or a --non-interactive / --force flag. Existing users who re-run setup in automation will hit a new blocking prompt that did not exist before.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Add a TTY/interactive-mode check before presenting the menu. Provide a --non-interactive or --yes flag that skips the menu and applies a default behavior. Document the new interactive flow and how to bypass it in scripted environments.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Breaking scope rename and feature addition co-committed, complicating rollback\",\n      \"body\": \"The npm scope rename (breaking) and the interactive menu feature (behavioral change) are bundled in a single commit. If the menu introduces a regression, reverting also reverts the scope rename, or vice versa. This makes targeted rollback impossible without cherry-picking or splitting the commit after the fact.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Split the scope rename and the interactive menu addition into separate commits so they can be independently reverted. The scope rename should be its own commit with appropriate BREAKING CHANGE footer in the commit message.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"CHANGELOG entry may underrepresent the breaking nature of the scope rename\",\n      \"body\": \"CHANGELOG.md has 21 lines added. If the scope rename is not clearly marked as a breaking change with upgrade instructions, users browsing the changelog will not realize their existing installations are affected until they encounter runtime failures.\",\n      \"file\": \"CHANGELOG.md\",\n      \"line_start\": 1,\n      \"line_end\": 21,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Ensure the CHANGELOG entry for this version explicitly marks the scope rename as BREAKING and includes migration steps (e.g., 'uninstall the old package and install the new one'). If the CHANGELOG already does this, disregard.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect the actual diff with `git diff 7766943^..7766943 -- package.json` to confirm the old and new scope names and assess blast radius.\",\n    \"Check `commands/setup.md` diff to verify whether there is a non-interactive fallback before shipping.\",\n    \"Split the commit into two: one for the scope rename with a BREAKING CHANGE note, one for the interactive menu feature.\",\n    \"Verify that .claude-plugin/marketplace.json and plugin.json references are consistent with the new scope and that the old scope either redirects or is documented as deprecated.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:51:09.515Z"
+}

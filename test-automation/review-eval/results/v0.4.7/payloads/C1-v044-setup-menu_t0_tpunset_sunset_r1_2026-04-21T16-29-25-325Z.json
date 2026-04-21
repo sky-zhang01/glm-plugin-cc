@@ -1,0 +1,70 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 80408,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit bundles a breaking npm scope rename with an interactive setup-menu feature. The scope rename will break existing consumers who reference the old package name, and there is no visible migration path, dual-publishing, or deprecation notice in the diff. Additionally, adding an interactive menu to a previously non-interactive setup command risks hanging or failing in scripted/CI contexts. These two concerns warrant attention before shipping.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change with no visible migration path",
+        "body": "The commit message explicitly states 'rename npm scope' and package.json shows 4 lines changed. Renaming an npm package scope invalidates every existing installation, lockfile entry, and import path that references the old scope. The CHANGELOG.md addition does not appear to contain migration instructions (based on the 21-line diff size being consistent with a brief entry). Without dual-publishing under both scopes or a deprecation cycle, existing users will encounter resolution failures on their next install with no diagnostic guidance.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 10,
+        "confidence": 0.78,
+        "recommendation": "Publish the package under both the old and new scopes during a transition period, or add a postinstall warning on the old scope pointing to the new one. Update CHANGELOG.md with explicit migration instructions including the old→new scope mapping."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive menu in setup command may hang or fail in non-interactive contexts",
+        "body": "The commit adds an interactive menu to /glm:setup when the system is already configured (commands/setup.md, 19 lines changed). If this command is invoked in a non-interactive shell, CI pipeline, or scripted context, the menu prompt will block indefinitely waiting for stdin. There is no evidence of a --non-interactive flag, timeout, or environment-detection guard in the diff. This is a regression for any automation that calls setup idempotently.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 40,
+        "confidence": 0.72,
+        "recommendation": "Add stdin/tty detection to skip or auto-resolve the menu in non-interactive contexts. Provide a --yes or --non-interactive flag that selects a sensible default. Document the new interactive behavior and any flags that suppress it."
+      },
+      {
+        "severity": "low",
+        "title": "Plugin metadata changes could silently break marketplace discovery",
+        "body": "Both .claude-plugin/marketplace.json (4 lines) and .claude-plugin/plugin.json (2 lines) are modified alongside the scope rename. If these files reference the old package scope internally or externally, the plugin may become undiscoverable or unresolvable in the marketplace. The small diff size suggests a string replacement, but without verification that all downstream consumers (marketplace index, cache, CDN) invalidate correctly, the rename could result in a stale or broken listing.",
+        "file": ".claude-plugin/marketplace.json",
+        "line_start": 1,
+        "line_end": 10,
+        "confidence": 0.55,
+        "recommendation": "Verify that all identifiers in marketplace.json and plugin.json are self-consistent and reference the new scope. Confirm with the marketplace infra team that the listing will update atomically on publish."
+      }
+    ],
+    "next_steps": [
+      "Inspect the full diff of package.json to confirm the exact scope rename and assess blast radius.",
+      "Inspect the full diff of commands/setup.md to verify whether non-interactive/TTY detection is handled.",
+      "Add a migration section to CHANGELOG.md mapping old scope → new scope for consumers.",
+      "Test the setup command in a non-interactive shell (e.g., CI) to confirm it does not hang on the new menu.",
+      "Verify .claude-plugin/*.json files are internally consistent after the rename."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"This commit bundles a breaking npm scope rename with an interactive setup-menu feature. The scope rename will break existing consumers who reference the old package name, and there is no visible migration path, dual-publishing, or deprecation notice in the diff. Additionally, adding an interactive menu to a previously non-interactive setup command risks hanging or failing in scripted/CI contexts. These two concerns warrant attention before shipping.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename is a breaking change with no visible migration path\",\n      \"body\": \"The commit message explicitly states 'rename npm scope' and package.json shows 4 lines changed. Renaming an npm package scope invalidates every existing installation, lockfile entry, and import path that references the old scope. The CHANGELOG.md addition does not appear to contain migration instructions (based on the 21-line diff size being consistent with a brief entry). Without dual-publishing under both scopes or a deprecation cycle, existing users will encounter resolution failures on their next install with no diagnostic guidance.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 10,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Publish the package under both the old and new scopes during a transition period, or add a postinstall warning on the old scope pointing to the new one. Update CHANGELOG.md with explicit migration instructions including the old→new scope mapping.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Interactive menu in setup command may hang or fail in non-interactive contexts\",\n      \"body\": \"The commit adds an interactive menu to /glm:setup when the system is already configured (commands/setup.md, 19 lines changed). If this command is invoked in a non-interactive shell, CI pipeline, or scripted context, the menu prompt will block indefinitely waiting for stdin. There is no evidence of a --non-interactive flag, timeout, or environment-detection guard in the diff. This is a regression for any automation that calls setup idempotently.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 40,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Add stdin/tty detection to skip or auto-resolve the menu in non-interactive contexts. Provide a --yes or --non-interactive flag that selects a sensible default. Document the new interactive behavior and any flags that suppress it.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"Plugin metadata changes could silently break marketplace discovery\",\n      \"body\": \"Both .claude-plugin/marketplace.json (4 lines) and .claude-plugin/plugin.json (2 lines) are modified alongside the scope rename. If these files reference the old package scope internally or externally, the plugin may become undiscoverable or unresolvable in the marketplace. The small diff size suggests a string replacement, but without verification that all downstream consumers (marketplace index, cache, CDN) invalidate correctly, the rename could result in a stale or broken listing.\",\n      \"file\": \".claude-plugin/marketplace.json\",\n      \"line_start\": 1,\n      \"line_end\": 10,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Verify that all identifiers in marketplace.json and plugin.json are self-consistent and reference the new scope. Confirm with the marketplace infra team that the listing will update atomically on publish.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect the full diff of package.json to confirm the exact scope rename and assess blast radius.\",\n    \"Inspect the full diff of commands/setup.md to verify whether non-interactive/TTY detection is handled.\",\n    \"Add a migration section to CHANGELOG.md mapping old scope → new scope for consumers.\",\n    \"Test the setup command in a non-interactive shell (e.g., CI) to confirm it does not hang on the new menu.\",\n    \"Verify .claude-plugin/*.json files are internally consistent after the rename.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:29:25.351Z"
+}

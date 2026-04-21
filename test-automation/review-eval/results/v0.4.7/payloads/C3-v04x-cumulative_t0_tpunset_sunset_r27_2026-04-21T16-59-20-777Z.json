@@ -1,0 +1,92 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 27
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.6,
+    "citation_false_file_hits": 0,
+    "latency_ms": 64805,
+    "error_code": ""
+  },
+  "parsed": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces ~6600 lines across 84 files with significant new runtime paths (retry logic, BigModel error dispatch, job tracking, state management) that carry real failure risk. I found several material issues: the retry library has a dangerous class of silent double-execution bugs on retryable operations that are not idempotent, the BigModel error dispatcher can swallow unknown error shapes entirely, and job-control state corruption is possible under concurrent access without file locking. These are the kinds of bugs that surface intermittently in production and are extremely difficult to diagnose after the fact.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs may silently re-execute non-idempotent operations on transient failures",
+        "body": "The retry module (scripts/lib/retry.mjs) provides a generic retry wrapper that can be applied to any async operation. If the caller's operation mutates external state (e.g., submitting a job to BigModel, writing state files) and the response is lost due to a network timeout, the retry will re-execute the mutation. The caller gets a 'success' on the second attempt but the first attempt may have already taken effect — leading to duplicate jobs, duplicate charges, or duplicated side effects. There is no idempotency-key mechanism or deduplication guard visible in the retry layer or in glm-client.mjs's call sites. Under the stated operating stance, a retry library that does not address idempotency is a latent production defect.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.82,
+        "recommendation": "Either (a) add idempotency-key support to retry.mjs that callers must provide for non-GET operations, or (b) document clearly that all retried operations MUST be idempotent and add a runtime guard/audit in glm-client.mjs that marks mutating HTTP methods (POST/PUT/PATCH) as non-retryable without an explicit idempotency key. At minimum, the retry config should default maxRetries=0 for POST calls until this is addressed."
+      },
+      {
+        "severity": "high",
+        "title": "BigModel error dispatcher can swallow unknown/unrecognized error shapes silently",
+        "body": "scripts/lib/bigmodel-errors.mjs implements error classification for BigModel API responses. If the error response has an unexpected structure (e.g., a new error code, a changed response schema, or a non-JSON body that still returns 200), the dispatcher falls through to a default path that returns a generic error, discarding the original response context. This means the caller (and the user) gets an unhelpful 'unknown error' with no actionable information, and the retry logic may treat it as non-retryable when it actually is transient. This is an observability gap that makes production debugging extremely difficult.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.75,
+        "recommendation": "Ensure the default/fallback error classification path preserves the full original error context (status code, headers, body snippet) in the error object, and log it at warn/error level. Add a test case for completely unrecognized error shapes to verify the fallback behavior preserves diagnostic information."
+      },
+      {
+        "severity": "high",
+        "title": "Job tracking state file has no concurrency protection — concurrent writes can corrupt state",
+        "body": "scripts/lib/tracked-jobs.mjs and scripts/lib/state.mjs manage persistent job state via filesystem reads and writes. Under concurrent invocations (e.g., two glm:review calls running simultaneously, or a user invoking glm:status while glm:review is writing), the non-atomic read-modify-write pattern can lose jobs or corrupt the JSON state file. There is no file locking (flock, lockfile, or atomic rename) visible in the implementation. This is a classic TOCTOU race that leads to silent state loss.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.78,
+        "recommendation": "Add advisory file locking (e.g., using proper-lockfile or an atomic write-via-temp-then-rename pattern) to all state file mutations. At minimum, write to a temp file in the same directory and rename atomically. For concurrent read-modify-write, use lockfile-based mutual exclusion."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs response handling may throw on non-JSON bodies, crashing the entire command",
+        "body": "scripts/lib/glm-client.mjs makes HTTP requests to the BigModel API and parses responses as JSON. If the server returns a non-JSON body (HTML error page from a proxy, empty body on 204, or a truncated response from a network issue), the JSON parse will throw an unhandled exception that propagates up and terminates the command with a raw stack trace instead of a user-friendly error. The retry logic may then re-throw this as a non-retryable error, hiding the real cause.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.7,
+        "recommendation": "Wrap all response body JSON parsing in try-catch. If parsing fails, construct a synthetic error object containing the status code and a truncated body preview, then pass that to the error dispatcher. This ensures the user sees what actually came back instead of a SyntaxError."
+      },
+      {
+        "severity": "medium",
+        "title": "fs.mjs atomic write can leave stale temp files on crash, with no cleanup mechanism",
+        "body": "scripts/lib/fs.mjs implements atomic file writes (likely write-to-temp-then-rename). If the process is killed between writing the temp file and the rename, the orphaned temp file is never cleaned up. Over time in automated CI or long-running sessions, these accumulate. More critically, if the temp file write partially completes and the process restarts, the next read might pick up a corrupted file depending on how temp naming works.",
+        "file": "scripts/lib/fs.mjs",
+        "line_start": 1,
+        "line_end": 44,
+        "confidence": 0.6,
+        "recommendation": "Add a cleanup step on startup that removes orphaned temp files from previous runs (matching a known temp-file naming pattern). Ensure temp files are written with the same extension as the target to prevent partial-read confusion."
+      }
+    ],
+    "next_steps": [
+      "Add idempotency guards or documentation constraints to retry.mjs before any non-GET operation uses it",
+      "Audit all callers of retry() in glm-client.mjs to confirm whether retried operations are truly idempotent",
+      "Add file locking or atomic write-via-rename to state.mjs and tracked-jobs.mjs to prevent concurrent state corruption",
+      "Add defensive JSON parse wrapping in glm-client.mjs response handling",
+      "Add integration test that simulates concurrent state file writes to verify no data loss",
+      "Verify bigmodel-errors.mjs fallback path preserves full error context and logs it"
+    ]
+  },
+  "rawOutputHead": "{\n  \"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff introduces ~6600 lines across 84 files with significant new runtime paths (retry logic, BigModel error dispatch, job tracking, state management) that carry real failure risk. I found several material issues: the retry library has a dangerous class of silent double-execution bugs on retryable operations that are not idempotent, the BigModel error dispatcher can swallow unknown error shapes entirely, and job-control state corruption is possible under concurrent access without file locking. These are the kinds of bugs that surface intermittently in production and are extremely difficult to diagnose after the fact.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"retry.mjs may silently re-execute non-idempotent operations on transient failures\",\n      \"body\": \"The retry module (scripts/lib/retry.mjs) provides a generic retry wrapper that can be applied to any async operation. If the caller's operation mutates external state (e.g., submitting a job to BigModel, writing state files) and the response is lost due to a network timeout, the retry will re-execute the mutation. The caller gets a 'success' on the second attempt but the first attempt may have already taken effect — leading to duplicate jobs, duplicate charges, or duplicated side effects. There is no idempotency-key mechanism or deduplication guard visible in the retry layer or in glm-client.mjs's call sites. Under the stated operating stance, a retry library that does not address idempotency is a latent production defect.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.82,\n      \"recommendation\": \"Either (a) add idempotency-key support to retry.mjs that callers must provide for non-GET operations, or (b) document clearly that all retried operations MUST be idempotent and add a runtime guard/audit in glm-client.mjs that marks mutating HTTP methods (POST/PUT/PATCH) as non-retryable without an explicit idempotency key. At minimum, the retry config should default maxRetries=0 for POST calls until this is addressed.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"BigModel error dispatcher can swallow unknown/unrecognized error shapes silently\",\n      \"body\": \"scripts/lib/bigmodel-errors.mjs implements error classification for BigModel API responses. If the error response has an unexpected structure (e.g., a new error code, a changed response schema, or a non-JSON body that still returns 200), the dispatcher falls through to a default path that returns a generic error, discarding the original response context. This means the caller (and the user) gets an unhelpful 'unknown error' with no actionable information, and the retry logic may treat it as non-retryable when it actually is transient. This is an observability gap that makes production debugging extremely difficult.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Ensure the default/fallback error classification path preserves the full original error context (status code, headers, body snippet) in the error object, and log it at warn/error level. Add a test case for completely unrecognized error shapes to verify the fallback behavior preserves diagnostic information.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"Job tracking state file has no concurrency protection — concurrent writes can corrupt state\",\n      \"body\": \"scripts/lib/tracked-jobs.mjs and scripts/lib/state.mjs manage persistent job state via filesystem reads and writes. Under concurrent invocations (e.g., two glm:review calls running simultaneously, or a user invoking glm:status while glm:review is writing), the non-atomic read-modify-write pattern can lose jobs or corrupt the JSON state file. There is no file locking (flock, lockfile, or atomic rename) visible in the implementation. This is a classic TOCTOU race that leads to silent state loss.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Add advisory file locking (e.g., using proper-lockfile or an atomic write-via-temp-then-rename pattern) to all state file mutations. At minimum, write to a temp file in the same directory and rename atomically. For concurrent read-modify-write, use lockfile-based mutual exclusion.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client.mjs response handling may throw on non-JSON bodies, crashing the entire command\",\n      \"body\": \"scripts/lib/glm-client.mjs makes HTTP requests to the BigModel API and parses responses as JSON. If the server returns a non-JSON body (HTML error page from a proxy, empty body on 204, or a truncated response from a network issue), the JSON parse will throw an unhandled exception that propagates up and terminates the command with a raw stack trace instead of a user-friendly error. The retry logic may then re-throw this as a non-retryable error, hiding the real cause.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Wrap all response body JSON parsing in try-catch. If parsing fails, construct a synthetic error object containing the status code and a truncated body preview, then pass that to the error dispatcher. This ensures the user sees what actually came back instead of a SyntaxError.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"fs.mjs atomic write can leave stale temp files on crash, with no cleanup mechanism\",\n      \"body\": \"scripts/lib/fs.mjs implements atomic file writes (likely write-to-temp-then-rename). If the process is killed between writing the temp file and the rename, the orphaned temp file is never cleaned up. Over time in automated CI or long-running sessions, these accumulate. More critically, if the temp file write partially completes and the process restarts, the next read might pick up a corrupted file depending on how temp naming works.\",\n      \"file\": \"scripts/lib/fs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 44,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Add a cleanup step on startup that removes orphaned temp files from previous runs (matching a known temp-file naming pattern). Ensure temp files are written with the same extension as the target to prevent partial-read confusion.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Add idempotency guards or documentation constraints to retry.mjs before any non-GET operation uses it\",\n    \"Audit all callers of retry() in glm-client.mjs to confirm whether retried operations are truly idempotent\",\n    \"Add file locking or atomic write-via-rename to state.mjs and tracked-jobs.mjs to prevent concurrent state corruption\",\n    \"Add defensive JSON parse wrapping in glm-client.mjs response handling\",\n    \"Add integration test that simulates concurrent state file writes to verify no data loss\",\n    \"Verify bigmodel-errors.mjs fallback path preserves full error context and logs it\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T16:59:20.817Z"
+}

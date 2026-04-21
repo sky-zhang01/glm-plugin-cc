@@ -1,0 +1,49 @@
+{
+  "fixture_id": "C2-v046-aftercare",
+  "curated_by": "maintainer + dogfood session 2026-04-21",
+  "notes": "Ground truth for scoring /glm:adversarial-review output. Not all findings that match `expected_bugs` are required (GLM may legitimately miss them); but any finding NOT in the allowed-citation set is a signal of hallucination.",
+  "expected_bugs": [
+    {
+      "id": "EB-1",
+      "description": "DEFAULT_POLICY.totalBudgetMs = 90000 is chosen arbitrarily, not derived from any measured call-duration distribution. A sharp adversarial review would question the number.",
+      "hit_if_finding_mentions": ["totalBudgetMs", "90000", "budget.*arbitrary", "budget.*derived"],
+      "file": "scripts/lib/retry.mjs",
+      "severity_floor": "low"
+    },
+    {
+      "id": "EB-2",
+      "description": "HTTP_ERROR (non-5xx-transient) defaults to retry=stop. Could be debated since 500 genuinely server-bug errors might be transient in other deployments.",
+      "hit_if_finding_mentions": ["HTTP_ERROR", "500.*retry", "stop.*transient"],
+      "file": "scripts/lib/glm-client.mjs",
+      "severity_floor": "low"
+    },
+    {
+      "id": "EB-3",
+      "description": "check-release-ready.sh only validates that `## v{version}` section exists in CHANGELOG, not that it contains meaningful content. An empty section would pass.",
+      "hit_if_finding_mentions": ["check-release-ready", "CHANGELOG.*empty", "section.*content", "grep.*v\\${VERSION}"],
+      "file": "scripts/ci/check-release-ready.sh",
+      "severity_floor": "low"
+    }
+  ],
+  "known_false_files": [
+    "reference_runtime.py",
+    "openclaw_memory_slot_runtime.py",
+    "governance.py",
+    "workflow_governor/"
+  ],
+  "known_false_file_note": "These are workflow-governor files, NOT glm-plugin-cc. They appeared in GLM hallucinated output on the workflow-governor cross-review session. If GLM ever cites them while reviewing this fixture, it is definitively hallucinating — wrong project entirely.",
+  "allowed_files": [
+    ".claude-plugin/marketplace.json",
+    ".claude-plugin/plugin.json",
+    "CHANGELOG.md",
+    "package.json",
+    "scripts/ci/check-release-ready.sh",
+    "scripts/hooks/pre-push",
+    "scripts/lib/bigmodel-errors.mjs",
+    "scripts/lib/glm-client.mjs",
+    "scripts/lib/retry.mjs",
+    "tests/bigmodel-errors.test.mjs",
+    "tests/retry.test.mjs"
+  ],
+  "allowed_files_note": "Any finding.file NOT in this list (after path normalization) is considered a hallucination. Test files are included because the diff adds them — adversarial reviewer can legitimately critique test coverage / assertions."
+}

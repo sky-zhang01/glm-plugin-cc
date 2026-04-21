@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.333,
+    "citation_false_file_hits": 0,
+    "latency_ms": 83277,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit bundles two unrelated concerns—a functional change to the setup command's interactive flow and an npm scope rename—into a single commit. The npm scope rename in package.json is a potentially breaking change for existing installations and references, with no visible migration path or compatibility shim. The interactive menu added to commands/setup.md introduces new branching logic whose failure modes (non-interactive contexts, partial configuration states, empty/cancel inputs) cannot be fully assessed from the stat alone but represent meaningful risk. The absence of any test file changes alongside a behavioral change to setup is a gap.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change with no migration path",
+        "body": "The package.json diff (4 lines changed) and the commit message ('rename npm scope') indicate the npm package scope has been changed. This is a breaking change for any existing consumer: imports, scripts, CI pipelines, and installed copies referencing the old scope will fail. There is no visible deprecation path, no dual-publishing strategy, and no migration documentation in the commit or CHANGELOG for the scope rename itself. If the old scoped package is abandoned in place, users on the old scope will get no updates and no error until they attempt to install or update.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.75,
+        "recommendation": "Publish the same version under both the old and new scope as a transition, or document the scope migration prominently. If the scope rename is purely cosmetic for an internal/unpublished package, add a comment in the CHANGELOG explicitly stating no published artifact is affected. Do not silently rename scopes in the same commit as unrelated behavioral changes."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive menu in setup command lacks visible test coverage or non-interactive fallback",
+        "body": "commands/setup.md (19 lines changed) now adds an interactive menu triggered when the system is 'already configured.' Interactive prompts in slash-command contexts risk hanging or failing silently when invoked in non-interactive pipelines or when stdin is unavailable. No test files appear in the diff stat, meaning the new branching logic has no automated coverage for: (a) selecting each menu option, (b) cancelling or providing empty input, (c) partial or corrupted existing configuration states that trigger the menu unexpectedly, (d) idempotent re-runs after each option.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.65,
+        "recommendation": "Add explicit handling for non-interactive contexts (default safe behavior or clear error). Add test coverage for each menu branch, including empty input and cancellation. Consider whether the 'already configured' detection is robust against partial or corrupt config states that are neither fully configured nor cleanly unconfigured."
+      },
+      {
+        "severity": "low",
+        "title": "Two unrelated concerns bundled in one commit complicates rollback",
+        "body": "The commit bundles an npm scope rename with a behavioral change to the setup command. If either change causes issues post-ship, rolling back the commit reverts both changes simultaneously. This is a hygiene concern that increases operational risk, especially for the scope rename which may be difficult to un-publish.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.8,
+        "recommendation": "Split the scope rename and the setup menu change into separate commits (or better, separate PRs) so they can be independently reviewed, tested, and rolled back."
+      }
+    ],
+    "next_steps": [
+      "Inspect the full diff of commands/setup.md to verify the interactive menu handles empty input, cancellation, and non-interactive contexts correctly.",
+      "Verify whether the npm scope rename affects a published package; if so, confirm a dual-publishing or migration strategy exists.",
+      "Add test coverage for the new setup menu branching logic before shipping.",
+      "Split the scope rename into a separate commit/PR to isolate rollback risk."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"This commit bundles two unrelated concerns—a functional change to the setup command's interactive flow and an npm scope rename—into a single commit. The npm scope rename in package.json is a potentially breaking change for existing installations and references, with no visible migration path or compatibility shim. The interactive menu added to commands/setup.md introduces new branching logic whose failure modes (non-interactive contexts, partial configuration states, empty/cancel inputs) cannot be fully assessed from the stat alone but represent meaningful risk. The absence of any test file changes alongside a behavioral change to setup is a gap.\",\"findings\":[{\"severity\":\"high\",\"title\":\"npm scope rename is a breaking change with no migration path\",\"body\":\"The package.json diff (4 lines changed) and the commit message ('rename npm scope') indicate the npm package scope has been changed. This is a breaking change for any existing consumer: imports, scripts, CI pipelines, and installed copies referencing the old scope will fail. There is no visible deprecation path, no dual-publishing strategy, and no migration documentation in the commit or CHANGELOG for the scope rename itself. If the old scoped package is abandoned in place, users on the old scope will get no updates and no error until they attempt to install or update.\",\"file\":\"package.json\",\"line_start\":1,\"line_end\":4,\"confidence\":0.75,\"recommendation\":\"Publish the same version under both the old and new scope as a transition, or document the scope migration prominently. If the scope rename is purely cosmetic for an internal/unpublished package, add a comment in the CHANGELOG explicitly stating no published artifact is affected. Do not silently rename scopes in the same commit as unrelated behavioral changes.\"},{\"severity\":\"medium\",\"title\":\"Interactive menu in setup command lacks visible test coverage or non-interactive fallback\",\"body\":\"commands/setup.md (19 lines changed) now adds an interactive menu triggered when the system is 'already configured.' Interactive prompts in slash-command contexts risk hanging or failing silently when invoked in non-interactive pipelines or when stdin is unavailable. No test files appear in the diff stat, meaning the new branching logic has no automated coverage for: (a) selecting each menu option, (b) cancelling or providing empty input, (c) partial or corrupted existing configuration states that trigger the menu unexpectedly, (d) idempotent re-runs after each option.\",\"file\":\"commands/setup.md\",\"line_start\":1,\"line_end\":19,\"confidence\":0.65,\"recommendation\":\"Add explicit handling for non-interactive contexts (default safe behavior or clear error). Add test coverage for each menu branch, including empty input and cancellation. Consider whether the 'already configured' detection is robust against partial or corrupt config states that are neither fully configured nor cleanly unconfigured.\"},{\"severity\":\"low\",\"title\":\"Two unrelated concerns bundled in one commit complicates rollback\",\"body\":\"The commit bundles an npm scope rename with a behavioral change to the setup command. If either change causes issues post-ship, rolling back the commit reverts both changes simultaneously. This is a hygiene concern that increases operational risk, especially for the scope rename which may be difficult to un-publish.\",\"file\":\"package.json\",\"line_start\":1,\"line_end\":4,\"confidence\":0.8,\"recommendation\":\"Split the scope rename and the setup menu change into separate commits (or better, separate PRs) so they can be independently reviewed, tested, and rolled back.\"}],\"next_steps\":[\"Inspect the full diff of commands/setup.md to verify the interactive menu handles empty input, cancellation, and non-interactive contexts correctly.\",\"Verify whether the npm scope rename affects a published package; if so, confirm a dual-publishing or migration strategy exists.\",\"Add test coverage for the new setup menu branching logic before shipping.\",\"Split the scope rename into a separate commit/PR to isolate rollback risk.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T13:59:55.333Z"
+}

@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": 2024,
+    "thinking": "on",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 68247,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 release adds retry/backoff logic and BigModel error dispatch, but the retry module has a race-prone cancellation mechanism (AbortController shared across retry attempts without guarding post-abort state), the GLM client mixes retry concerns at the call site without clear idempotency guarantees for non-retryable error paths, and the new CI check script uses shell constructs that can silently pass on failure. These defects could cause duplicated API calls, leaked AbortControllers, or false-positive CI gates.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "AbortController lifecycle not fully guarded in retry.mjs — post-abort state can cause silent wrong behavior",
+        "body": "The retry module accepts an AbortController signal to support cancellation. However, if the signal fires between the delay sleep and the next attempt invocation, the retry loop may silently return the last error without marking it as aborted, because the abort check is typically only evaluated at the top of the loop or after the sleep. This means a consumer that aborts may receive a misleading 'all retries exhausted' result rather than an AbortError, making it impossible to distinguish 'cancelled by user' from 'genuinely failed'. In a CI or automated pipeline context, this could mask intentional cancellation and cause downstream logic to proceed on stale or partial results.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.75,
+        "recommendation": "Ensure abort signal is checked immediately after every await point (especially after the delay sleep), and if aborted, throw or return a clearly-typed AbortError immediately rather than falling through to the retry-exhausted path. Add explicit test cases for: abort during sleep, abort during fn execution, and abort after all retries exhausted."
+      },
+      {
+        "severity": "medium",
+        "title": "GLM client retry integration lacks explicit idempotency classification for mutating operations",
+        "body": "The glm-client.mjs change wraps API calls with retry logic, but there is no visible mechanism to classify which operations are safe to retry (GET/read) versus unsafe (POST/mutating). If a BigModel API call mutates state server-side and returns a retriable error (e.g. timeout or 5xx), the retry will re-execute the mutation, potentially causing duplicate resource creation or double-charged tokens. The error dispatch in bigmodel-errors.mjs classifies errors but does not appear to carry a 'safe-to-retry-for-mutations' flag.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 99,
+        "confidence": 0.7,
+        "recommendation": "Add an idempotency key or method-level retry policy to the GLM client so that mutating operations either: (a) are not retried automatically, or (b) include an idempotency header/key. Document which API operations are safe to retry. Add test coverage for retry behavior on mutating vs read-only calls."
+      },
+      {
+        "severity": "medium",
+        "title": "check-release-ready.sh may silently pass on missing tooling or failed assertions due to unquoted variables and unchecked exits",
+        "body": "The new CI check script check-release-ready.sh performs validation checks for release readiness. Shell scripts without `set -euo pipefail` or with unquoted variable expansions can silently skip checks or treat empty results as success. If the script is the gate for release promotion, a silent pass on a real failure means an unready version could be released.",
+        "file": "scripts/ci/check-release-ready.sh",
+        "line_start": 1,
+        "line_end": 84,
+        "confidence": 0.65,
+        "recommendation": "Add `set -euo pipefail` at the top of the script. Quote all variable expansions. Ensure every check explicitly exits non-zero on failure rather than relying on implicit behavior. Test the script with deliberately broken inputs to confirm it fails loudly."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error classification could misclassify unknown error shapes as retryable",
+        "body": "When the error dispatch module encounters an error that does not match any known pattern, the fallback behavior determines whether the error is retryable. If the default is 'retryable', any unexpected error format (including auth failures with non-standard shapes, or new API error codes from BigModel) will be retried, wasting quota and potentially triggering rate limits. If the default is 'not retryable', transient issues with unexpected shapes will never be retried. Either way, the fallback classification is a blind spot without test coverage for unknown error shapes.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.6,
+        "recommendation": "Explicitly handle the 'unknown error shape' case with a logged warning and a documented default. Add test cases for: completely unknown error objects, errors with unexpected HTTP status codes, and errors with missing fields. Ensure the fallback classification is intentional and logged for observability."
+      },
+      {
+        "severity": "low",
+        "title": "pre-push hook script lacks protection against being bypassed via --no-verify or direct push from CI",
+        "body": "The pre-push hook provides a local safety net but can be trivially bypassed with `git push --no-verify` or when pushes originate from CI/CD pipelines that don't install the hook. If the hook is intended as a release gate, it provides false confidence because it is not enforced server-side.",
+        "file": "scripts/hooks/pre-push",
+        "line_start": 1,
+        "line_end": 22,
+        "confidence": 0.55,
+        "recommendation": "If this hook gates release-critical checks, ensure the same checks run in CI (e.g., in check-release-ready.sh or a GitHub Actions workflow). Document that the hook is a convenience, not a guarantee. Consider adding branch protection rules that require CI checks to pass."
+      }
+    ],
+    "next_steps": [
+      "Inspect scripts/lib/retry.mjs and trace the exact control flow when abort signal fires during the delay sleep — add a targeted test for this scenario.",
+      "Verify that glm-client.mjs distinguishes between read-only and mutating API calls when applying retry logic, and add idempotency guards for the latter.",
+      "Run check-release-ready.sh with deliberately broken inputs (missing changelog entries, wrong version) and confirm it exits non-zero with clear error messages.",
+      "Check bigmodel-errors.mjs for the default/fallback error classification path and ensure unknown error shapes are logged and handled intentionally.",
+      "Confirm that the pre-push hook checks are redundant with CI enforcement, not a substitute for it."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.6 release adds retry/backoff logic and BigModel error dispatch, but the retry module has a race-prone cancellation mechanism (AbortController shared across retry attempts without guarding post-abort state), the GLM client mixes retry concerns at the call site without clear idempotency guarantees for non-retryable error paths, and the new CI check script uses shell constructs that can silently pass on failure. These defects could cause duplicated API calls, leaked AbortControllers, or false-positive CI gates.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"AbortController lifecycle not fully guarded in retry.mjs — post-abort state can cause silent wrong behavior\",\n      \"body\": \"The retry module accepts an AbortController signal to support cancellation. However, if the signal fires between the delay sleep and the next attempt invocation, the retry loop may silently return the last error without marking it as aborted, because the abort check is typically only evaluated at the top of the loop or after the sleep. This means a consumer that aborts may receive a misleading 'all retries exhausted' result rather than an AbortError, making it impossible to distinguish 'cancelled by user' from 'genuinely failed'. In a CI or automated pipeline context, this could mask intentional cancellation and cause downstream logic to proceed on stale or partial results.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Ensure abort signal is checked immediately after every await point (especially after the delay sleep), and if aborted, throw or return a clearly-typed AbortError immediately rather than falling through to the retry-exhausted path. Add explicit test cases for: abort during sleep, abort during fn execution, and abort after all retries exhausted.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"GLM client retry integration lacks explicit idempotency classification for mutating operations\",\n      \"body\": \"The glm-client.mjs change wraps API calls with retry logic, but there is no visible mechanism to classify which operations are safe to retry (GET/read) versus unsafe (POST/mutating). If a BigModel API call mutates state server-side and returns a retriable error (e.g. timeout or 5xx), the retry will re-execute the mutation, potentially causing duplicate resource creation or double-charged tokens. The error dispatch in bigmodel-errors.mjs classifies errors but does not appear to carry a 'safe-to-retry-for-mutations' flag.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 99,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Add an idempotency key or method-level retry policy to the GLM client so that mutating operations either: (a) are not retried automatically, or (b) include an idempotency header/key. Document which API operations are safe to retry. Add test coverage for retry behavior on mutating vs read-only calls.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"check-release-ready.sh may silently pass on missing tooling or failed assertions due to unquoted variables and unchecked exits\",\n      \"body\": \"The new CI check script check-release-ready.sh performs validation checks for release readiness. Shell scripts without `set -euo pipefail` or with unquoted variable expansions can silently skip checks or treat empty results as success. If the script is the gate for release promotion, a silent pass on a real failure means an unready version could be released.\",\n      \"file\": \"scripts/ci/check-release-ready.sh\",\n      \"line_start\": 1,\n      \"line_end\": 84,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Add `set -euo pipefail` at the top of the script. Quote all variable expansions. Ensure every check explicitly exits non-zero on failure rather than relying on implicit behavior. Test the script with deliberately broken inputs to confirm it fails loudly.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"bigmodel-errors.mjs error classification could misclassify unknown error shapes as retryable\",\n      \"body\": \"When the error dispatch module encounters an error that does not match any known pattern, the fallback behavior determines whether the error is retryable. If the default is 'retryable', any unexpected error format (including auth failures with non-standard shapes, or new API error codes from BigModel) will be retried, wasting quota and potentially triggering rate limits. If the default is 'not retryable', transient issues with unexpected shapes will never be retried. Either way, the fallback classification is a blind spot without test coverage for unknown error shapes.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Explicitly handle the 'unknown error shape' case with a logged warning and a documented default. Add test cases for: completely unknown error objects, errors with unexpected HTTP status codes, and errors with missing fields. Ensure the fallback classification is intentional and logged for observability.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"pre-push hook script lacks protection against being bypassed via --no-verify or direct push from CI\",\n      \"body\": \"The pre-push hook provides a local safety net but can be trivially bypassed with `git push --no-verify` or when pushes originate from CI/CD pipelines that don't install the hook. If the hook is intended as a release gate, it provides false confidence because it is not enforced server-side.\",\n      \"file\": \"scripts/hooks/pre-push\",\n      \"line_start\": 1,\n      \"line_end\": 22,\n      \"confidence\": 0.55,\n      \"recommendation\": \"If this hook gates release-critical checks, ensure the same checks run in CI (e.g., in check-release-ready.sh or a GitHub Actions workflow). Document that the hook is a convenience, not a guarantee. Consider adding branch protection rules that require CI checks to pass.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect scripts/lib/retry.mjs and trace the exact control flow when abort signal fires during the delay sleep — add a targeted test for this scenario.\",\n    \"Verify that glm-client.mjs distinguishes between read-only and mutating API calls when applying retry logic, and add idempotency guards for the latter.\",\n    \"Run check-release-ready.sh with deliberately broken inputs (missing changelog entries, wrong version) and confirm it exits non-zero with clear error messages.\",\n    \"Check bigmodel-errors.mjs for the default/fallback error classification path and ensure unknown error shapes are logged and handled intentionally.\",\n    \"Confirm that the pre-push hook checks are redundant with CI enforcement, not a substitute for it.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:51:56.054Z"
+}

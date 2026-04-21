@@ -1,0 +1,28 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "temperature": 0,
+    "topP": null,
+    "seed": 1337,
+    "thinking": "on",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 0,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 9566,
+    "error_code": ""
+  },
+  "parsed": null,
+  "rawOutputHead": "<thinking>\nLet me examine the actual code changes to identify material defects. I need to look at the key files - retry.mjs, bigmodel-errors.mjs, glm-client.mjs, and the CI scripts.\n</thinking>",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T10:41:20.604Z"
+}

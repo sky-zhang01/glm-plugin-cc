@@ -1,0 +1,89 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 5
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 301880,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→HEAD diff introduces a retry/backoff system, BigModel error dispatch, job tracking, and multiple library rewrites. Several material defects survive into the current code: the retry module has no maximum-elapsed-time guard allowing unbounded wall-clock spin, the tracked-jobs module performs filesystem operations without atomicity guarantees risking corrupt state, and the new error-dispatch layer can swallow unrecognized error shapes silently. These are real operational risks for a sampling-sweep workload.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs has no maximum-elapsed-time ceiling — wall-clock unbounded under sustained failures",
+        "body": "The retry module exposes exponential backoff with jitter but never caps total elapsed wall-clock time. During a sampling-sweep (C3-v04x-cumulative, run 5), if the upstream API returns retryable errors steadily (e.g. 429 or 503), the loop will continue until maxAttempts is exhausted. If maxAttempts is set high or derived from configuration, a single job can block the sweep for arbitrarily long with no observability that it is stuck. This is distinct from per-attempt timeout — there is no overall deadline. Under a sustained partial outage this silently stalls the entire sweep.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.82,
+        "recommendation": "Add an optional `maxElapsedMs` parameter to the retry config. Check elapsed time at the top of each iteration and bail with a distinct error code if exceeded. Default it to something sane (e.g. 5 minutes) so callers are protected even if they don't pass it."
+      },
+      {
+        "severity": "high",
+        "title": "tracked-jobs.mjs non-atomic JSON read-modify-write risks state corruption on crash or concurrent access",
+        "body": "The tracked-jobs module reads a JSON file, mutates an in-memory structure, and writes it back. There is no file locking (flock, lockfile, or atomic rename). If two glm-companion processes race (e.g. two review commands in parallel terminals, or a crash mid-write), the file can be truncated to zero bytes or contain partial JSON. The sweep context (C3-v04x-cumulative) implies multiple jobs launched in sequence, increasing the chance of overlap. State corruption here means lost job tracking with no recovery path.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.88,
+        "recommendation": "Write to a temp file in the same directory and atomically rename over the target. For concurrent access, use a simple lockfile with stale-detection. At minimum, catch JSON parse errors on read and recreate from empty rather than throwing."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs unrecognized error shapes fall through to generic handler with no logging or classification",
+        "body": "The new BigModel error dispatch layer pattern-matches known error structures (rate limit, auth, server error, etc.). Errors that match no known shape are silently classified as a generic 'unknown' with no structured logging of the raw error body. In a sweep context, if the upstream changes its error response format, every failure will be misclassified without any diagnostic trail, making it impossible to determine root cause from logs alone.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.75,
+        "recommendation": "In the default/fallthrough branch, log the full raw error object (or at minimum its keys and status code) at warn level before returning the generic classification. This ensures new error formats are discoverable in logs without needing to reproduce."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs error propagation may lose the original HTTP status when BigModel dispatch wraps it",
+        "body": "The client delegates error classification to bigmodel-errors.mjs, but if the dispatch returns a wrapped error object, downstream consumers that check for specific HTTP status codes (e.g. retry logic checking for 429) may no longer see the original status. This creates a coupling gap: the retry module and the client may disagree on what constitutes retryable, leading to either over-retrying non-retryable errors or never retrying retryable ones.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.7,
+        "recommendation": "Ensure the error object returned by bigmodel-errors classification always preserves the original `status` (or `statusCode`) property. Add an integration test that verifies retry logic correctly identifies a 429 classified error as retryable end-to-end."
+      },
+      {
+        "severity": "low",
+        "title": "process.mjs deleted but potential import sites may remain in untested code paths",
+        "body": "scripts/lib/process.mjs was removed in this diff. While imports were likely updated, there is no automated check that a future git merge or untested command path won't reference the deleted module, causing a runtime ReferenceError. The only protection is the check-imports.mjs script, which validates module existence at CI time but not at install time.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.45,
+        "recommendation": "This is low risk given CI coverage, but consider adding a defensive check in glm-companion.mjs startup that verifies all expected lib modules resolve, failing fast with a clear message if any are missing."
+      }
+    ],
+    "next_steps": [
+      "Inspect retry.mjs to confirm maxAttempts defaults and whether any caller sets an overall deadline — if not, add one.",
+      "Audit tracked-jobs.mjs write path for atomicity; implement write-to-temp-then-rename.",
+      "Add structured logging to the default branch in bigmodel-errors.mjs classification.",
+      "Verify error status code preservation through the glm-client → bigmodel-errors → retry chain with an integration test."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→HEAD diff introduces a retry/backoff system, BigModel error dispatch, job tracking, and multiple library rewrites. Several material defects survive into the current code: the retry module has no maximum-elapsed-time guard allowing unbounded wall-clock spin, the tracked-jobs module performs filesystem operations without atomicity guarantees risking corrupt state, and the new error-dispatch layer can swallow unrecognized error shapes silently. These are real operational risks for a sampling-sweep workload.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs has no maximum-elapsed-time ceiling — wall-clock unbounded under sustained failures\",\"body\":\"The retry module exposes exponential backoff with jitter but never caps total elapsed wall-clock time. During a sampling-sweep (C3-v04x-cumulative, run 5), if the upstream API returns retryable errors steadily (e.g. 429 or 503), the loop will continue until maxAttempts is exhausted. If maxAttempts is set high or derived from configuration, a single job can block the sweep for arbitrarily long with no observability that it is stuck. This is distinct from per-attempt timeout — there is no overall deadline. Under a sustained partial outage this silently stalls the entire sweep.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.82,\"recommendation\":\"Add an optional `maxElapsedMs` parameter to the retry config. Check elapsed time at the top of each iteration and bail with a distinct error code if exceeded. Default it to something sane (e.g. 5 minutes) so callers are protected even if they don't pass it.\"},{\"severity\":\"high\",\"title\":\"tracked-jobs.mjs non-atomic JSON read-modify-write risks state corruption on crash or concurrent access\",\"body\":\"The tracked-jobs module reads a JSON file, mutates an in-memory structure, and writes it back. There is no file locking (flock, lockfile, or atomic rename). If two glm-companion processes race (e.g. two review commands in parallel terminals, or a crash mid-write), the file can be truncated to zero bytes or contain partial JSON. The sweep context (C3-v04x-cumulative) implies multiple jobs launched in sequence, increasing the chance of overlap. State corruption here means lost job tracking with no recovery path.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.88,\"recommendation\":\"Write to a temp file in the same directory and atomically rename over the target. For concurrent access, use a simple lockfile with stale-detection. At minimum, catch JSON parse errors on read and recreate from empty rather than throwing.\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors.mjs unrecognized error shapes fall through to generic handler with no logging or classification\",\"body\":\"The new BigModel error dispatch layer pattern-matches known error structures (rate limit, auth, server error, etc.). Errors that match no known shape are silently classified as a generic 'unknown' with no structured logging of the raw error body. In a sweep context, if the upstream changes its error response format, every failure will be misclassified without any diagnostic trail, making it impossible to determine root cause from logs alone.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.75,\"recommendation\":\"In the default/fallthrough branch, log the full raw error object (or at minimum its keys and status code) at warn level before returning the generic classification. This ensures new error formats are discoverable in logs without needing to reproduce.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs error propagation may lose the original HTTP status when BigModel dispatch wraps it\",\"body\":\"The client delegates error classification to bigmodel-errors.mjs, but if the dispatch returns a wrapped error object, downstream consumers that check for specific HTTP status codes (e.g. retry logic checking for 429) may no longer see the original status. This creates a coupling gap: the retry module and the client may disagree on what constitutes retryable, leading to either over-retrying non-retryable errors or never retrying retryable ones.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.7,\"recommendation\":\"Ensure the error object returned by bigmodel-errors classification always preserves the original `status` (or `statusCode`) property. Add an integration test that verifies retry logic correctly identifies a 429 classified error as retryable end-to-end.\"},{\"severity\":\"low\",\"title\":\"process.mjs deleted but potential import sites may remain in untested code paths\",\"body\":\"scripts/lib/process.mjs was removed in this diff. While imports were likely updated, there is no automated check that a future git merge or untested command path won't reference the deleted module, causing a runtime ReferenceError. The only protection is the check-imports.mjs script, which validates module existence at CI time but not at install time.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":67,\"confidence\":0.45,\"recommendation\":\"This is low risk given CI coverage, but consider adding a defensive check in glm-companion.mjs startup that verifies all expected lib modules resolve, failing fast with a clear message if any are missing.\"}],\"next_steps\":[\"Inspect retry.mjs to confirm maxAttempts defaults and whether any caller sets an overall deadline — if not, add one.\",\"Audit tracked-jobs.mjs write path for atomicity; implement write-to-temp-then-rename.\",\"Add structured logging to the default branch in bigmodel-errors.mjs classification.\",\"Verify error status code preservation through the glm-client → bigmodel-errors → retry chain with an integration test.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T14:55:08.515Z"
+}

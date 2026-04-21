@@ -1,0 +1,59 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 2,
+    "citation_accuracy": 0.5,
+    "citation_false_file_hits": 0,
+    "latency_ms": 87341,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit bundles an npm scope rename with a behavioral change to the setup command. The scope rename in package.json and plugin manifests is potentially breaking for existing installations — users pinned to the old scope will not receive updates and may encounter resolution failures. The interactive menu addition in commands/setup.md alters the setup flow for already-configured users, but without the actual diff content to inspect, the conditional logic and edge-case handling cannot be verified. Shipping a scope rename without a migration path is the primary ship-blocking concern.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename may break existing installations",
+        "body": "The commit message explicitly mentions 'rename npm scope'. Files package.json, .claude-plugin/marketplace.json, and .claude-plugin/plugin.json all change (4, 4, and 2 lines respectively). If the published package name changes, existing users referencing the old scope will fail to resolve or update. No migration guide, deprecation notice, or dual-publishing strategy is visible in this commit. This is a user-visible breaking change that could leave existing installations stranded on the old scope with no upgrade path.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 5,
+        "confidence": 0.72,
+        "recommendation": "Confirm whether the old scope will remain published and point users to the new one via a deprecation notice. Add a post-install or pre-run version check so existing installations detect the rename and guide users to reinstall under the new scope. Document the migration in CHANGELOG.md or release_card.md explicitly."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive setup menu changes lack visible test coverage or edge-case specification",
+        "body": "commands/setup.md gains 19 lines of changes introducing an 'interactive menu when already configured.' For a setup command, failure modes include: partially-configured state (some keys set, others missing), corrupted config files, conflicting config sources, and users who want to reconfigure only one option. Without seeing the actual prompt logic, there is no evidence these edge cases are handled. A setup command that incorrectly detects 'already configured' or offers destructive options without confirmation could cause data loss of existing configuration.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.55,
+        "recommendation": "Inspect the actual diff to verify: (1) the 'already configured' detection is robust against partial/corrupt state, (2) any destructive option (reset, overwrite) requires explicit user confirmation, (3) the menu has a cancel/abort option, and (4) re-running setup is idempotent regardless of which path is chosen."
+      }
+    ],
+    "next_steps": [
+      "Inspect the full diff of package.json to confirm the exact scope change and assess breakage radius.",
+      "Inspect the full diff of commands/setup.md to verify the interactive menu handles partial configuration, corruption, and cancellation safely.",
+      "Verify whether the old npm scope will continue to exist as a redirect or deprecated package, and if not, plan a migration communication.",
+      "Check release_card.md (326 lines changed) for accuracy of the migration instructions and version references."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"This commit bundles an npm scope rename with a behavioral change to the setup command. The scope rename in package.json and plugin manifests is potentially breaking for existing installations — users pinned to the old scope will not receive updates and may encounter resolution failures. The interactive menu addition in commands/setup.md alters the setup flow for already-configured users, but without the actual diff content to inspect, the conditional logic and edge-case handling cannot be verified. Shipping a scope rename without a migration path is the primary ship-blocking concern.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename may break existing installations\",\n      \"body\": \"The commit message explicitly mentions 'rename npm scope'. Files package.json, .claude-plugin/marketplace.json, and .claude-plugin/plugin.json all change (4, 4, and 2 lines respectively). If the published package name changes, existing users referencing the old scope will fail to resolve or update. No migration guide, deprecation notice, or dual-publishing strategy is visible in this commit. This is a user-visible breaking change that could leave existing installations stranded on the old scope with no upgrade path.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 5,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Confirm whether the old scope will remain published and point users to the new one via a deprecation notice. Add a post-install or pre-run version check so existing installations detect the rename and guide users to reinstall under the new scope. Document the migration in CHANGELOG.md or release_card.md explicitly.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Interactive setup menu changes lack visible test coverage or edge-case specification\",\n      \"body\": \"commands/setup.md gains 19 lines of changes introducing an 'interactive menu when already configured.' For a setup command, failure modes include: partially-configured state (some keys set, others missing), corrupted config files, conflicting config sources, and users who want to reconfigure only one option. Without seeing the actual prompt logic, there is no evidence these edge cases are handled. A setup command that incorrectly detects 'already configured' or offers destructive options without confirmation could cause data loss of existing configuration.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Inspect the actual diff to verify: (1) the 'already configured' detection is robust against partial/corrupt state, (2) any destructive option (reset, overwrite) requires explicit user confirmation, (3) the menu has a cancel/abort option, and (4) re-running setup is idempotent regardless of which path is chosen.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect the full diff of package.json to confirm the exact scope change and assess breakage radius.\",\n    \"Inspect the full diff of commands/setup.md to verify the interactive menu handles partial configuration, corruption, and cancellation safely.\",\n    \"Verify whether the old npm scope will continue to exist as a redirect or deprecated package, and if not, plan a migration communication.\",\n    \"Check release_card.md (326 lines changed) for accuracy of the migration instructions and version references.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T14:40:52.366Z"
+}
