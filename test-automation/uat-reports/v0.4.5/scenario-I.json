@@ -1,0 +1,21 @@
+{
+  "command": "review",
+  "jobId": "job-mo8b6tq5-gt2g23",
+  "result": {
+    "rawOutput": "",
+    "parsed": null,
+    "parseError": null,
+    "failureMessage": "Auth failed (HTTP 401). Stored api_key may be invalid or lack permission for glm-5.1. Re-run /glm:setup --api-key <key> to refresh.",
+    "errorCode": "AUTH_FAILED",
+    "reasoningSummary": null,
+    "rawResponse": "{\"error\":{\"code\":\"401\",\"message\":\"\u4ee4\u724c\u5df2\u8fc7\u671f\u6216\u9a8c\u8bc1\u4e0d\u6b63\u786e\"}}"
+  },
+  "rendered": "# GLM Review\n\nGLM did not return valid structured JSON.\n\n- Parse error: null\n",
+  "meta": {
+    "reviewLabel": "Review",
+    "targetLabel": "branch diff against main \u00b7 focus=multi word focus text",
+    "targetMode": "branch",
+    "baseRef": "main",
+    "focusText": "multi word focus text"
+  }
+}

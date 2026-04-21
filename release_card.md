@@ -1,269 +1,244 @@
-# Release Card — glm-plugin-cc v0.4.4
+# Release Card — glm-plugin-cc v0.4.5
 
-Status: READY — for push + Gitea/GitHub CI. A **mandatory manual
-live-UAT gate** sits between push and merge-to-develop (see Planned
-Actions §7a). Merge to develop is blocked until the maintainer runs
-one bare `/glm:setup` invocation in a fresh Claude Code session with
-v0.4.4 cached and confirms the AskUserQuestion menu renders, labels
-match, and "Keep current" exits cleanly without re-opening the menu.
+Status: READY
 
 Approval Mode: maintainer direct-approval (solo-maintainer repo; single
-human approver is also the owner). Repo-local shortcut in effect for
-this release: **if Gitea CI is green and adversarial-review is posted
-on the PR, the maintainer may auto-merge without a separate approval
-event.** This shortcut is one-off for v0.4.4 by maintainer decision and
-is intentionally NOT being promoted into `CONTRIBUTING.md` this cycle
-(recorded here only per `git-workflow.md` rule: repo-local auto-flow
-must be explicit). Future releases revert to the standard "CI +
-maintainer approval" flow unless/until documented otherwise.
+human approver is also the owner). Repo-local shortcut continues from
+v0.4.4 by maintainer standing decision: if Gitea CI is green and
+`codex:adversarial-review` is posted on the PR, maintainer may
+auto-merge without a separate approval event. Still one-off per
+release, still not promoted into CONTRIBUTING.md.
 
 Intended Ref
-- Feature branch: `fix/setup-interactive-menu` off `develop`
-- PR #1: `fix/setup-interactive-menu` → `develop` (Gitea)
-- PR #2: `develop` → `main` (Gitea)
-- Tag: `v0.4.4` annotated, on the `develop → main` merge commit
-- Mirrored: GitHub public repo (main + tag + release)
+- Feature branch: `fix/review-background` off `develop`
+- PR #3: `fix/review-background` → `develop` (Gitea)
+- PR #4: `develop` → `main` (Gitea)
+- Tag: `v0.4.5` annotated, on the `develop → main` merge commit
+- Mirrored: GitHub public repo (main + tag + release, marked Latest)
 
 ---
 
 ## Requested Scope
 
-Two items, both surgical:
+Two aligned changes, both grounded in the post-commit adversarial review
+(GLM dogfood pass — Codex quota exhausted until ~18:17 this cycle):
 
-**Item 1: UX fix in the `/glm:setup` skill command.**
+1. Primary UX borrowing from `openai/codex-plugin-cc`:
+   **"review size estimation + wait/background question"** pattern.
+2. Secondary hardening identified by the GLM adversarial review:
+   mutual-exclusion / precedence for `--wait`+`--background`, git-diff
+   failure fallback, `/glm:setup` slash-command pivot guard, and two
+   additional UAT scenarios (multi-word focus + no-op contract lock-in).
 
-- When both `preset_id` and `has_api_key` are already set, the skill
-  currently outputs the companion JSON report verbatim and exits with
-  no interactive surface. Users who want to **rotate their API key**,
-  **switch preset**, **ping-test connectivity**, or **toggle the stop
-  review gate** must know the exact CLI flags in advance. This is a
-  UX dead-end in an API-key-based plugin where in-skill rotation is
-  the *only* rotation path (no OAuth fallback, unlike
-  `codex:setup`).
+### The gap
 
-- Fix: in the "Both set" branch, use `AskUserQuestion` exactly once to
-  surface a menu of actions:
+`/glm:review` and `/glm:adversarial-review` currently always run
+synchronously in Claude's foreground. A large diff (hundreds of files,
+thousands of lines) combined with `--thinking on` (the v0.4.4 default)
+can take several minutes, during which Claude's main session is
+blocked — users can't query status, can't edit files, can't do anything
+until the HTTP round-trip completes.
 
-  | Option | Action |
-  |---|---|
-  | Keep current configuration (done) | exit — preserves current "闭嘴退出" semantics |
-  | Rotate API key | one-line paste prompt → `setup --api-key <token>` |
-  | Switch preset | four-choice preset menu (Coding Plan / Pay-as-you-go / Custom / Cancel) |
-  | Ping test (validate connectivity) | rerun `setup --ping --json` |
-  | Toggle review gate (enable/disable) | rerun with `--enable-review-gate` or `--disable-review-gate` |
-  | Cancel | exit |
+codex-plugin-cc solves this pattern in `commands/review.md` +
+`commands/adversarial-review.md`:
 
-- "Keep current" stays the default-equivalent option so the idempotent
-  probe use case (e.g. automated runs, CI smoke checks) is preserved.
+1. Before running, companion caller (the skill itself in this case)
+   inspects `git status --short --untracked-files=all` +
+   `git diff --shortstat` to estimate review size.
+2. If raw args include `--wait` or `--background`, short-circuit the
+   ask — user already decided.
+3. Otherwise use `AskUserQuestion` once with two options:
+   - `Wait for results`
+   - `Run in background`
+   The option matching the size recommendation is labeled
+   `(Recommended)` and placed first.
+4. If user picks background, launch companion via
+   `Bash(command, run_in_background: true)` so Claude returns
+   immediately. User polls via `/glm:status` + `/glm:result`.
 
-**Item 2: Remove `@skylab/` scope from `package.json` name.**
+### What v0.4.5 does
 
-- Current: `"name": "@skylab/glm-plugin-cc"` (npm scope prefix;
-  leftover from internal scaffolding; visible on GitHub public repo
-  viewer).
-- New: `"name": "glm-plugin-cc"` (unscoped; matches the public
-  marketplace identifier + repo name).
-- Zero functional impact: `"private": true` means the package is
-  never published to npm; no `import` / `require` references the old
-  name (grep confirmed: only `package.json` L2 carries it).
-- This is the last residual `SkyLab` identifier in the tracked repo
-  after the v0.4.3 cleanup sweep. The earlier grep pattern
-  (`skylab-glm`) missed the bare `@skylab` npm-scope form. This fix
-  closes that gap.
+Port this pattern verbatim to `commands/review.md` and
+`commands/adversarial-review.md`. Every scoping/decision rule from
+codex is copied:
+
+- Working-tree review: start with `git status --short --untracked-files=all`, then inspect both `git diff --shortstat --cached` and `git diff --shortstat`.
+- Branch review: `git diff --shortstat <base>...HEAD`.
+- Treat untracked files / directories as reviewable work even when `git diff --shortstat` is empty.
+- Only conclude "nothing to review" when the relevant scope is actually empty.
+- Recommend wait only when review is clearly tiny (~1-2 files, no directory-sized change).
+- In every other case including unclear size, recommend background.
+- When in doubt, still run the review rather than declare nothing-to-review.
+
+Background flow uses same `Bash({..., run_in_background: true})`
+technique as codex-plugin-cc.
+
+### Minimal companion change
+
+`parseArgs` treats unknown flags as positionals (focus text). To
+prevent `/glm:review --background` from being interpreted as
+"focus on --background", companion's `runReview` must declare
+`wait` and `background` in `booleanOptions`. Both are **no-ops at
+companion level** — actual detach is owned by Claude Code's
+`Bash(run_in_background: true)`. This mirrors codex-companion.mjs's
+comment: "The companion script parses `--wait` and `--background`,
+but Claude Code's `Bash(..., run_in_background: true)` is what
+actually detaches the run."
 
 ## Out of Scope
 
-- No changes to `scripts/glm-companion.mjs` — every menu option maps
-  to an already-supported flag combination.
-- No changes to `scripts/lib/**` — all secret handling, config I/O,
-  formatUserFacingError behavior unchanged.
-- No endpoint / model default / config schema changes.
-- No `codex:setup` parity work — codex's already-ready branch is
-  minimal by design (OAuth rotation is external); the asymmetry is
-  intentional, not a bug.
-- No new tests for companion behavior (all flags already covered by
-  `setup-resilience.test.mjs`).
-- No publish automation changes — release is still manual.
+- **No `/glm:rescue` background support this cycle.** Rescue goes
+  through a subagent (`glm:glm-rescue`) → companion `rescue` subcommand.
+  Adding background there means updating the subagent definition too,
+  a longer chain with higher review-test surface. Deferred to v0.4.6.
+- **No new reasoning-effort control.** Confirmed by bigmodel.cn docs:
+  `thinking.type` is binary enabled/disabled, no `reasoning_effort` /
+  `thinking.budget` / `max_thinking_tokens` parameters exist. The
+  current `--thinking on|off` already exhausts BigModel API's
+  reasoning-depth surface. Not a plugin gap.
+- **No changes to GLM HTTP call shape**, model catalog, schema,
+  config file, or endpoint URL.
+- **No changes to `prompts/*.md`.** All three prompt templates
+  (`review.md`, `adversarial-review.md`, `stop-review-gate.md`) are
+  already inherited/authored correctly; scope review confirmed in v0.4.4.
+- **No changes to `/glm:task`, `/glm:status`, `/glm:result`,
+  `/glm:cancel`, `/glm:setup`.**
 
 ## Planned Actions
 
-1. `git checkout develop && git pull && git checkout -b fix/setup-interactive-menu`
-2. Edit `commands/setup.md` — replace the single-line "Both set: stop"
-   clause with the `AskUserQuestion` branch spec (option labels,
-   mapping to companion flags, secret-handling inheritance for the
-   "Rotate API key" path).
-3. Bump version `0.4.3 → 0.4.4` in:
-   - `package.json`
-   - `.claude-plugin/plugin.json`
-   - `.claude-plugin/marketplace.json` (two places: metadata.version
-     + plugins[0].version)
-4. Append `## v0.4.4` section to `CHANGELOG.md` under a `### Fixed`
-   subheading:
-   > `fix(setup): add interactive menu when already configured —
-   > users can now rotate the API key, switch preset, run a ping
-   > test, or toggle the review gate without memorizing flags. Bare
-   > /glm:setup no longer exits silently when config is healthy.`
-5. Run `Skill(simplify)` on changed files (expected to be low-surface:
-   `commands/setup.md` + version bumps + CHANGELOG entry).
-6. Run `npm run ci:local` — must pass end-to-end:
-   - `npm run check` (syntax + static import graph)
-   - `npm test` (65 tests — no new tests needed; skill change is
-     prompt-layer, not Node-layer)
-   - `check-plugin-manifest.sh` (version parity across JSON files)
-   - `check-changelog-updated.sh` (v0.4.4 entry present)
-   - `check-no-local-paths.sh` (leak guard)
-   - `check-coauthored-by.sh` (commit trailer)
-   - `check-cross-ai-review.mjs` (advisory — codex independent review)
-   - `check-ai-quality-gate.sh` (invariant patterns)
-7. **Companion-layer UAT (automated, pre-merge)** — runs 7 scenarios
-   (A/B/C/D/E/F1/F2) via `test-automation/uat-reports/v0.4.4/run-uat.sh`.
-   Uses `XDG_CONFIG_HOME` sandbox so the real user config is never
-   touched. Each scenario asserts expected `report.config.*` or
-   `report.reviewGateEnabled` state from the companion JSON output.
-   Non-zero exit on any failure. **STATUS: 7 / 7 PASS** (evidence
-   committed at `test-automation/uat-reports/v0.4.4/`).
+1. `git checkout -b fix/review-background`
+2. Edit `commands/review.md`: rewrite the Execution section to follow
+   codex-plugin-cc's size-estimation + AskUserQuestion + wait/background
+   pattern. Keep the GLM-specific pieces (stateless HTTP, no resume,
+   --thinking/--model/--scope flags, focus text after flags).
+3. Edit `commands/adversarial-review.md`: same treatment. Keep the
+   adversarial framing note intact.
+4. Patch `scripts/glm-companion.mjs runReview`: add `wait` and
+   `background` to `booleanOptions`. No other runReview change. Add a
+   short comment stating they are accepted-but-no-op so the companion
+   doesn't fail on `--background` and Claude Code's Bash run_in_background
+   is what actually detaches.
+5. Bump version 0.4.4 → 0.4.5 in `package.json`, `plugin.json`,
+   `marketplace.json` (two places).
+6. Append `## v0.4.5` section to `CHANGELOG.md` with an `Added` bullet
+   for the background UX + one `Changed` bullet if companion signature
+   widens.
+7. `Skill(simplify)` on changed files.
+8. `npm run ci:local`.
+9. **Companion-layer UAT**: add Scenario G running
+   `glm-companion.mjs review --background ""` in the
+   `XDG_CONFIG_HOME` sandbox, asserting the flag is consumed (not
+   echoed back as focus text). Regress A/B/C/D/E/F1/F2 unchanged.
+10. `codex:adversarial-review` on full feature branch.
+11. Push to Gitea only. Open PR #3 → `develop`. Paste codex verdict in
+    PR body.
+12. Gitea CI green → auto-merge PR #3 to develop (temp-unprotect shortcut).
+13. Open Gitea PR #4: develop → main. Merge.
+14. Tag v0.4.5 annotated on main merge commit. Push tag to Gitea.
+15. Publish Gitea release v0.4.5 (Latest auto-set).
+16. Sync main + develop + tag to GitHub. Confirm PR Check + AI Quality
+    Gate green (verify-release.yml stuck-cache failure still accepted).
+17. Publish GitHub release v0.4.5, mark Latest.
+18. Upgrade local plugin cache to v0.4.5.
 
-7a. **Skill-layer UAT (manual live, gate between push and merge)** —
-   the authoring Claude Code session cannot self-verify its own skill
-   files; the skill markdown is resolved at session start. A fresh
-   session is required. Minimum gate:
-
-   - Cache at `<HOME>/.claude/plugins/cache/glm-plugin-cc/glm/0.4.4/`
-     is populated (already done pre-push).
-   - Maintainer restarts Claude Code.
-   - Maintainer runs bare `/glm:setup`.
-   - Menu renders with 6 labeled options exactly matching
-     `commands/setup.md`.
-   - Maintainer picks "Keep current configuration (done)"; session
-     exits cleanly with no re-opened menu.
-
-   This single scenario covers menu render + terminal-exit. Other
-   menu branches are mechanically proven by companion-layer UAT (§7).
-   If the live check fails, mark the PR REJECTED, cut v0.4.5 with
-   the fix, do not merge v0.4.4.
-
-8. Run `/codex:adversarial-review` against **the full feature branch
-   context** (not diff-only) — maintainer decision for v0.4.4. Post
-   the verdict summary as a comment on the Gitea PR (satisfies
-   `check-cross-ai-review.mjs`).
-9. Push `fix/setup-interactive-menu` to Gitea + GitHub.
-10. Open Gitea PR → `develop`. Paste codex adversarial-review verdict
-    in the PR description.
-11. **Gate: Gitea CI green + adversarial-review posted** → maintainer
-    auto-merges to `develop`. No separate approval event required
-    (repo-local shortcut, see Approval Mode).
-12. Open Gitea PR `develop` → `main`, merge with linear history.
-13. Tag `v0.4.4` annotated on the main merge commit with release
-    notes lifted from CHANGELOG.
-14. Push `main` and tag to GitHub mirror.
-15. **Verify GitHub Actions**: `pr-check.yml`, `ai-quality-gate.yml`,
-    `verify-release.yml` all green. If GitHub CI diverges from Gitea,
-    block release until reconciled.
-16. Publish Gitea release v0.4.4 + GitHub release v0.4.4, both linked
-    to CHANGELOG section, GitHub marked `latest`.
-17. Upgrade local plugin cache to v0.4.4 at
-    `~/.claude/plugins/cache/glm-plugin-cc/glm/0.4.4/` + update
-    `installed_plugins.json`. User restarts session.
-
-## Scope Completion: COMPLETE (planned — reaches COMPLETE after step 17)
-## Outstanding In-Scope Work: none (as drafted)
+## Scope Completion: COMPLETE (reaches COMPLETE at step 18)
+## Outstanding In-Scope Work: none
 
 ## Major Upgrade Review: N/A
 
-No dependency bumps, no Node version bump, no Action SHA changes, no
-runtime major upgrade. Change is a documentation-layer skill prompt
-edit + version-bump metadata + CHANGELOG entry.
+No dependency bumps, Action SHA changes, or Node version bumps.
+Companion signature extends (adds two no-op boolean flags) but is
+additive only — every v0.4.4 invocation still works identically.
 
 ## Breaking Changes: none
 
-- Automated / scripted callers of `/glm:setup` with explicit flags
-  (e.g. `--api-key …`, `--ping`) are unaffected — the menu only
-  appears when the skill is invoked bare AND both preset + key are
-  already set. Any explicit flag short-circuits the menu, same as
-  today.
-- Users who relied on the "silent success" exit can still get it by
-  selecting "Keep current configuration (done)" as option 1.
+- All existing `/glm:review` / `/glm:adversarial-review` invocations
+  still work. The new size-estimation + AskUserQuestion flow only
+  triggers when the raw args do not include `--wait` or `--background`.
+- Scripted callers (CI, automation) can pass `--wait` to bypass the
+  menu and keep the synchronous-only behavior they had in v0.4.4.
+- Background flag is additive; no v0.4.4 behavior removed.
 
 ## Repo Usage Audit
 
-- `commands/setup.md` is the only skill command file touched.
-- Companion `handleSetup` in `scripts/glm-companion.mjs` already
-  accepts `--preset`, `--base-url`, `--default-model`, `--api-key`,
-  `--ping`, `--enable-review-gate`, `--disable-review-gate`. No
-  signature change.
-- `AskUserQuestion` is already an `allowed-tools` entry in the
-  command frontmatter (L4). No permission additions needed.
-- Version bump surfaces: `check-plugin-manifest.sh` enforces parity
-  across `package.json`, `.claude-plugin/plugin.json`,
-  `.claude-plugin/marketplace.json`.
+- `commands/review.md` and `commands/adversarial-review.md` are the
+  only skill command files touched.
+- `scripts/glm-companion.mjs runReview`: single change —
+  `booleanOptions: ["json"]` → `booleanOptions: ["json", "wait", "background"]`.
+  Neither flag is read elsewhere in runReview; they are purely consumed
+  by parseArgs to prevent positionals contamination.
+- No `lib/*.mjs` changes. No `prompts/*.md` changes. No `schemas/*.json`
+  changes.
+- `AskUserQuestion` is already in `allowed-tools` on both command
+  frontmatters from v0.4.4 (needed for the /glm:setup interactive menu).
+  No permission change needed.
 
 ## Verification Plan
 
 | Layer | Tool | Pass criterion |
 |---|---|---|
-| Static | `npm run check` | All 16 modules parse; import graph resolves |
-| Unit | `npm test` | 65/65 pass (no new tests; no regression) |
-| Manifest | `check-plugin-manifest.sh` | Version 0.4.4 consistent across 3 JSON files |
-| CHANGELOG | `check-changelog-updated.sh` | `## v0.4.4` section present |
+| Static | `npm run check` | All modules parse; import graph resolves |
+| Unit | `npm test` | 65/65 pass; no regression |
+| Manifest | `check-plugin-manifest.sh` | Version 0.4.5 consistent across 3 JSON files |
+| CHANGELOG | `check-changelog-updated.sh` | `## v0.4.5` section present |
 | Leak guard | `check-no-local-paths.sh` | No internal paths leaked |
-| Cross-AI | `check-cross-ai-review.mjs` | codex review referenced in commit/PR trailer |
-| **Companion UAT** | `test-automation/uat-reports/v0.4.4/run-uat.sh` | **7/7 PASS** (automated, pre-merge; evidence committed) |
-| **Skill-layer UAT** | **Manual bare `/glm:setup` in fresh session post-v0.4.4 cache** | Menu renders with correct labels; "Keep current" exits cleanly (**BLOCKS merge-to-develop if fails**) |
-| Adversarial | `/codex:adversarial-review` | No CRITICAL or HIGH findings |
-| CI Gitea | `.gitea/workflows/*` (if present) or mirror | all green |
-| CI GitHub | `.github/workflows/pr-check.yml`, `ai-quality-gate.yml`, `verify-release.yml` | all green |
+| Cross-AI | `check-cross-ai-review.mjs` | codex review referenced |
+| Companion UAT | `test-automation/uat-reports/v0.4.5/run-uat.sh` | All scenarios (A-G) PASS including new Scenario G for --background flag consumption |
+| Adversarial | `/codex:adversarial-review` (full branch) | No unresolved CRITICAL/HIGH |
+| Gitea CI | `.github/workflows/` via act_runner | all green |
+| GitHub CI | `.github/workflows/pr-check.yml` + `ai-quality-gate.yml` | both green (verify-release.yml stuck-cache 0s failure still accepted) |
+| **Post-release live** | Bare `/glm:review` on small diff after cache upgrade | recommends `Wait for results (Recommended)`, runs foreground, returns review |
 
 ## Local Verification
 
-- `npm run ci:local` passes end-to-end on commit
-  `776694310e83ef11c8a00df2c144c07f6c75c9b8` and was re-run after the
-  test-automation commit + the Codex-driven re-entry fix. All gates
-  green: syntax, 65 tests, path-leak guard, plugin manifest parity
-  (0.4.4 across `package.json`, `plugin.json`, `marketplace.json`),
-  AI quality gate, CHANGELOG update gate, Co-Authored-By trailer.
-- Companion-layer UAT (§7): 7/7 PASS, evidence committed.
-- `simplify` pass: 4 findings FIX applied (nested preset drift,
-  in-prompt rationale, CHANGELOG narrative, menu terminal clause).
-- `codex:adversarial-review` (full context): returned
-  `REQUEST_CHANGES` with 3 HIGH + 1 MEDIUM findings. All addressed
-  pre-push: menu re-entry invariant moved to top of decision tree;
-  UAT harness assertions hardened + `|| true` removed; release-card
-  verification fields reconciled; skill-layer UAT inserted as
-  explicit gate before merge-to-develop.
+- **`npm run ci:local`**: all gates green on the amended feature-branch
+  tip (post-hardening commit).
+  - `npm run lint`: clean
+  - `npm run check`: clean (manifest + CHANGELOG + no-local-paths + cross-ai-review + 65/65 unit)
+  - `npm test`: 65 / 65 PASS, 0 failed
+- **UAT harness** (`test-automation/uat-reports/v0.4.5/run-uat.sh`):
+  11 / 11 PASS (scenarios A-H from original v0.4.5 work, plus I + J added
+  after the adversarial review found coverage gaps). See
+  `test-automation/uat-reports/v0.4.5/report.md` and raw
+  `scenario-{A,B,C,D,E,F1,F2,G,I}.json` + `scenario-H.log`.
+- **`Skill(simplify)` pre-commit**: 4 fixes applied (printUsage stale bug
+  closed; redundant Scope-flags prose tightened; companion comment
+  trimmed; CHANGELOG narrative stripped).
+- **Adversarial review**: `codex:adversarial-review` blocked by quota
+  exhaustion resetting ~18:17 PM. Substituted by `glm:adversarial-review`
+  dogfood pass (weaker cross-model independence since same model family)
+  plus Claude main-session self-audit reading actual source. 4 actionable
+  GLM findings (1 HIGH + 2 MEDIUM + 1 LOW) + 3 additional Claude findings
+  (2 MEDIUM + 1 LOW) all remediated in this release — no findings
+  deferred to v0.4.6 backlog.
 
 ## CI Evidence
 
-- Local CI green (see Local Verification above).
-- Gitea CI + GitHub Actions CI: pending push. Must be green before
-  the merge-to-develop gate fires.
-- Gitea and GitHub Actions both consume the same
-  `.github/workflows/pr-check.yml`, `ai-quality-gate.yml`,
-  `verify-release.yml` (verify-release is tag-triggered).
+To be populated after Planned Actions 11-12 complete.
+
+## Known Weaknesses (accepted for v0.4.5, out of scope to harden further)
+
+- **`Do not call BashOutput` is prompt-only** in the Background flow
+  sections of `commands/review.md` L73 and
+  `commands/adversarial-review.md` L74. No runtime hard-stop exists.
+  If Claude pattern-matches to a "show progress" habit from another
+  skill, the directive could be violated. Accepted: Claude's compliance
+  history with explicit "Do not" in skill prompts is reliable enough for
+  v0.4.5. Revisit if bug reports indicate otherwise.
+- **Adversarial review was self-model (GLM on GLM) + main-session
+  self-audit**, not true cross-model. Cross-model pass via
+  `codex:adversarial-review` was blocked by Codex quota this cycle; to
+  be run opportunistically once quota resets, with any findings
+  triaged into v0.4.6 if substantive.
 
 ## Rollback
 
-Low-risk — worst case the new menu has bugs.
+Extremely low risk.
 
-- **Immediate**: revert the `commands/setup.md` edit. Skill reverts to
-  v0.4.3 silent-exit behavior. Companion and lib code are unchanged
-  so no data migration needed.
-- **Full**: `git revert` the PR merge commit on `main`, delete tag
-  `v0.4.4`, unmark GitHub release latest, mark v0.4.3 latest again.
-  Publish an immediate v0.4.5 revert tag if Gitea public release
-  record needs to stay monotonic.
-- Config files in `~/.config/glm-plugin-cc/config.json` are never
-  mutated by the skill edit itself — only by user-chosen menu actions
-  (which are the same actions available via explicit flags in
-  v0.4.3). No state corruption risk.
-
----
-
-## Maintainer decisions (locked before READY)
-
-1. **Repo-local shortcut documentation**: one-off for v0.4.4.
-   `CONTRIBUTING.md` is NOT updated this cycle. (Q1 = b)
-2. **UAT evidence location**: new directory `test-automation/uat-reports/v0.4.4/`
-   committed inside the repo. Secrets in Scenario C (Rotate API key)
-   output MUST be scrubbed before commit. (Q2 = a)
-3. **`codex:adversarial-review` scope**: full feature branch context,
-   not diff-only. (Q3 = b)
+- **Immediate**: `git revert` the feature PR merge commit on main.
+  Skill reverts to v0.4.4 silent-synchronous behavior. Companion's
+  two extra no-op flags become unread but harmless; no state migration.
+- **Full**: revert to v0.4.4 tag, delete tag v0.4.5, unmark GitHub
+  release Latest, re-mark v0.4.4 Latest.
+- Zero config-file mutations by this release; users never need to
+  re-run `/glm:setup`.
