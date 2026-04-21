@@ -1,6 +1,11 @@
 # Release Card — glm-plugin-cc v0.4.4
 
-Status: READY
+Status: READY — for push + Gitea/GitHub CI. A **mandatory manual
+live-UAT gate** sits between push and merge-to-develop (see Planned
+Actions §7a). Merge to develop is blocked until the maintainer runs
+one bare `/glm:setup` invocation in a fresh Claude Code session with
+v0.4.4 cached and confirms the AskUserQuestion menu renders, labels
+match, and "Keep current" exits cleanly without re-opening the menu.
 
 Approval Mode: maintainer direct-approval (solo-maintainer repo; single
 human approver is also the owner). Repo-local shortcut in effect for
@@ -110,24 +115,32 @@ Two items, both surgical:
    - `check-coauthored-by.sh` (commit trailer)
    - `check-cross-ai-review.mjs` (advisory — codex independent review)
    - `check-ai-quality-gate.sh` (invariant patterns)
-7. **Manual UAT (6 scenarios)** — unit tests cannot exercise the
-   Claude-side `AskUserQuestion` flow. Must run live in a Claude Code
-   session against the local cache at
-   `~/.claude/plugins/cache/glm-plugin-cc/glm/0.4.4/` (built from
-   feature branch, pre-merge). Scenarios:
+7. **Companion-layer UAT (automated, pre-merge)** — runs 7 scenarios
+   (A/B/C/D/E/F1/F2) via `test-automation/uat-reports/v0.4.4/run-uat.sh`.
+   Uses `XDG_CONFIG_HOME` sandbox so the real user config is never
+   touched. Each scenario asserts expected `report.config.*` or
+   `report.reviewGateEnabled` state from the companion JSON output.
+   Non-zero exit on any failure. **STATUS: 7 / 7 PASS** (evidence
+   committed at `test-automation/uat-reports/v0.4.4/`).
 
-   | ID | Precondition | Command | Expected |
-   |---|---|---|---|
-   | A | Empty config | `/glm:setup` | preset menu → paste key → ready |
-   | B | Both set (healthy) | `/glm:setup` | **NEW menu appears**, select "Keep current" → exit |
-   | C | Both set (healthy) | `/glm:setup` | select "Rotate API key" → paste → config updated (old key overwritten) |
-   | D | Both set (healthy) | `/glm:setup` | select "Switch preset" → Pay-as-you-go → `base_url` switched |
-   | E | Both set (healthy) | `/glm:setup` | select "Ping test" → real HTTP probe returns OK |
-   | F | Both set (healthy) | `/glm:setup` | select "Toggle review gate" → enable → `reviewGateEnabled: true` |
+7a. **Skill-layer UAT (manual live, gate between push and merge)** —
+   the authoring Claude Code session cannot self-verify its own skill
+   files; the skill markdown is resolved at session start. A fresh
+   session is required. Minimum gate:
 
-   Each scenario requires screenshot or JSON evidence captured to
-   `test-automation/uat-reports/v0.4.4/`. Scenarios C, D, F must leave
-   config in a recoverable state (restore after).
+   - Cache at `<HOME>/.claude/plugins/cache/glm-plugin-cc/glm/0.4.4/`
+     is populated (already done pre-push).
+   - Maintainer restarts Claude Code.
+   - Maintainer runs bare `/glm:setup`.
+   - Menu renders with 6 labeled options exactly matching
+     `commands/setup.md`.
+   - Maintainer picks "Keep current configuration (done)"; session
+     exits cleanly with no re-opened menu.
+
+   This single scenario covers menu render + terminal-exit. Other
+   menu branches are mechanically proven by companion-layer UAT (§7).
+   If the live check fails, mark the PR REJECTED, cut v0.4.5 with
+   the fix, do not merge v0.4.4.
 
 8. Run `/codex:adversarial-review` against **the full feature branch
    context** (not diff-only) — maintainer decision for v0.4.4. Post
@@ -194,14 +207,38 @@ edit + version-bump metadata + CHANGELOG entry.
 | CHANGELOG | `check-changelog-updated.sh` | `## v0.4.4` section present |
 | Leak guard | `check-no-local-paths.sh` | No internal paths leaked |
 | Cross-AI | `check-cross-ai-review.mjs` | codex review referenced in commit/PR trailer |
-| **UAT** | **Manual live /glm:setup in Claude Code** | **All 6 scenarios (A-F) pass** |
+| **Companion UAT** | `test-automation/uat-reports/v0.4.4/run-uat.sh` | **7/7 PASS** (automated, pre-merge; evidence committed) |
+| **Skill-layer UAT** | **Manual bare `/glm:setup` in fresh session post-v0.4.4 cache** | Menu renders with correct labels; "Keep current" exits cleanly (**BLOCKS merge-to-develop if fails**) |
 | Adversarial | `/codex:adversarial-review` | No CRITICAL or HIGH findings |
 | CI Gitea | `.gitea/workflows/*` (if present) or mirror | all green |
 | CI GitHub | `.github/workflows/pr-check.yml`, `ai-quality-gate.yml`, `verify-release.yml` | all green |
 
-## Local Verification: not yet run (DRAFT state)
+## Local Verification
 
-## CI Evidence: not yet run (DRAFT state)
+- `npm run ci:local` passes end-to-end on commit
+  `776694310e83ef11c8a00df2c144c07f6c75c9b8` and was re-run after the
+  test-automation commit + the Codex-driven re-entry fix. All gates
+  green: syntax, 65 tests, path-leak guard, plugin manifest parity
+  (0.4.4 across `package.json`, `plugin.json`, `marketplace.json`),
+  AI quality gate, CHANGELOG update gate, Co-Authored-By trailer.
+- Companion-layer UAT (§7): 7/7 PASS, evidence committed.
+- `simplify` pass: 4 findings FIX applied (nested preset drift,
+  in-prompt rationale, CHANGELOG narrative, menu terminal clause).
+- `codex:adversarial-review` (full context): returned
+  `REQUEST_CHANGES` with 3 HIGH + 1 MEDIUM findings. All addressed
+  pre-push: menu re-entry invariant moved to top of decision tree;
+  UAT harness assertions hardened + `|| true` removed; release-card
+  verification fields reconciled; skill-layer UAT inserted as
+  explicit gate before merge-to-develop.
+
+## CI Evidence
+
+- Local CI green (see Local Verification above).
+- Gitea CI + GitHub Actions CI: pending push. Must be green before
+  the merge-to-develop gate fires.
+- Gitea and GitHub Actions both consume the same
+  `.github/workflows/pr-check.yml`, `ai-quality-gate.yml`,
+  `verify-release.yml` (verify-release is tag-triggered).
 
 ## Rollback
 

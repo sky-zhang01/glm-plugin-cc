@@ -34,7 +34,7 @@
       "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
       "default_model": "glm-5.1",
       "has_api_key": true,
-      "updated_at_utc": "2026-04-21T04:14:43.613Z",
+      "updated_at_utc": "2026-04-21T04:25:35.992Z",
       "error": null
     },
     "presets": [

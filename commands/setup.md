@@ -12,6 +12,8 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/glm-companion.mjs" setup --json "$ARGUMENTS"
 
 Present the companion stdout verbatim. Do not add commentary, bullet-list summary, or Chinese re-statement — the JSON report is the full response.
 
+**Decision-tree invariant — read this before the branches below.** The branch-dispatch in this file runs exactly once per `/glm:setup` invocation, keyed off the state returned by the *initial* companion call above. Any further `node glm-companion.mjs setup …` call triggered by a branch action (preset remediation, key paste, menu option, ping, review-gate toggle) is treated as a single terminal write: show its stdout verbatim, then stop. Do **not** re-evaluate these branches against the post-rerun state. "Fall through" between branches, where called out, applies only within the initial probe's state evaluation, not across companion reruns.
+
 Then inspect `report.config.preset_id` and `report.config.has_api_key`:
 
 - **Preset unset** (`preset_id: null`): use `AskUserQuestion` once, Coding Plan first and suffixed `(Recommended)`:
@@ -25,7 +27,7 @@ Then inspect `report.config.preset_id` and `report.config.has_api_key`:
 
 - **Both set AND `$ARGUMENTS` is non-empty** (user passed explicit flags such as `--ping`, `--api-key`, `--preset`, `--enable-review-gate`, `--disable-review-gate`): stop — the companion already handled the explicit request and the JSON report is the full response.
 
-- **Both set AND `$ARGUMENTS` is empty** (bare `/glm:setup` invocation on a healthy configuration): use `AskUserQuestion` exactly once to surface an action menu with these options in order. **Each option is terminal** — after showing companion stdout from the chosen action, stop; the branch-dispatch rules above apply only to the initial probe and must not re-open the menu on the post-action state.
+- **Both set AND `$ARGUMENTS` is empty** (bare `/glm:setup` invocation on a healthy configuration): use `AskUserQuestion` exactly once to surface an action menu with these options in order. Every option resolves to either a single terminal companion call or a direct stop (see the decision-tree invariant above — no post-action re-evaluation).
   - `Keep current configuration (done)` → stop. No further action.
   - `Rotate API key` → one-line prompt, nothing else — *"Paste your new GLM API key on a single line in your next message. I'll overwrite the existing key in `~/.config/glm-plugin-cc/config.json` (0600) and never echo it back."* When the user replies, extract the token verbatim (strip whitespace, no quoting / paraphrasing) and run `node … setup --api-key "<token>" --json`. Show stdout verbatim.
   - `Switch preset` → nested `AskUserQuestion` with four options:
