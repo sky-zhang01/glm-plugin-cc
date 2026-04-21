@@ -1,5 +1,116 @@
 # Changelog
 
+## v0.4.6 — 2026-04-21
+
+Post-v0.4.5 aftercare release. Adds programmatic BigModel vendor
+error-code handling with automatic retry/backoff for transient
+conditions, corrects the error-code table against the official docs,
+and retires the chronically-broken `verify-release.yml` workflow in
+favor of a local pre-tag gate.
+
+### Added
+
+- **BigModel vendor error-code dispatch table**
+  (`scripts/lib/bigmodel-errors.mjs`) — official codes 1301/1302/1304/1305/1308/1309/1310
+  per [docs.bigmodel.cn/cn/faq/api-code](https://docs.bigmodel.cn/cn/faq/api-code).
+  Each maps to a distinct internal `errorCode` + retry semantic
+  (`immediate` / `after-cooldown` / `never`) + user-facing recovery
+  hint. Unknown vendor codes fall through to `VENDOR_ERROR:<code>`
+  preserving raw vendor message rather than being silently swallowed
+  as generic `RATE_LIMITED`.
+- **Automatic retry/backoff for transient conditions**
+  (`scripts/lib/retry.mjs`) — `/glm:review`, `/glm:adversarial-review`,
+  and `/glm:task` now transparently retry on `retry: immediate` failure
+  codes (1302 account rate limit, 1305 shared-pool overload) plus
+  network-layer errors (TIMEOUT, NETWORK_ERROR). Exponential backoff
+  with ±20 % jitter, default policy: `maxAttempts=3`, `baseDelayMs=2000`,
+  `multiplier=2.5`, `maxDelayMs=15000`, `totalBudgetMs=30000`. Terminal
+  codes (1301/1304/1308/1309/1310, auth, bad request) return on first
+  call — no wasted retries. Default matches ZhipuAI SDK's own
+  `max_retries=3` industry norm. Each attempt surfaces through
+  `onProgress` so the caller sees "attempt 2 hit SERVICE_OVERLOADED;
+  backing off 5100 ms before retry". Result shape extends with
+  `attempts`, `attemptHistory`, `retryExhausted` for observability.
+  Opt-out via `retry: false` in the call-site options (useful for
+  debugging).
+- `scripts/ci/check-release-ready.sh` — local pre-tag gate running the
+  four checks the defunct `verify-release.yml` tried to run
+  (package.json ↔ tag parity, manifest parity, CHANGELOG section,
+  release_card Status: READY). Invoked automatically by the pre-push
+  hook on `refs/tags/v*.*.*` refspec.
+
+### Changed
+
+- **Error-code table corrections** against the official BigModel docs:
+  - `1303` REMOVED from the table (does not exist in official docs; my
+    earlier mapping was memory-derived)
+  - `1304` reclassified from `INSUFFICIENT_BALANCE` (wrong) to
+    `DAILY_QUOTA_EXHAUSTED` — daily call-count cap, requires plan
+    purchase not balance top-up
+  - `1302` message clarified: account-level **rate limit** (not just
+    concurrent), retry=immediate per official "建议重试 / 控制请求频率"
+  - Added 1301 (CONTENT_BLOCKED), 1308 (PLAN_QUOTA_EXHAUSTED),
+    1309 (PLAN_EXPIRED), 1310 (PERIODIC_QUOTA_EXHAUSTED)
+
+### Removed
+
+- `.github/workflows/verify-release.yml` deleted and the orphaned
+  GitHub registration marked `disabled_manually`. Every run since
+  creation was a 0-second failure: GitHub's parser never registered
+  the YAML (registered `name` = filename path fallback, not the
+  `name: Release Gate` declared in YAML — confirmed via
+  `/repos/.../actions/workflows` diff against `ai-quality-gate.yml`
+  and `pr-check.yml`). Coverage fully replaced by
+  `check-release-ready.sh` + pre-push hook; no release-gate
+  functionality lost.
+
+### Hardened (post-adversarial-review, in-release)
+
+GLM adversarial-review dogfood of the v0.4.6 branch surfaced 2
+additional HIGH-severity gaps, both remediated before merge:
+
+- **HTTP 502/503/504/500 now auto-retry** as a distinct
+  `HTTP_ERROR_TRANSIENT` error code with `retry: immediate`. Previously
+  the generic `HTTP_ERROR` fallback defaulted to `stop`, so BigModel
+  gateway spikes would abort without retry. Terminal 5xx (e.g. 507)
+  still stops to avoid amplifying persistent backend bugs.
+- **totalBudgetMs now enforces wall-clock elapsed**, including call
+  duration and not only cumulative backoff sleep. Previously a retry
+  loop with 20-second calls could silently exceed a 30-second budget.
+  Default budget raised from 30s to 90s to accommodate 3 × thinking-on
+  calls plus backoff. `withRetry` now accepts a `now()` injector so
+  tests can stub wall-clock advancement.
+- `onAttempt` callback payload extended with `maxAttempts`, `elapsedMs`,
+  `budgetMs` so the caller-visible progress string can render
+  "attempt 2/3; elapsed 22000/90000 ms".
+- pre-push hook gained an explanatory comment documenting the
+  multi-ref push semantic (`git push origin main v0.4.6` loops each ref).
+
+GLM findings #4 (1308 retry semantic) and #7 (unmapped-code logging)
+were rebutted: 1308 is period-based per official docs (not concurrent
+as GLM guessed), and silent conservative-stop on unknown codes is the
+safer default for a plugin. GLM finding #6 (real-timer integration
+test) accepted as a low-value gap — fake-timer tests give same logical
+coverage at 10× speed.
+
+### Tests
+
+- 115 / 115 PASS (65 pre-existing + 20 new bigmodel-errors tests + 30
+  new retry tests). Lock in the corrected error table, retry semantic
+  dispatch, backoff math, wall-clock budget enforcement, HTTP 5xx
+  transient classification, attemptHistory shape, network-error
+  retryability, opt-out path, and onAttempt payload contract.
+
+### Known non-issue (deferred)
+
+- GLM-5.1 model-class hallucination on large (>5k line) diffs with
+  structured output + `thinking: enabled` is documented in
+  `~/Project/knowledge/agent-hallucination-patterns.md` (Appendix,
+  2026-04-21). Two independent dogfood sessions observed it on the
+  same day. Mitigations (scope-narrowing heuristic, schema-echo
+  detector, optional citation sanity-check) are scoped for a future
+  release — they are model-class mitigation, not a plugin bug.
+
 ## v0.4.5 — 2026-04-21
 
 Add `--wait` / `--background` execution-mode flags to `/glm:review` and

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Git pre-push hook: runs the full local CI suite before any push.
 # Blocks push on any failure so gitea / GitHub never see a broken state.
+# When pushing a version tag (refs/tags/vX.Y.Z), additionally runs the
+# release-ready gate (replaces the broken verify-release.yml workflow).
 #
 # Install: bash scripts/install-hooks.sh
 # Bypass (emergency only): git push --no-verify
@@ -20,5 +22,25 @@ if ! bash scripts/ci/check-all.sh; then
   echo "  Run 'npm run ci:local' for faster iteration."
   exit 1
 fi
+
+# Release-ready gate: if ANY of the refs being pushed is a version tag,
+# run scripts/ci/check-release-ready.sh for that tag. Git feeds refs as
+# lines of `<local_ref> <local_sha> <remote_ref> <remote_sha>` on stdin,
+# one per ref in a multi-ref push like `git push origin main v0.4.6`.
+# The loop iterates EVERY ref; `exit 1` on any failing ref aborts the
+# whole push (correct behavior — partial pushes are worse than none).
+# Non-tag refs (branch pushes) fall through the if-guard unchanged.
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+  if [[ "$remote_ref" =~ ^refs/tags/(v[0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+    TAG="${BASH_REMATCH[1]}"
+    echo ""
+    echo "pre-push: release tag $TAG detected — running release-ready gate…"
+    if ! bash scripts/ci/check-release-ready.sh "$TAG"; then
+      echo ""
+      echo "✗ Release-ready gate FAILED for $TAG. Fix the issues above before pushing the tag." >&2
+      exit 1
+    fi
+  fi
+done
 
 exit 0
