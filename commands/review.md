@@ -98,11 +98,12 @@ Bash({
   plugin intentionally ships no opinionated defaults**: at effective
   N=81-84 per cell on the large-diff fixture, no pairwise Fisher
   exact contrast between `temp=0`, `0.5`, and `1.0` reached
-  significance (p = 0.535 / 0.747 / 0.781) and observed rates
+  significance (p = 0.5348 / 0.7466 / 0.7812) and observed rates
   flattened to 95.1% / 91.6% / 92.9%. At this sample size the test
   has ~80% power to detect a ~15pct per-step effect and ~95% power
-  for ~20pct — this is a properly-powered null result, so the
-  evidence actively cannot support a default. `--seed <int>` plus an
+  for ~20pct under that assumed alternative, but the supported release
+  claim is narrower: no temperature effect was detected in this sweep,
+  so the evidence cannot support a default. `--seed <int>` plus an
   explicit `--temperature` makes runs approximately reproducible and
   is useful for A/B probing.
 - `--wait` / `--background` — execution mode bypass. See "Execution mode rules" above.
@@ -120,7 +121,7 @@ want to verify the model hasn't drifted:
 |---|---|---|---|---|---|
 | **Small** (<500 lines) | C1-v044-setup-menu | 6 / 440 | **100% (N=42-44 per temp)** | Harness `citation_accuracy` 0.68-0.82. `0/227 findings cite out-of-diff or cross-project files`; the 31.7% scoring mismatches are driven by "diff-meta" findings (commit-message / CHANGELOG-entry / scope-rename critique) where bodies use review meta-language not present as literal tokens in the cited file (scoring-rubric limitation). **Caveat**: the harness can't detect line-level content fabrication within an allowed file — at least one run confabulated a fictional `@anthropics → @anthropic-ai` rename. This is the "correctness without faithfulness" failure mode (Wallat 2024); v0.4.8 Tier 1 deterministic claim verifier is the planned mitigation. If you're using `/glm:review` for small diffs, sanity-check the findings' quoted claims against the diff. | 10-60s |
 | **Medium** (~1500 lines) | C2-v046-aftercare | 11 / 1550 | 95% (40/42 effective across the full temp×seed matrix) | `citation_accuracy` 0.85-1.00 across all cells. Schema and citation both robust. | 30-90s |
-| **Large** (8000+ lines) | C3-v04x-cumulative | 84 / 8336 | **~92-95% across `temp∈{0,0.5,1}` (N=81-84 per cell)**, Fisher exact p > 0.5 for every pair (0.535 / 0.747 / 0.781) | `citation_accuracy` 0.83-0.92. **0/457 runs cited `known_false_files`** — the 2026-04-21 cross-project hallucination pattern did not reproduce. Parse-layer defenses recover most of the 5-8% schema failures via typed correction-retry. | 60s-3min |
+| **Large** (8000+ lines) | C3-v04x-cumulative | 84 / 8336 | **~92-95% across `temp∈{0,0.5,1}` (N=81-84 per cell)**, Fisher exact p > 0.5 for every pair (0.5348 / 0.7466 / 0.7812) | `citation_accuracy` 0.83-0.92. **0/457 runs cited `known_false_files`** — the 2026-04-21 cross-project hallucination pattern did not reproduce. Parse-layer defenses recover most of the 5-8% schema failures via typed correction-retry. | 60s-3min |
 
 Practical notes:
 

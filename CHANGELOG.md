@@ -17,14 +17,14 @@ hallucination pattern via parse-layer defenses that run unconditionally
 on review output, exposes BigModel sampling-parameter flags on the
 CLI, lands a 3-fixture evaluation harness covering small / medium /
 large diffs, and runs a **457-run** empirical sweep across five
-adaptive phases. At effective N=81-84 per C3 temperature cell
-(~80% Fisher exact power for ~15pct per-step differences), no
-sampling-parameter effect reaches statistical significance — every
-pairwise contrast returns p > 0.5, observed rates are ~92-95% flat
-across temperatures on C3, and C1 schema is 100% across all three
-temperatures at N=42-44. **This is now a properly-powered null
-result**, not a data-gap deferral: the release ships no
-sampling-parameter default because the evidence cannot support one.
+adaptive phases. After excluding upstream-layer failures, final
+effective model-N is C3 **81/83/84** and C1 **44/43/42** across
+`temp=0/0.5/1`. No C3 pairwise Fisher exact contrast reaches
+significance (p = **0.5348 / 0.7466 / 0.7812**), observed rates are
+~92-95% flat across temperatures on C3, and C1 schema is 100% across
+all three temperatures. The exact power depends on the assumed
+alternative; the supported release claim is "no detected effect in
+this sweep", so the release ships no sampling-parameter default.
 Closes Gitea issue #7.
 
 The initial 9-run sanity sweep on C2 (medium diff) was too thin to
@@ -57,41 +57,44 @@ in five adaptive phases:
    in parallel from the same two worktrees, taking every C3 cell to
    effective N=81-84 and every C1 cell to N=42-44. At N=81-84,
    Fisher exact has ~80% power to detect a ~15pct per-step
-   difference and ~95% power for ~20pct. **At this properly-powered
-   sample size, every pairwise Fisher contrast returns p > 0.5 and
-   observed C3 rates flatten to ~92-95% across temperatures** — the
-   N=14-17 ordering was sampling noise around a true rate near
-   ~93%. The temperature-null result is now evidence-backed, not
-   just underpowered.
+   difference and ~95% power for ~20pct under that assumed
+   alternative. Every pairwise Fisher contrast returns p > 0.5 and
+   observed C3 rates flatten to ~92-95% across temperatures, removing
+   the earlier Phase 7c t=0.5 trough as a release decision driver.
 
 Total evidence base: **457 valid runs with complete sidecar JSON for
 each**. The data surfaced three categories of previously-silent
 failures:
 
-- **5 parse-failure modes** masquerading as `schema=0` with
-  `errorCode=""` — all now typed + correction-hinted.
+- **5 parse-failure modes** — all now typed + correction-hinted. Across
+  the full CSV, non-upstream typed parse failures are **12/457**:
+  `MARKDOWN_FENCE_UNTERMINATED` 1, `PARSE_FAILURE` 10, and
+  `TRUNCATED_JSON` 1. Seven older pre-classifier rows still surface as
+  `schema_compliance=0` with blank `error_code`.
 - **5 BigModel vendor error codes** (500, 1234, 1311, 1312, 1313) that
   the v0.4.6 dispatch table missed — all now added with correct retry
   semantics.
 - **38 upstream-layer failures across 457 runs (8.3%)** — vendor
-  errors + network timeout + empty-response cases. Distributed in
-  time (concentrated in Phase 7a; Phase 7b had zero; Phase 7c 4/64;
-  Phase 7d 24/308 = 7.8%), not across cells, and now handled by the
-  expanded dispatch table for automatic retry.
+  errors + network timeout + empty-response cases. Phase 7d contributed
+  **25/308** upstream failures; the rest came from the earlier four
+  phases. Distribution remains time-correlated rather than
+  temperature-, fixture-, or seed-correlated.
 
 **No default sampling parameter change ships in v0.4.7.** At Phase
 7d's effective N=81-84 per C3 cell, every pairwise Fisher exact
 test returns p > 0.5 and observed rates flatten to ~92-95% across
 temperatures. At this sample size the test has ~80% power to
-detect a ~15pct per-step difference and ~95% power for ~20pct, so
-the null result is **evidence-backed**, not underpowered:
+detect a ~15pct per-step difference and ~95% power for ~20pct under
+that assumed alternative:
 
 | fixture | temp | effective N | schema pass | Wilson 95% CI |
 |---|---|---|---|---|
 | C3 | 0.0 | 81 | **77/81 (95.1%)** | [88.0%, 98.1%] |
-| C3 | 0.5 | 83 | 76/83 (91.6%) | [83.6%, 95.9%] |
+| C3 | 0.5 | 83 | 76/83 (91.6%) | [83.7%, 95.8%] |
 | C3 | 1.0 | 84 | 78/84 (92.9%) | [85.3%, 96.7%] |
-| C2 | all 12 cells | 42 | 40/42 (95.2%) | 2 parse-layer failures |
+| C2 | temp=0.0 | 15 | 14/15 (93.3%) | [70.2%, 98.8%] |
+| C2 | temp=0.5 | 15 | 14/15 (93.3%) | [70.2%, 98.8%] |
+| C2 | temp=1.0 | 12 | 12/12 (100%) | [75.8%, 100%] |
 | C1 | 0.0 | 44 | **44/44 (100%)** | [92.0%, 100%] |
 | C1 | 0.5 | 43 | **43/43 (100%)** | [91.8%, 100%] |
 | C1 | 1.0 | 42 | **42/42 (100%)** | [91.6%, 100%] |
@@ -101,28 +104,21 @@ Phase 7d N=81-84):**
 
 | contrast | table | p (two-sided) | interpretation |
 |---|---|---:|---|
-| C3 t=0 vs t=0.5 | 77/81 vs 76/83 | **0.535** | not significant |
-| C3 t=0 vs t=1 | 77/81 vs 78/84 | **0.747** | not significant |
-| C3 t=0.5 vs t=1 | 76/83 vs 78/84 | **0.781** | not significant |
+| C3 t=0 vs t=0.5 | 77/81 vs 76/83 | **0.5348** | not significant |
+| C3 t=0 vs t=1 | 77/81 vs 78/84 | **0.7466** | not significant |
+| C3 t=0.5 vs t=1 | 76/83 vs 78/84 | **0.7812** | not significant |
 
-Compared to the Phase 7c N=14-17 view (p = 0.344 / 1.000 / 0.664,
-observed 93%/76%/86% ordering that looked like a weak monotonic
-trend), the properly-powered N=81-84 data shows the N=14-17
-ordering was sampling noise around a true C3 rate near ~93%. The
-effect sizes collapsed from ~15pct/step at N=14-17 to ~3-4pct/step
-at N=81-84 — well within Wilson CI overlap.
+Three things the final 457-row data clarifies relative to the N=6 and
+N≥14 views:
 
-Three things the properly-powered N=81-84 data (Phase 7d) resolves:
-
-1. **Large-diff temperature effect — not detected at ~80% power.**
+1. **Large-diff temperature effect — still not detected.**
    The N=5-7 view showed a mild 83%→71%→67% trend. The N=14-17
    view (Phase 7c) flattened that into 93%→76%→86% non-monotone,
    with design power only ~16% — observed-but-not-significant. The
    N=81-84 view (Phase 7d) flattens further to 95%/92%/93% — ~3-4pct
-   between cells, every pairwise Fisher p > 0.5, and design power
-   ~80% for ~15pct/step. **The null is now properly backed, not
-   underpowered.** The plugin ships no default temperature change
-   because the evidence cannot support one.
+   between cells, with pairwise Fisher p = 0.5348 / 0.7466 / 0.7812.
+   The plugin ships no default temperature change because the sweep
+   detected no effect to justify one.
 2. **Small-diff citation-accuracy root cause — scoring-harness
    artifact.** C1 schema is 100% across all three temps at
    N=42-44 (confirmed up from N=16-17 in Phase 7c). The
@@ -237,8 +233,8 @@ failure mode at any temperature under the current model snapshot.
   - `results/v0.4.7/payloads/` — 457 sidecar JSON files with full
     parsed output + rawOutput head (8KB cap) + per-run metrics +
     cell metadata. Evidence for the five parse-failure modes, the
-    five new vendor error codes, the properly-powered C3 temperature
-    null, and the C1 citation diff-meta pattern.
+    five new vendor error codes, the final C3 temperature picture,
+    and the C1 citation diff-meta pattern.
 - **5 new BigModel vendor error codes** (`scripts/lib/bigmodel-errors.mjs`)
   — empirically caught in the v0.4.7 expanded sweep + confirmed
   against the current official docs at
@@ -310,7 +306,7 @@ failure mode at any temperature under the current model snapshot.
 | schema-compliant success (schema=1, error_code="") | 400 | 87.5% | plugin produced a valid schema-compliant payload |
 | upstream-layer BigModel failures (500 / 1234 / EMPTY / NETWORK, raw + typed) | 38 | 8.3% | vendor-side errors — retriable via dispatch table expansion |
 | stealthy schema-0 with blank error_code (Phase 4/5 pre-classifier) | 7 | 1.5% | raw `<thinking>…</thinking>` prose, extra data after JSON, tool-call text — would be typed under v0.4.7 if replayed |
-| parse-layer typed failures (Phase 7c/7d: `MARKDOWN_FENCE_UNTERMINATED`, `PARSE_FAILURE`, etc.) | 11 | 2.4% | parse-layer classifier caught these — 5 modes total, all with correction-retry |
+| parse-layer typed failures (Phase 7c/7d: `MARKDOWN_FENCE_UNTERMINATED`, `PARSE_FAILURE`, `TRUNCATED_JSON`) | 12 | 2.6% | parse-layer classifier caught these — 5 modes total, all with correction-retry |
 | other (misc schema=0 with no typed code) | 1 | 0.2% | residual pre-classifier artifact |
 
 Phase attribution for raw-vs-typed vendor codes: **every raw
@@ -323,7 +319,7 @@ loaded the expanded `bigmodel-errors.mjs` correctly.
 **38 of 457 runs (8.3%) were upstream-layer BigModel failures**.
 Phase 7a had a dense ~25-minute burst around 13:00 UTC
 (5/15 runs ≈ 33%); Phase 7b was zero; Phase 7c ran at ~6% (4/64);
-Phase 7d ran at 7.8% (24/308). That by-time structure rules out
+Phase 7d ran at 8.12% (25/308). That by-time structure rules out
 any per-cell explanation — the vendor errors are **time-correlated
 BigModel transient instability**, not temperature-, fixture-, or
 seed-triggered behavior. v0.4.7's dispatch-table expansion (500,
@@ -331,14 +327,16 @@ seed-triggered behavior. v0.4.7's dispatch-table expansion (500,
 retry/backoff pipeline instead of falling through to
 `VENDOR_ERROR:<code>` with `retry=unknown`.
 
-**11 of 457 runs (2.4%) were parse-layer-classified failures** —
-the invisible-pre-v0.4.7 failure class this release targets, caught
-by the classifier in deployment. Plus an additional **7 Phase 4/5 runs**
-which are the same class of failure captured before the classifier
-merged, so they surface with `schema_compliance=0` and blank
-`error_code`. Under the v0.4.7 path those would also be typed.
+**12 of 457 runs (2.63%) were non-upstream typed parse-layer
+failures**: `MARKDOWN_FENCE_UNTERMINATED` 1, `PARSE_FAILURE` 10, and
+`TRUNCATED_JSON` 1. This corrects the earlier off-by-one count: one
+Phase 7d `TRUNCATED_JSON` row is present in the CSV and belongs in
+the typed parse-failure denominator. Plus an additional **7 Phase 4/5
+runs** captured before the classifier merged still surface with
+`schema_compliance=0` and blank `error_code`; under the v0.4.7 path
+those would also be typed.
 
-> **Baseline caveat**: the 457-run sweep and the 2.4% / 1.5% parse-
+> **Baseline caveat**: the 457-run sweep and the 2.63% / 1.5% parse-
 > failure rates measure the **pre-`response_format: json_object`**
 > code path. v0.4.7 ships `response_format: json_object` on every
 > review call (see § Added), which is expected to reduce these rates
@@ -356,9 +354,11 @@ N=42-44 per C1 cell (Phase 7d), the picture is now properly powered:
 | **C1 temp=0.0** | 44 | **44/44 (100%)** | [92.0%, 100%] |
 | **C1 temp=0.5** | 43 | **43/43 (100%)** | [91.8%, 100%] |
 | **C1 temp=1.0** | 42 | **42/42 (100%)** | [91.6%, 100%] |
-| C2 (all 12 cells) | 42 | 40/42 (95.2%) | 2 parse-layer failures (one REASONING_LEAK, one extra-data-after-JSON) |
+| C2 temp=0.0 | 15 | 14/15 (93.3%) | [70.2%, 98.8%] |
+| C2 temp=0.5 | 15 | 14/15 (93.3%) | [70.2%, 98.8%] |
+| C2 temp=1.0 | 12 | 12/12 (100%) | [75.8%, 100%] |
 | **C3 temp=0.0** | 81 | **77/81 (95.1%)** | [88.0%, 98.1%] |
-| **C3 temp=0.5** | 83 | 76/83 (91.6%) | [83.6%, 95.9%] |
+| **C3 temp=0.5** | 83 | 76/83 (91.6%) | [83.7%, 95.8%] |
 | **C3 temp=1.0** | 84 | 78/84 (92.9%) | [85.3%, 96.7%] |
 
 Re-reading at properly-powered N:
@@ -381,16 +381,15 @@ Re-reading at properly-powered N:
   Phase 7a N=6 consolidation of its cell. Both would surface as
   typed `errorCode` under the v0.4.7 path. Medium diffs are
   effectively temperature-insensitive.
-- **C3 temperature effect — evidence-backed null.** At N=81-84 per
+- **C3 temperature effect — no detected default-worthy effect.** At N=81-84 per
   cell the Fisher exact test has ~80% power to detect a ~15pct per-
   step difference and ~95% power for ~20pct. All three pairwise
-  contrasts return p > 0.5 (0.535 / 0.747 / 0.781), observed rates
+  contrasts return p > 0.5 (0.5348 / 0.7466 / 0.7812), observed rates
   flatten to 95.1% / 91.6% / 92.9% (max-min ≈ 3.5pct), and all three
   Wilson CIs overlap substantially. The N=14-17 "93%→76%→86% non-
   monotone" picture from Phase 7c was sampling noise around a true
-  rate near ~93%. **The null is now evidence-backed, not
-  underpowered** — the plugin ships no default temperature change
-  because the evidence cannot support one.
+  rate near ~93%. The plugin ships no default temperature change
+  because this sweep detected no effect that could justify one.
 
 ### C1 citation audit (per-finding root cause)
 
@@ -463,8 +462,8 @@ claims against fixture content is v0.5.x scope.
   faithfulness" failure mode; v0.4.8 Tier 1 #1 (deterministic claim
   verifier) is the planned mitigation.
 - **Properly-powered C3 temperature null.** At N=81-84 per cell
-  Fisher exact two-sided p-values: t=0 vs t=0.5 = 0.535; t=0 vs
-  t=1 = 0.747; t=0.5 vs t=1 = 0.781. Observed rates 95.1% / 91.6%
+  Fisher exact two-sided p-values: t=0 vs t=0.5 = 0.5348; t=0 vs
+  t=1 = 0.7466; t=0.5 vs t=1 = 0.7812. Observed rates 95.1% / 91.6%
   / 92.9%. Design power at this N for a ~15pct per-step effect is
   ~80%, for ~20pct is ~95%. The Phase 7c N=14-17 non-monotone
   ordering was sampling noise around a true rate near ~93%.
@@ -497,16 +496,14 @@ claims against fixture content is v0.5.x scope.
   the 54-run baseline. The targeted approach surfaced the vendor-
   error-time-correlation finding, pushed effective N high enough
   for ~80% Fisher power on per-step differences, and delivered an
-  evidence-backed null rather than a data-gap deferral. Phase 7d
+  no-detected-effect result rather than a data-gap deferral. Phase 7d
   (308 runs) was delivered in parallel from two detached worktrees
   in ~3 hours wall-clock on a personal Coding Plan.
 
 **Decision**: no default sampling parameter change in v0.4.7. The
 Phase 7d N=81-84 data returns Fisher exact p > 0.5 on every C3
 pairwise contrast, observed C3 rates flatten to ~92-95%, and C1 is
-100% across N=42-44 per temperature — at ~80% power for a ~15pct
-per-step effect, this is an **evidence-backed null**, not "no
-detected effect at underpowered N". Without a detected effect
+100% across N=42-44 per temperature. Without a detected effect
 there is no temperature setting justified as a default. The
 actionable wins in v0.4.7 are:
 

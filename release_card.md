@@ -91,15 +91,14 @@ workflow-governor cross-review hallucination session:
   phases to **457 total runs**, reaching effective **N=81-84 per C3
   cell** (Phase 7d N=80 power-up) and **N=42-44 per C1 cell**. At
   that sample size Fisher exact two-sided p on C3 schema compliance
-  is **0.535 / 0.747 / 0.781** for the three pairwise contrasts (all
+  is **0.5348 / 0.7466 / 0.7812** for the three pairwise contrasts (all
   p > 0.5); observed rates flatten to **95.1% / 91.6% / 92.9%**
   across temperatures (max-min ≈ 3.5pct with overlapping Wilson
   CIs). C1 is **129/129 across temperatures** at N=42-44 per cell
   (Wilson lower bound ≥ 91.6%). Design power at N=81-84 for a ~15pct
-  per-step effect is ~80%, and for ~20pct is ~95%. **The null is
-  properly-powered and evidence-backed**, not "no detected effect
-  at underpowered N". The plugin ships no default temperature change
-  because there is no detected effect to justify one; server default
+  per-step effect is ~80%, and for ~20pct is ~95% under that assumed
+  alternative. The plugin ships no default temperature change because
+  there is no detected effect to justify one; server default
   (unset) is preserved. Issue #7 closes here; a future test
   targeting per-step effects smaller than ~10pct would need N ≥ ~200
   per cell.
@@ -199,8 +198,8 @@ workflow-governor cross-review hallucination session:
     CHANGELOG at this step reflected underpowered-null framing;
     `commands/review.md` gains "Diff size guidance" section;
     `commands/adversarial-review.md` sampling bullet aligned.
-    (Superseded by Phase 7d at step 25e where N=81-84 delivers a
-    properly-powered null. Phase 7c numbers retained below as
+    (Superseded by Phase 7d at step 25e where N=81-84 detects no
+    C3 temperature effect. Phase 7c numbers retained below as
     historical intermediate state.) ✓
 23. `Skill(simplify)` on N=149 doc diff — **DONE** (3-agent parallel
     + Python factual audit; caught 134-vs-127 success-count mismatch
@@ -252,16 +251,18 @@ workflow-governor cross-review hallucination session:
     ~3h. Final effective-N: C3 81/83/84 per temperature cell, C1
     44/43/42. **Schema compliance**: C3 77/81 (95.1%) / 76/83
     (91.6%) / 78/84 (92.9%); C1 100% across all three cells. **All
-    three pairwise C3 Fisher exact p > 0.5**: 0.535 / 0.747 / 0.781.
-    **C1 citation audit at properly-powered N=42-44**: 227 parsed
+    three pairwise C3 Fisher exact p > 0.5**: 0.5348 / 0.7466 / 0.7812.
+    Phase 7d upstream failures: 25/308. Non-upstream typed parse
+    failures across the full CSV: 12/457, including TRUNCATED_JSON
+    1/457. **C1 citation audit at final N=42-44**: 227 parsed
     findings, 0 out-of-allowed, 0 known_false_files (Wallat
     correctness-without-faithfulness failure mode still applies to
     line-level content; scoped as v0.4.8 Tier 1 #1/#2). ✓
 25f. **(DONE post-Phase-7d)** CHANGELOG.md rewritten with final
     Phase 7d numbers: 457-run outcome block, N=81-84/N=42-44
     effective-N table, Fisher exact table with final p-values,
-    227-finding citation audit, properly-powered-null framing
-    replacing the underpowered-null language. ✓
+    227-finding citation audit, final no-detected-temperature-effect
+    framing replacing the underpowered-null language. ✓
 25g. **(DONE post-Phase-7d)** Codex cross-review of final CHANGELOG
     + release_card against raw CSV/payloads: Verdict BLOCK on 2
     items — CRITICAL release_card staleness (149-run language) +
@@ -272,10 +273,13 @@ workflow-governor cross-review hallucination session:
     row count, effective-N, Fisher p-values, 227/0/0 citation
     audit, 0 known_false_files hits across all 457 payloads. ✓
 26. Manifest bump: package.json + plugin.json + marketplace.json
-    0.4.7-beta1 → 0.4.7. — pending
-27. `npm run ci:local` post-doc-updates re-run (must pass 170/170). — pending
-28. Amend commit on top of beta1 with Phase 7d doc refresh + manifest
-    bump + release_card finalization. — pending
+    0.4.7-beta1 → 0.4.7. ✓
+27. `npm run ci:local` post-doc-updates re-run: syntax check,
+    170/170 tests, path-leak guard, plugin manifest validation, AI
+    quality gate, CHANGELOG update gate, and Co-Authored-By trailer
+    check all passed. ✓
+28. Corrective commit on top of `6f849e8` with Phase 7d doc/gate
+    corrections (`25/308`, `12/457`, Scope Completion release gate). ✓
 29. Push to Gitea. PR may already be open from beta1; if open, the
     amend shows up on the existing PR. If closed, open new PR → develop. — pending
 30. Gitea CI green → auto-merge PR to develop. — pending
@@ -297,7 +301,7 @@ workflow-governor cross-review hallucination session:
 ## Scope Completion: COMPLETE
 ## Outstanding In-Scope Work: none — all technical scope (code, docs,
 Phase 7d data, Codex cross-review, CHANGELOG/release_card amendments)
-complete. Remaining steps 26-38 are mechanical release chain actions.
+complete. Remaining steps 29-38 are mechanical release chain actions.
 
 ## Major Upgrade Review: N/A
 
@@ -369,20 +373,21 @@ the POST body when the caller explicitly passes a flag).
 | Adversarial | `/codex:adversarial-review` preferred, else `/glm:adversarial-review` | No unresolved CRITICAL/HIGH |
 | Gitea CI | `ai-quality-gate.yml` + `pr-check.yml` | both green |
 | GitHub CI | same 2 workflows | both green |
-| **Release gate** | `bash scripts/ci/check-release-ready.sh v0.4.7` | All 4 checks pass (runs automatically in pre-push on tag push) |
-| **Expanded sweep data** | `node test-automation/review-eval/scripts/summarize.mjs results/v0.4.7/expanded-sweep.csv` | 457 rows, 0 SCHEMA_ECHO, 0 known_false_files hits across all 457 runs, 0 out-of-allowed citations on C1 (227 findings). Effective-N: C1=100%/100%/100% (N=44/43/42), C2=95% (40/42 pooled across 12 cells), C3=95.1%/91.6%/92.9% (N=81/83/84). Fisher exact on C3 all pairwise p>0.5 (0.535/0.747/0.781). Upstream failures 38/457 (8.3%) time-correlated across phases. Codex cross-review independently verified all numbers against raw CSV + payloads. |
+| **Release gate** | `bash scripts/ci/check-release-ready.sh v0.4.7` | Package/manifests match tag; CHANGELOG section exists; release_card is Status READY and Scope Completion COMPLETE |
+| **Expanded sweep data** | `node test-automation/review-eval/scripts/summarize.mjs results/v0.4.7/expanded-sweep.csv` + final audit script | 457 rows, 457 payloads, 0 SCHEMA_ECHO, 0 known_false_files hits across all payloads, 0 out-of-allowed citations on C1. Effective-N: C1=44/43/42 all schema-pass; C2=14/15, 14/15, 12/12; C3=77/81, 76/83, 78/84. Fisher exact on C3 p=0.5348 / 0.7466 / 0.7812. Upstream failures: 38/457 overall, 25/308 in Phase 7d. Typed non-upstream parse failures: 12/457 including TRUNCATED_JSON 1. |
 
 ## Local Verification
 
-- `npm test` green (170/170) at beta1 commit (98c4ca0), which
-  includes buildChatRequestBody extraction + 14 new chat-request-body
-  tests. Post-amendment `npm run ci:local` re-run is pending (step 27).
+- `npm run ci:local` green after final doc/gate corrections: syntax
+  check, 170/170 tests, path-leak guard, plugin manifest validation,
+  AI quality gate, CHANGELOG update gate, and Co-Authored-By trailer
+  check all passed.
 - Phase 7c sweep 2026-04-21 ~82 min wall time: 30 C3 runs from
   `/tmp/glm-eval-A` (d5fa754) + 34 C1 runs from `/tmp/glm-eval-B`
   (7766943), zero parallel-append collisions.
 - Phase 7d sweep 2026-04-22 ~3h wall time: 225 C3 runs from
   `/tmp/glm-eval-A` + 83 C1 runs from `/tmp/glm-eval-B`, total 308
-  appended, CSV now at 457 data rows. 24 upstream errors (7.8%).
+  appended, CSV now at 457 data rows. 25 upstream errors (8.12%).
 - Codex cross-review 2026-04-22: independently recomputed CSV row
   count, effective-N per cell, schema-compliance rates, Fisher
   exact p-values, 227-finding citation audit, and grep for

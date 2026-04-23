@@ -2,7 +2,7 @@
 # Pre-tag release-readiness gate.
 #
 # Replaces the broken `.github/workflows/verify-release.yml` (GitHub
-# stale-parser issue — see CHANGELOG v0.4.6). Does the same four checks,
+# stale-parser issue — see CHANGELOG v0.4.6). Does the same core checks,
 # but locally + synchronously, so errors surface BEFORE `git push <tag>`
 # rather than as a post-hoc CI red mark.
 #
@@ -20,6 +20,7 @@
 #   3. plugin manifest parity check fails (re-uses check-plugin-manifest.sh)
 #   4. CHANGELOG.md has no `## vX.Y.Z[-<prerelease>]` section
 #   5. release_card.md missing OR not `Status: READY`
+#   6. non-prerelease tag but release_card.md is not `Scope Completion: COMPLETE`
 #
 # Intended invocation: called manually by the release driver immediately
 # before `git tag -a vX.Y.Z ...`, and referenced from RELEASE-CARD-TEMPLATE.
@@ -87,6 +88,19 @@ if ! grep -qE "^Status: READY" release_card.md; then
   exit 1
 fi
 echo "  ✓ release_card.md is Status: READY"
+
+if [[ ! "$VERSION" =~ -[A-Za-z0-9.-]+$ ]]; then
+  if ! grep -qE "^## Scope Completion: COMPLETE([[:space:]]|$)" release_card.md; then
+    echo "✗ release_card.md is not scope-complete for non-prerelease tag '$TAG'." >&2
+    echo "  Expected line: ## Scope Completion: COMPLETE" >&2
+    echo "  Current scope line:" >&2
+    grep -E "^## Scope Completion:" release_card.md >&2 || echo "  (no Scope Completion line found)" >&2
+    exit 1
+  fi
+  echo "  ✓ release_card.md Scope Completion: COMPLETE"
+else
+  echo "  ✓ prerelease tag: Scope Completion check skipped"
+fi
 
 echo ""
 echo "════════════════════════════════════════════════════════════"
