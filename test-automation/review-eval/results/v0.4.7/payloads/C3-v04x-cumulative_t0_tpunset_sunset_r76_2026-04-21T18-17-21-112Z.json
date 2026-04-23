@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 76
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.6,
+    "citation_false_file_hits": 0,
+    "latency_ms": 48807,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces critical infrastructure (retry logic, BigModel error dispatch, job tracking, client rewrite) with several material defects: non-idempotent state mutations in tracked-jobs, an unbounded retry loop risk in retry.mjs when retryable-check logic disagrees with error classification, missing concurrency guards in glm-client that can cause double-submission under the new --wait/--background modes, and silent data-loss paths in state.mjs when writeJson fails mid-operation. These are not theoretical — they map to real failure modes during sampling sweeps where parallel invocations and transient errors are expected.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs exponential backoff can violate maxAttempts when retryable predicate throws",
+        "body": "In retry.mjs, if the retryable check itself throws (e.g., malformed error object missing expected properties), the catch block in the retry loop will re-throw, bypassing the attempt counter and potentially leaving the caller with an unhandled rejection. More critically, the attempt counter is only incremented on the retryable path — if `isRetryable` returns false for a transient error that should be retried (classification mismatch with bigmodel-errors.mjs), the function returns the error result immediately with no retry and no logging of the classification failure. During a sampling sweep with flaky API responses, this means silent partial data loss — jobs complete with errors that should have been retried, and there is no observability into the misclassification.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.78,
+        "recommendation": "Add explicit logging when isRetryable returns false for errors that have retryable HTTP status codes, so misclassification is detectable. Wrap the isRetryable call in its own try/catch that defaults to retryable=true to prevent a buggy predicate from collapsing the retry loop."
+      },
+      {
+        "severity": "high",
+        "title": "tracked-jobs.mjs updateJob is not atomic — crash between delete and write loses job record permanently",
+        "body": "The updateJob pattern in tracked-jobs.mjs reads the jobs map, mutates it, then writes the entire map back via writeJson. If the process crashes or is interrupted between the delete of the old file and the write of the new file (or if writeJson partially fails), the job record is permanently lost. For a sampling sweep with 76 runs, this means a job that was submitted and is running on the remote API can have its local tracking record destroyed. There is no recovery mechanism — no journal, no backup, no append-only log. The impact is data loss of in-flight work product.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.72,
+        "recommendation": "Write the new state to a temporary file first, then atomically rename over the old file. Alternatively, keep a .bak of the previous state file before overwriting so recovery is possible."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs has no concurrency guard — double submission on rapid retry or parallel invocation",
+        "body": "The new --wait and --background execution modes in glm-client.mjs create a window where the same job can be submitted twice. If a user (or automated sweep script) invokes the client, the submission is not guarded by a lock or idempotency key. Under --wait mode, a timeout on the response can cause the caller to retry, submitting a duplicate job. Under --background, rapid sequential calls can race on the state file. The tracked-jobs layer does not implement file locking (no flock, no advisory lock). This is especially likely during automated sampling sweeps where invocations are scripted.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.68,
+        "recommendation": "Generate an idempotency key (e.g., hash of input parameters) and check for an existing job with that key before submitting. Use advisory file locking (flock via fs-ext or a .lock file) around state file mutations."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error dispatch silently swallows unrecognized error shapes",
+        "body": "The BigModel error dispatch classifies errors by pattern matching on error properties (status codes, error codes, message patterns). Errors that do not match any known pattern fall through to a default path that returns a generic non-retryable error. This is dangerous because API providers frequently add new error codes or change error response formats. A new rate-limit error format would be classified as non-retryable, causing the retry layer to give up immediately. There is no warning logged for unmatched error shapes, making this a silent failure that is extremely difficult to diagnose in production.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.75,
+        "recommendation": "Log a warning with the full error shape when no classification matches, so new error formats are detectable. Consider defaulting to retryable rather than non-retryable for unrecognized errors, since retrying a non-retryable error is cheaper than losing a retryable one."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs writeJson does not fsync — data can be lost on abrupt shutdown",
+        "body": "writeJson in state.mjs calls fs.writeFile but does not call fs.fsync before returning. On systems with aggressive filesystem caching (common in CI environments and containerized runs), an abrupt process kill or node crash can lose the last write. For a sampling sweep accumulating state across 76 runs, the final state file write is the most vulnerable — it contains the cumulative results of all prior work. Losing it means rerunning the entire sweep.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.65,
+        "recommendation": "After writeFile, open the file descriptor and call fsync before closing. Alternatively, use the write-then-rename pattern (write to .tmp, rename over target) which is safer on most filesystems."
+      }
+    ],
+    "next_steps": [
+      "Examine retry.mjs attempt counter logic under error classification edge cases — add test for isRetryable predicate failure",
+      "Add atomic write semantics (write-then-rename) to tracked-jobs.mjs and state.mjs",
+      "Add concurrency protection to glm-client.mjs submission path — idempotency key or file lock",
+      "Add observability: log unrecognized BigModel error shapes at warn level, log retry classification mismatches",
+      "Run the sampling sweep with intentional fault injection (kill -9 mid-write, transient API errors with novel status codes) to validate recovery"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 cumulative diff introduces critical infrastructure (retry logic, BigModel error dispatch, job tracking, client rewrite) with several material defects: non-idempotent state mutations in tracked-jobs, an unbounded retry loop risk in retry.mjs when retryable-check logic disagrees with error classification, missing concurrency guards in glm-client that can cause double-submission under the new --wait/--background modes, and silent data-loss paths in state.mjs when writeJson fails mid-operation. These are not theoretical — they map to real failure modes during sampling sweeps where parallel invocations and transient errors are expected.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs exponential backoff can violate maxAttempts when retryable predicate throws\",\"body\":\"In retry.mjs, if the retryable check itself throws (e.g., malformed error object missing expected properties), the catch block in the retry loop will re-throw, bypassing the attempt counter and potentially leaving the caller with an unhandled rejection. More critically, the attempt counter is only incremented on the retryable path — if `isRetryable` returns false for a transient error that should be retried (classification mismatch with bigmodel-errors.mjs), the function returns the error result immediately with no retry and no logging of the classification failure. During a sampling sweep with flaky API responses, this means silent partial data loss — jobs complete with errors that should have been retried, and there is no observability into the misclassification.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.78,\"recommendation\":\"Add explicit logging when isRetryable returns false for errors that have retryable HTTP status codes, so misclassification is detectable. Wrap the isRetryable call in its own try/catch that defaults to retryable=true to prevent a buggy predicate from collapsing the retry loop.\"},{\"severity\":\"high\",\"title\":\"tracked-jobs.mjs updateJob is not atomic — crash between delete and write loses job record permanently\",\"body\":\"The updateJob pattern in tracked-jobs.mjs reads the jobs map, mutates it, then writes the entire map back via writeJson. If the process crashes or is interrupted between the delete of the old file and the write of the new file (or if writeJson partially fails), the job record is permanently lost. For a sampling sweep with 76 runs, this means a job that was submitted and is running on the remote API can have its local tracking record destroyed. There is no recovery mechanism — no journal, no backup, no append-only log. The impact is data loss of in-flight work product.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.72,\"recommendation\":\"Write the new state to a temporary file first, then atomically rename over the old file. Alternatively, keep a .bak of the previous state file before overwriting so recovery is possible.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs has no concurrency guard — double submission on rapid retry or parallel invocation\",\"body\":\"The new --wait and --background execution modes in glm-client.mjs create a window where the same job can be submitted twice. If a user (or automated sweep script) invokes the client, the submission is not guarded by a lock or idempotency key. Under --wait mode, a timeout on the response can cause the caller to retry, submitting a duplicate job. Under --background, rapid sequential calls can race on the state file. The tracked-jobs layer does not implement file locking (no flock, no advisory lock). This is especially likely during automated sampling sweeps where invocations are scripted.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.68,\"recommendation\":\"Generate an idempotency key (e.g., hash of input parameters) and check for an existing job with that key before submitting. Use advisory file locking (flock via fs-ext or a .lock file) around state file mutations.\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors.mjs error dispatch silently swallows unrecognized error shapes\",\"body\":\"The BigModel error dispatch classifies errors by pattern matching on error properties (status codes, error codes, message patterns). Errors that do not match any known pattern fall through to a default path that returns a generic non-retryable error. This is dangerous because API providers frequently add new error codes or change error response formats. A new rate-limit error format would be classified as non-retryable, causing the retry layer to give up immediately. There is no warning logged for unmatched error shapes, making this a silent failure that is extremely difficult to diagnose in production.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.75,\"recommendation\":\"Log a warning with the full error shape when no classification matches, so new error formats are detectable. Consider defaulting to retryable rather than non-retryable for unrecognized errors, since retrying a non-retryable error is cheaper than losing a retryable one.\"},{\"severity\":\"medium\",\"title\":\"state.mjs writeJson does not fsync — data can be lost on abrupt shutdown\",\"body\":\"writeJson in state.mjs calls fs.writeFile but does not call fs.fsync before returning. On systems with aggressive filesystem caching (common in CI environments and containerized runs), an abrupt process kill or node crash can lose the last write. For a sampling sweep accumulating state across 76 runs, the final state file write is the most vulnerable — it contains the cumulative results of all prior work. Losing it means rerunning the entire sweep.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.65,\"recommendation\":\"After writeFile, open the file descriptor and call fsync before closing. Alternatively, use the write-then-rename pattern (write to .tmp, rename over target) which is safer on most filesystems.\"}],\"next_steps\":[\"Examine retry.mjs attempt counter logic under error classification edge cases — add test for isRetryable predicate failure\",\"Add atomic write semantics (write-then-rename) to tracked-jobs.mjs and state.mjs\",\"Add concurrency protection to glm-client.mjs submission path — idempotency key or file lock\",\"Add observability: log unrecognized BigModel error shapes at warn level, log retry classification mismatches\",\"Run the sampling sweep with intentional fault injection (kill -9 mid-write, transient API errors with novel status codes) to validate recovery\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T18:17:21.147Z"
+}

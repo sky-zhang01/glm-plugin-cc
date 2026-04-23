@@ -1,0 +1,91 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 5
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 52004,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces a retry/backoff subsystem, BigModel error dispatch, job tracking overhaul, and file-system helpers across 84 files. While the breadth is impressive, the critical path through retry.mjs, bigmodel-errors.mjs, glm-client.mjs, and tracked-jobs.mjs has several material weaknesses: retry exhaustion silently returns the last error without distinguishing retriable from non-retriable failures, the tracked-jobs TTL mechanism can silently drop active jobs under clock skew or process pause, fs.mjs atomic-write uses rename without fsync risking zero-length files on crash, and the BigModel error classifier falls back to a generic retry on any unrecognized response shape, potentially masking auth/permission errors as transient. These are not theoretical — they represent silent failure modes in the primary user-facing flow.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry exhaustion silently swallows error classification — non-retriable failures get retried anyway",
+        "body": "In bigmodel-errors.mjs, `classifyError` is the gatekeeper for whether a request gets retried. If the HTTP response body does not match any known error schema (e.g., a new error format from the API, an HTML error page from a proxy, or a permissions error with an unexpected structure), the classifier falls through to a default that marks the error as retriable. This means: (1) Auth failures with a slightly different response shape get infinite-retry loops up to the max. (2) The retry layer in retry.mjs does not cross-check the classifier's decision against a secondary signal (e.g., HTTP status code range). (3) After exhaustion, the caller receives the raw error with no indication that it was misclassified. Under the v0.4.7 sampling sweep focus, this is the highest-risk path because it affects every API call in the happy and unhappy paths.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.82,
+        "recommendation": "Add a hard guard in the retry caller: if the HTTP status is 401/403/405, never retry regardless of classifier output. In classifyError, return non-retriable as the default fallback instead of retriable. Add a test case for each 4xx status with an empty/unrecognized body."
+      },
+      {
+        "severity": "high",
+        "title": "Atomic file write lacks fsync — crash window can produce zero-length state files",
+        "body": "fs.mjs atomicWriteFile writes to a temp file then calls rename(). On Linux, rename is atomic for the directory entry but does not guarantee data durability — if the process or machine crashes between write() and kernel flush, the renamed file may contain zero bytes. For state.mjs and tracked-jobs.mjs which persist job state, this means a crash during write can destroy the job database, causing lost in-flight job tracking on recovery. This is a classic silent data loss scenario.",
+        "file": "scripts/lib/fs.mjs",
+        "line_start": 1,
+        "line_end": 44,
+        "confidence": 0.75,
+        "recommendation": "Add `fs.fsync(fd)` on the temp file descriptor before calling rename. If using writeFile, open the fd explicitly, write, fsync, close, then rename. This is the standard pattern for atomic-durable writes."
+      },
+      {
+        "severity": "medium",
+        "title": "Tracked-jobs TTL expiry can silently kill active jobs under GC pause or system sleep",
+        "body": "tracked-jobs.mjs uses a TTL-based expiry to clean up stale jobs. The TTL is checked against Date.now() at read time. If the Node process is suspended (e.g., laptop sleep, container freeze, orchestrator pause), the clock advances but the process does not, so when it resumes, legitimate in-flight jobs may be considered expired and silently pruned. There is no heartbeat refresh mechanism or grace period. For long-running review jobs, this could cause the system to lose track of jobs that are still actively being processed.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.7,
+        "recommendation": "Add a `touch(jobId)` or heartbeat mechanism that updates the TTL timestamp while a job is actively being processed. Alternatively, add a configurable grace multiplier (e.g., 2x TTL) before pruning, and log a warning when pruning jobs that have not been explicitly marked as completed/failed."
+      },
+      {
+        "severity": "medium",
+        "title": "retry.mjs does not propagate attempt count or timing metadata to callers — observability gap for diagnosing partial failures",
+        "body": "The retry module in retry.mjs wraps errors but does not attach metadata about how many attempts were made, total elapsed time, or which error classification triggered each retry. When a user reports 'it just failed', there is no structured way to distinguish 'failed immediately with a non-retriable error' from 'failed after 5 retries over 30 seconds'. The caller in glm-client.mjs receives only the final error. This is an observability gap that will make production debugging significantly harder.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.65,
+        "recommendation": "Attach a `_retryMeta` property to the thrown error containing `{attempts, totalElapsedMs, lastClassification}`. In glm-client.mjs, include this metadata in any user-facing error message or log output. Add a test verifying the metadata is present on exhausted retries."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs response parsing has no schema validation — malformed API responses propagate as undefined fields",
+        "body": "glm-client.mjs parses API responses with property access like `response.choices[0].message.content` without defensive checks. If the API returns a valid HTTP 200 with an unexpected body shape (e.g., empty choices array, null message, or a version-skewed response format), this will throw an unhandled TypeError that gets classified as a generic error rather than a parse failure. The retry layer would then retry the same request (since it looks like a transient error), wasting quota on what is actually a schema incompatibility.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.72,
+        "recommendation": "Add explicit validation of the response structure after parsing. If `choices` is empty or `message` is null, throw a non-retriable ParseError with the response body attached for debugging. Add test cases for empty choices, null message, and missing fields."
+      }
+    ],
+    "next_steps": [
+      "Fix the bigmodel-errors.mjs default fallback to non-retriable and add 4xx status guards in the retry caller — this is the highest-risk silent failure.",
+      "Add fsync to the atomic write path in fs.mjs before renaming.",
+      "Add a heartbeat/touch mechanism to tracked-jobs.mjs to prevent premature TTL expiry under process suspension.",
+      "Attach retry metadata to errors for observability in retry.mjs.",
+      "Add response schema validation in glm-client.mjs to prevent TypeErrors on malformed responses.",
+      "Re-run the v0.4.7 sampling sweep after these fixes with explicit test scenarios for: auth failure with unexpected body shape, crash during state write, and long-pause TTL expiry."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 diff introduces a retry/backoff subsystem, BigModel error dispatch, job tracking overhaul, and file-system helpers across 84 files. While the breadth is impressive, the critical path through retry.mjs, bigmodel-errors.mjs, glm-client.mjs, and tracked-jobs.mjs has several material weaknesses: retry exhaustion silently returns the last error without distinguishing retriable from non-retriable failures, the tracked-jobs TTL mechanism can silently drop active jobs under clock skew or process pause, fs.mjs atomic-write uses rename without fsync risking zero-length files on crash, and the BigModel error classifier falls back to a generic retry on any unrecognized response shape, potentially masking auth/permission errors as transient. These are not theoretical — they represent silent failure modes in the primary user-facing flow.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Retry exhaustion silently swallows error classification — non-retriable failures get retried anyway\",\n      \"body\": \"In bigmodel-errors.mjs, `classifyError` is the gatekeeper for whether a request gets retried. If the HTTP response body does not match any known error schema (e.g., a new error format from the API, an HTML error page from a proxy, or a permissions error with an unexpected structure), the classifier falls through to a default that marks the error as retriable. This means: (1) Auth failures with a slightly different response shape get infinite-retry loops up to the max. (2) The retry layer in retry.mjs does not cross-check the classifier's decision against a secondary signal (e.g., HTTP status code range). (3) After exhaustion, the caller receives the raw error with no indication that it was misclassified. Under the v0.4.7 sampling sweep focus, this is the highest-risk path because it affects every API call in the happy and unhappy paths.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.82,\n      \"recommendation\": \"Add a hard guard in the retry caller: if the HTTP status is 401/403/405, never retry regardless of classifier output. In classifyError, return non-retriable as the default fallback instead of retriable. Add a test case for each 4xx status with an empty/unrecognized body.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"Atomic file write lacks fsync — crash window can produce zero-length state files\",\n      \"body\": \"fs.mjs atomicWriteFile writes to a temp file then calls rename(). On Linux, rename is atomic for the directory entry but does not guarantee data durability — if the process or machine crashes between write() and kernel flush, the renamed file may contain zero bytes. For state.mjs and tracked-jobs.mjs which persist job state, this means a crash during write can destroy the job database, causing lost in-flight job tracking on recovery. This is a classic silent data loss scenario.\",\n      \"file\": \"scripts/lib/fs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 44,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Add `fs.fsync(fd)` on the temp file descriptor before calling rename. If using writeFile, open the fd explicitly, write, fsync, close, then rename. This is the standard pattern for atomic-durable writes.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Tracked-jobs TTL expiry can silently kill active jobs under GC pause or system sleep\",\n      \"body\": \"tracked-jobs.mjs uses a TTL-based expiry to clean up stale jobs. The TTL is checked against Date.now() at read time. If the Node process is suspended (e.g., laptop sleep, container freeze, orchestrator pause), the clock advances but the process does not, so when it resumes, legitimate in-flight jobs may be considered expired and silently pruned. There is no heartbeat refresh mechanism or grace period. For long-running review jobs, this could cause the system to lose track of jobs that are still actively being processed.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Add a `touch(jobId)` or heartbeat mechanism that updates the TTL timestamp while a job is actively being processed. Alternatively, add a configurable grace multiplier (e.g., 2x TTL) before pruning, and log a warning when pruning jobs that have not been explicitly marked as completed/failed.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"retry.mjs does not propagate attempt count or timing metadata to callers — observability gap for diagnosing partial failures\",\n      \"body\": \"The retry module in retry.mjs wraps errors but does not attach metadata about how many attempts were made, total elapsed time, or which error classification triggered each retry. When a user reports 'it just failed', there is no structured way to distinguish 'failed immediately with a non-retriable error' from 'failed after 5 retries over 30 seconds'. The caller in glm-client.mjs receives only the final error. This is an observability gap that will make production debugging significantly harder.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Attach a `_retryMeta` property to the thrown error containing `{attempts, totalElapsedMs, lastClassification}`. In glm-client.mjs, include this metadata in any user-facing error message or log output. Add a test verifying the metadata is present on exhausted retries.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client.mjs response parsing has no schema validation — malformed API responses propagate as undefined fields\",\n      \"body\": \"glm-client.mjs parses API responses with property access like `response.choices[0].message.content` without defensive checks. If the API returns a valid HTTP 200 with an unexpected body shape (e.g., empty choices array, null message, or a version-skewed response format), this will throw an unhandled TypeError that gets classified as a generic error rather than a parse failure. The retry layer would then retry the same request (since it looks like a transient error), wasting quota on what is actually a schema incompatibility.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Add explicit validation of the response structure after parsing. If `choices` is empty or `message` is null, throw a non-retriable ParseError with the response body attached for debugging. Add test cases for empty choices, null message, and missing fields.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Fix the bigmodel-errors.mjs default fallback to non-retriable and add 4xx status guards in the retry caller — this is the highest-risk silent failure.\",\n    \"Add fsync to the atomic write path in fs.mjs before renaming.\",\n    \"Add a heartbeat/touch mechanism to tracked-jobs.mjs to prevent premature TTL expiry under process suspension.\",\n    \"Attach retry metadata to errors for observability in retry.mjs.\",\n    \"Add response schema validation in glm-client.mjs to prevent TypeErrors on malformed responses.\",\n    \"Re-run the v0.4.7 sampling sweep after these fixes with explicit test scenarios for: auth failure with unexpected body shape, crash during state write, and long-pause TTL expiry.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T19:59:19.113Z"
+}

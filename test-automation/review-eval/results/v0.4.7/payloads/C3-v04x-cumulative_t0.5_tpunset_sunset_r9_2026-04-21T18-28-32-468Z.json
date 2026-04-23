@@ -1,0 +1,100 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 9
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 6,
+    "citation_accuracy": 0.833,
+    "citation_false_file_hits": 0,
+    "latency_ms": 69615,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces significant new infrastructure (retry with backoff, BigModel error dispatch, job tracking, background execution) that has material gaps in failure handling, race conditions on state files, and observability. The retry system and state management are the highest-risk areas: partial writes to JSON state files under concurrent access can corrupt job state silently, and the retry module's circuit-breaker semantics are untested for edge cases like clock skew or nested retries. I am blocking on these because data-loss and silent-failure risks outweigh the feature value.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "JSON state file writes are not atomic — concurrent or interrupted writes corrupt state",
+        "body": "scripts/lib/state.mjs and scripts/lib/tracked-jobs.mjs write JSON state files using fs.writeFile (or similar) directly. If the process crashes mid-write, or if two invocations race (e.g. two /glm:review calls in parallel), the state file can be truncated or contain interleaved bytes. There is no write-to-temp-then-rename pattern, no file locking, and no corruption-recovery path. The tracked-jobs module is used for background job coordination; corrupted state means lost or duplicated jobs with no way to detect or recover.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.85,
+        "recommendation": "Adopt atomic writes: write to a temp file in the same directory, then fs.rename() (which is atomic on POSIX). Add a corruption guard that catches JSON parse errors on read and falls back to an empty state with a warning. Consider a file lock (e.g. lockfile) if concurrent access is expected."
+      },
+      {
+        "severity": "high",
+        "title": "Retry module does not handle nested retry contexts or retry-of-a-retry",
+        "body": "scripts/lib/retry.mjs (203 lines) implements exponential backoff with jitter. However, if a caller that is itself inside a retry loop invokes another function that also uses retryWithBackoff, the inner retries amplify the outer backoff silently. The module has no concept of a retry context or depth limit. The tests (tests/retry.test.mjs, 352 lines) cover the happy paths but do not test nested retry scenarios. Under sustained failure this can cause minutes of invisible latency with no indication to the user.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.75,
+        "recommendation": "Add a retry-depth or retry-context mechanism so inner retries know they are already inside an outer retry. At minimum, document a contract that retryWithBackoff must not be called from within another retry. Add a max-wall-clock-time option so nested retries cannot blow past reasonable timeouts."
+      },
+      {
+        "severity": "medium",
+        "title": "BigModel error dispatch may misclassify unknown errors as retryable",
+        "body": "scripts/lib/bigmodel-errors.mjs maps API error codes to retry/retry-after/classify strategies. The default/fallback case for unrecognized error responses appears to classify them as retryable or at least does not explicitly mark them as fatal. If the upstream API changes its error schema (version skew), the system will retry errors that are actually permanent (e.g. auth revocation, quota exceeded with a new error code), wasting quota and hiding the real problem from the user.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.7,
+        "recommendation": "The default/fallback classification for unrecognized errors should be 'non-retryable' (fail-closed). Log the unrecognized error structure at warn level so it is discoverable. Add a test case for an entirely unknown error code asserting it is not retried."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client error propagation can swallow the original error cause",
+        "body": "scripts/lib/glm-client.mjs wraps BigModel calls with retry and error dispatch. In several catch/rejection paths, the original error object is replaced with a new Error containing only a message string, discarding the stack trace and any attached properties (status, headers, retry-after). This makes debugging production failures significantly harder because the root cause is irretrievably lost.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.7,
+        "recommendation": "Use `cause` chaining: `new Error('contextual message', { cause: originalError })`. Preserve the original error as a property on any wrapper error. Audit every catch block in glm-client.mjs for cause preservation."
+      },
+      {
+        "severity": "medium",
+        "title": "Background job tracking has no TTL or orphan cleanup",
+        "body": "scripts/lib/tracked-jobs.mjs tracks background jobs in a JSON file but there is no visible TTL, expiry, or orphan-reaper mechanism. If jobs are started but never complete (process killed, machine rebooted), they remain in the tracking file indefinitely. Subsequent commands that check job status will report stale jobs as 'running' forever, misleading users and potentially blocking new operations.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.72,
+        "recommendation": "Add a createdAt timestamp to each tracked job entry. On read, flag or prune jobs older than a configurable TTL (e.g. 24h). Expose stale jobs in the status output so users can see and clean them."
+      },
+      {
+        "severity": "low",
+        "title": "CI check-no-local-paths.sh may have false positives on legitimate test fixtures",
+        "body": "scripts/ci/check-no-local-paths.sh scans for local filesystem paths. The test fixtures under test-automation/uat-reports/ contain JSON files that were generated from real runs and may include absolute paths from the development machine. If the exclusion list does not cover these files, CI will fail on a legitimate file, blocking merges. If it does exclude them, the check has a gap for new test files added in the same directory.",
+        "file": "scripts/ci/check-no-local-paths.sh",
+        "line_start": 1,
+        "line_end": 97,
+        "confidence": 0.5,
+        "recommendation": "Verify the exclusion list covers test-automation/. Consider scanning only tracked source files (scripts/, commands/, prompts/) rather than the entire repo, or explicitly enumerating the directories to scan."
+      }
+    ],
+    "next_steps": [
+      "Run `git diff v0.4.0..HEAD -- scripts/lib/state.mjs scripts/lib/tracked-jobs.mjs` to confirm the non-atomic write paths and provide line-specific fixes.",
+      "Run `git diff v0.4.0..HEAD -- scripts/lib/retry.mjs` and trace all callers to identify nested-retry risk.",
+      "Run `git diff v0.4.0..HEAD -- scripts/lib/bigmodel-errors.mjs` and verify the fallback/default error classification is fail-closed.",
+      "Run `git diff v0.4.0..HEAD -- scripts/lib/glm-client.mjs` and audit every catch block for cause-chain preservation.",
+      "Run `node tests/retry.test.mjs` and `node tests/bigmodel-errors.test.mjs` to confirm current test coverage and add tests for the identified gaps."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 diff introduces significant new infrastructure (retry with backoff, BigModel error dispatch, job tracking, background execution) that has material gaps in failure handling, race conditions on state files, and observability. The retry system and state management are the highest-risk areas: partial writes to JSON state files under concurrent access can corrupt job state silently, and the retry module's circuit-breaker semantics are untested for edge cases like clock skew or nested retries. I am blocking on these because data-loss and silent-failure risks outweigh the feature value.\",\"findings\":[{\"severity\":\"high\",\"title\":\"JSON state file writes are not atomic — concurrent or interrupted writes corrupt state\",\"body\":\"scripts/lib/state.mjs and scripts/lib/tracked-jobs.mjs write JSON state files using fs.writeFile (or similar) directly. If the process crashes mid-write, or if two invocations race (e.g. two /glm:review calls in parallel), the state file can be truncated or contain interleaved bytes. There is no write-to-temp-then-rename pattern, no file locking, and no corruption-recovery path. The tracked-jobs module is used for background job coordination; corrupted state means lost or duplicated jobs with no way to detect or recover.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.85,\"recommendation\":\"Adopt atomic writes: write to a temp file in the same directory, then fs.rename() (which is atomic on POSIX). Add a corruption guard that catches JSON parse errors on read and falls back to an empty state with a warning. Consider a file lock (e.g. lockfile) if concurrent access is expected.\"},{\"severity\":\"high\",\"title\":\"Retry module does not handle nested retry contexts or retry-of-a-retry\",\"body\":\"scripts/lib/retry.mjs (203 lines) implements exponential backoff with jitter. However, if a caller that is itself inside a retry loop invokes another function that also uses retryWithBackoff, the inner retries amplify the outer backoff silently. The module has no concept of a retry context or depth limit. The tests (tests/retry.test.mjs, 352 lines) cover the happy paths but do not test nested retry scenarios. Under sustained failure this can cause minutes of invisible latency with no indication to the user.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.75,\"recommendation\":\"Add a retry-depth or retry-context mechanism so inner retries know they are already inside an outer retry. At minimum, document a contract that retryWithBackoff must not be called from within another retry. Add a max-wall-clock-time option so nested retries cannot blow past reasonable timeouts.\"},{\"severity\":\"medium\",\"title\":\"BigModel error dispatch may misclassify unknown errors as retryable\",\"body\":\"scripts/lib/bigmodel-errors.mjs maps API error codes to retry/retry-after/classify strategies. The default/fallback case for unrecognized error responses appears to classify them as retryable or at least does not explicitly mark them as fatal. If the upstream API changes its error schema (version skew), the system will retry errors that are actually permanent (e.g. auth revocation, quota exceeded with a new error code), wasting quota and hiding the real problem from the user.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.7,\"recommendation\":\"The default/fallback classification for unrecognized errors should be 'non-retryable' (fail-closed). Log the unrecognized error structure at warn level so it is discoverable. Add a test case for an entirely unknown error code asserting it is not retried.\"},{\"severity\":\"medium\",\"title\":\"glm-client error propagation can swallow the original error cause\",\"body\":\"scripts/lib/glm-client.mjs wraps BigModel calls with retry and error dispatch. In several catch/rejection paths, the original error object is replaced with a new Error containing only a message string, discarding the stack trace and any attached properties (status, headers, retry-after). This makes debugging production failures significantly harder because the root cause is irretrievably lost.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.7,\"recommendation\":\"Use `cause` chaining: `new Error('contextual message', { cause: originalError })`. Preserve the original error as a property on any wrapper error. Audit every catch block in glm-client.mjs for cause preservation.\"},{\"severity\":\"medium\",\"title\":\"Background job tracking has no TTL or orphan cleanup\",\"body\":\"scripts/lib/tracked-jobs.mjs tracks background jobs in a JSON file but there is no visible TTL, expiry, or orphan-reaper mechanism. If jobs are started but never complete (process killed, machine rebooted), they remain in the tracking file indefinitely. Subsequent commands that check job status will report stale jobs as 'running' forever, misleading users and potentially blocking new operations.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.72,\"recommendation\":\"Add a createdAt timestamp to each tracked job entry. On read, flag or prune jobs older than a configurable TTL (e.g. 24h). Expose stale jobs in the status output so users can see and clean them.\"},{\"severity\":\"low\",\"title\":\"CI check-no-local-paths.sh may have false positives on legitimate test fixtures\",\"body\":\"scripts/ci/check-no-local-paths.sh scans for local filesystem paths. The test fixtures under test-automation/uat-reports/ contain JSON files that were generated from real runs and may include absolute paths from the development machine. If the exclusion list does not cover these files, CI will fail on a legitimate file, blocking merges. If it does exclude them, the check has a gap for new test files added in the same directory.\",\"file\":\"scripts/ci/check-no-local-paths.sh\",\"line_start\":1,\"line_end\":97,\"confidence\":0.5,\"recommendation\":\"Verify the exclusion list covers test-automation/. Consider scanning only tracked source files (scripts/, commands/, prompts/) rather than the entire repo, or explicitly enumerating the directories to scan.\"}],\"next_steps\":[\"Run `git diff v0.4.0..HEAD -- scripts/lib/state.mjs scripts/lib/tracked-jobs.mjs` to confirm the non-atomic write paths and provide line-specific fixes.\",\"Run `git diff v0.4.0..HEAD -- scripts/lib/retry.mjs` and trace all callers to identify nested-retry risk.\",\"Run `git diff v0.4.0..HEAD -- scripts/lib/bigmodel-errors.mjs` and verify the fallback/default error classification is fail-closed.\",\"Run `git diff v0.4.0..HEAD -- scripts/lib/glm-client.mjs` and audit every catch block for cause-chain preservation.\",\"Run `node tests/retry.test.mjs` and `node tests/bigmodel-errors.test.mjs` to confirm current test coverage and add tests for the identified gaps.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T18:28:32.518Z"
+}

@@ -1,0 +1,79 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 27
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 228737,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.4→v0.4.6 span introduces a new retry/backoff subsystem (retry.mjs, bigmodel-errors.mjs) integrated into the core client, deletes process.mjs outright, and modifies job-control/render paths — all without v0.4.6 UAT evidence. The user is targeting v0.4.7 but no such tag exists (HEAD=v0.4.6), indicating untracked or unreleased code is under test. The combination of a deleted module, new retry wrapping on API calls, and a version gap raises real risk of runtime import failures and duplicate-operation side effects that would surface only under error-path stress.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Deleted process.mjs may leave dangling imports causing load-time ReferenceError",
+        "body": "scripts/lib/process.mjs (67 lines) was fully removed (commit 225401a: 'ReferenceError + full thread/resume scaffolding purge'). Any surviving import of this module from glm-companion.mjs, glm-client.mjs, job-control.mjs, render.mjs, or other scripts will throw an uncatchable ReferenceError at require/import time, killing the entire CLI invocation. The commit message itself acknowledges this class of bug ('ReferenceError'), suggesting it has already bitten once. Without verifying every import site was cleaned up, this is a latent crash waiting for an uncovered code path.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.75,
+        "recommendation": "Run `grep -rn 'process\\.mjs' scripts/` across the tree to confirm zero surviving import references. Add a CI gate that verifies no import target is missing (`node --check` or a static import resolver). If any reference exists, restore the module or refactor the caller."
+      },
+      {
+        "severity": "high",
+        "title": "New retry/backoff integrated into glm-client without idempotency guarantees on job-submission calls",
+        "body": "The diff adds retry.mjs (203 lines) and bigmodel-errors.mjs (168 lines) — 'BigModel error dispatch + auto retry/backoff.' These are integrated into glm-client.mjs (155-line delta), meaning API calls including potentially non-idempotent operations (job creation, submission) are now automatically retried. If the server accepted the request but the response was lost (a classic timeout scenario), a retry will duplicate the operation. No UAT report exists for v0.4.6 (only v0.4.4 and v0.4.5), so this behavior has no evidence of being exercised under simulated failure.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.7,
+        "recommendation": "Audit every glm-client.mjs call site that now has retry wrapping. For non-idempotent operations (POST creating resources), either: (a) use idempotency keys, (b) add a read-before-write check, or (c) exclude those calls from automatic retry with a `retryable: false` flag. Add a UAT scenario that simulates a mid-flight timeout on job submission and asserts no duplicate is created."
+      },
+      {
+        "severity": "medium",
+        "title": "No v0.4.6 UAT evidence; user running v0.4.7 sweep against code that lacks validation coverage",
+        "body": "UAT reports exist for v0.4.4 and v0.4.5 under test-automation/uat-reports/ but not for v0.4.6. The v0.4.6 release (commit d5fa754) bundles the entire retry/error-handling subsystem, job-control changes, render refactor, and process.mjs deletion. The user's stated focus is v0.4.7 — a version that does not exist as a tag or branch — meaning either uncommitted code or an unreleased branch is under test. The cumulative C3-v04x sweep is testing against a moving target with no validated baseline for the v0.4.6 changes.",
+        "file": "test-automation/uat-reports",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.8,
+        "recommendation": "Before proceeding with the v0.4.7 sweep: (1) tag the exact commit under test, (2) execute the v0.4.6 UAT scenarios against the v0.4.6 tag to establish a validated baseline, (3) document any v0.4.7-specific changes as an incremental diff from that baseline."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error classification drives retry decisions — misclassification causes infinite retry or silent drop",
+        "body": "The new 168-line bigmodel-errors.mjs classifies API errors to determine retry eligibility. If a permanent error (e.g., 401/403 authentication failure, 400 bad request) is misclassified as retryable, the retry loop will waste quota and delay surfacing the real problem. If a transient error (e.g., 429, 503) is misclassified as permanent, the operation fails immediately without retry, silently degrading reliability. The 189-line test file suggests unit coverage exists, but error taxonomy stability depends on upstream API contract — any undocumented error code change breaks the classification silently.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.6,
+        "recommendation": "Add an integration test that exercises real HTTP error responses (mocked server returning 429, 503, 401, 403, 400) and asserts correct retry/no-retry behavior. Add logging at retry decision points so misclassifications are observable in production. Include a fallback classification (treat unknown errors as non-retryable to fail safe) and log a warning for unrecogized error codes."
+      }
+    ],
+    "next_steps": [
+      "Run `grep -rn 'process\\.mjs\\|from.*process' scripts/` to confirm the deleted module has no surviving imports.",
+      "Audit glm-client.mjs call sites wrapped by retry.mjs to identify non-idempotent operations that could be duplicated on retry.",
+      "Execute v0.4.6 UAT against the v0.4.6 tag before trusting any v0.4.7 sweep results.",
+      "Add observability (structured logs) at every retry decision point in bigmodel-errors.mjs classification."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.4→v0.4.6 span introduces a new retry/backoff subsystem (retry.mjs, bigmodel-errors.mjs) integrated into the core client, deletes process.mjs outright, and modifies job-control/render paths — all without v0.4.6 UAT evidence. The user is targeting v0.4.7 but no such tag exists (HEAD=v0.4.6), indicating untracked or unreleased code is under test. The combination of a deleted module, new retry wrapping on API calls, and a version gap raises real risk of runtime import failures and duplicate-operation side effects that would surface only under error-path stress.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Deleted process.mjs may leave dangling imports causing load-time ReferenceError\",\"body\":\"scripts/lib/process.mjs (67 lines) was fully removed (commit 225401a: 'ReferenceError + full thread/resume scaffolding purge'). Any surviving import of this module from glm-companion.mjs, glm-client.mjs, job-control.mjs, render.mjs, or other scripts will throw an uncatchable ReferenceError at require/import time, killing the entire CLI invocation. The commit message itself acknowledges this class of bug ('ReferenceError'), suggesting it has already bitten once. Without verifying every import site was cleaned up, this is a latent crash waiting for an uncovered code path.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":67,\"confidence\":0.75,\"recommendation\":\"Run `grep -rn 'process\\\\.mjs' scripts/` across the tree to confirm zero surviving import references. Add a CI gate that verifies no import target is missing (`node --check` or a static import resolver). If any reference exists, restore the module or refactor the caller.\"},{\"severity\":\"high\",\"title\":\"New retry/backoff integrated into glm-client without idempotency guarantees on job-submission calls\",\"body\":\"The diff adds retry.mjs (203 lines) and bigmodel-errors.mjs (168 lines) — 'BigModel error dispatch + auto retry/backoff.' These are integrated into glm-client.mjs (155-line delta), meaning API calls including potentially non-idempotent operations (job creation, submission) are now automatically retried. If the server accepted the request but the response was lost (a classic timeout scenario), a retry will duplicate the operation. No UAT report exists for v0.4.6 (only v0.4.4 and v0.4.5), so this behavior has no evidence of being exercised under simulated failure.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.7,\"recommendation\":\"Audit every glm-client.mjs call site that now has retry wrapping. For non-idempotent operations (POST creating resources), either: (a) use idempotency keys, (b) add a read-before-write check, or (c) exclude those calls from automatic retry with a `retryable: false` flag. Add a UAT scenario that simulates a mid-flight timeout on job submission and asserts no duplicate is created.\"},{\"severity\":\"medium\",\"title\":\"No v0.4.6 UAT evidence; user running v0.4.7 sweep against code that lacks validation coverage\",\"body\":\"UAT reports exist for v0.4.4 and v0.4.5 under test-automation/uat-reports/ but not for v0.4.6. The v0.4.6 release (commit d5fa754) bundles the entire retry/error-handling subsystem, job-control changes, render refactor, and process.mjs deletion. The user's stated focus is v0.4.7 — a version that does not exist as a tag or branch — meaning either uncommitted code or an unreleased branch is under test. The cumulative C3-v04x sweep is testing against a moving target with no validated baseline for the v0.4.6 changes.\",\"file\":\"test-automation/uat-reports\",\"line_start\":1,\"line_end\":1,\"confidence\":0.8,\"recommendation\":\"Before proceeding with the v0.4.7 sweep: (1) tag the exact commit under test, (2) execute the v0.4.6 UAT scenarios against the v0.4.6 tag to establish a validated baseline, (3) document any v0.4.7-specific changes as an incremental diff from that baseline.\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors.mjs error classification drives retry decisions — misclassification causes infinite retry or silent drop\",\"body\":\"The new 168-line bigmodel-errors.mjs classifies API errors to determine retry eligibility. If a permanent error (e.g., 401/403 authentication failure, 400 bad request) is misclassified as retryable, the retry loop will waste quota and delay surfacing the real problem. If a transient error (e.g., 429, 503) is misclassified as permanent, the operation fails immediately without retry, silently degrading reliability. The 189-line test file suggests unit coverage exists, but error taxonomy stability depends on upstream API contract — any undocumented error code change breaks the classification silently.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.6,\"recommendation\":\"Add an integration test that exercises real HTTP error responses (mocked server returning 429, 503, 401, 403, 400) and asserts correct retry/no-retry behavior. Add logging at retry decision points so misclassifications are observable in production. Include a fallback classification (treat unknown errors as non-retryable to fail safe) and log a warning for unrecogized error codes.\"}],\"next_steps\":[\"Run `grep -rn 'process\\\\.mjs\\\\|from.*process' scripts/` to confirm the deleted module has no surviving imports.\",\"Audit glm-client.mjs call sites wrapped by retry.mjs to identify non-idempotent operations that could be duplicated on retry.\",\"Execute v0.4.6 UAT against the v0.4.6 tag before trusting any v0.4.7 sweep results.\",\"Add observability (structured logs) at every retry decision point in bigmodel-errors.mjs classification.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T20:29:17.371Z"
+}

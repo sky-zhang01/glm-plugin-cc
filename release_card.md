@@ -1,30 +1,33 @@
-# Release Card — glm-plugin-cc v0.4.7 (beta1 cut 2026-04-22)
+# Release Card — glm-plugin-cc v0.4.7 (final cut 2026-04-22)
 
-Status: READY — beta1 prerelease scope
+Status: READY — v0.4.7 final (supersedes beta1 98c4ca0)
 
 Approval Mode: maintainer direct-approval (solo-maintainer repo; same
 pattern as v0.4.4 / v0.4.5 / v0.4.6). Gitea CI green → maintainer
 auto-merge per standing one-off-per-release shortcut. Not promoted
-into CONTRIBUTING.md. Beta1 cut mid-release because Phase 7d power-up
-sweep is long-running (~8-10h wall time) and the rest of v0.4.7
-content — code, docs, 149-run data — is already locked; cutting
-beta1 now lets the interim snapshot be audited against a stable ref.
+into CONTRIBUTING.md. Beta1 was cut mid-release as an interim
+audit-ref at commit `98c4ca0` (Gitea + GitHub Prerelease, NOT
+Latest, v0.4.6 stayed Latest during beta1). Phase 7d power-up sweep
+then completed in ~3h wall time via 2 parallel detached worktrees,
+producing the final 457-run evidence base (N=81-84 per C3 cell,
+N=42-44 per C1 cell). This final cut amends the beta1 commit with
+Phase 7d numbers in CHANGELOG + bumps manifests beta1→final.
 
-Intended Ref (beta1)
+Beta1 history preserved (already shipped as Gitea + GitHub
+Prerelease on tag `v0.4.7-beta1`, NOT Latest). Not rebased or
+force-replaced — the beta1 tag stands as the audit-ref snapshot.
+
+Intended Ref (v0.4.7 final)
 - Feature branch: `fix/v047-review-reliability-mvp` off `develop`
-- PR: `fix/v047-review-reliability-mvp` → `develop` (Gitea)
+  (amended to add final 7d numbers + manifest bump + CHANGELOG
+  header change beta1→final)
+- PR: `fix/v047-review-reliability-mvp` → `develop` (Gitea; may
+  reuse the beta1 PR if still open, or fresh PR with same branch)
 - PR: `develop` → `main` (Gitea)
-- Tag: `v0.4.7-beta1` annotated, on the `develop → main` merge commit
-- **Gitea release**: marked `Prerelease`, **NOT Latest**
-- **GitHub release**: marked `Prerelease`, **NOT Latest** (v0.4.6 stays Latest)
-
-Intended Ref (v0.4.7 final — after Phase 7d)
-- Follow-up commit that writes Phase 7d effective-N and Fisher-exact
-  numbers into CHANGELOG tables + bumps manifest versions from
-  `0.4.7-beta1` → `0.4.7`
-- Tag: `v0.4.7` annotated
-- Gitea + GitHub release: marked `Latest`
-- Gitea issue #7: close at this point, not at beta1
+- Tag: `v0.4.7` annotated, on the `develop → main` merge commit
+- **Gitea release**: marked `Latest`
+- **GitHub release**: marked `Latest` (promotes past v0.4.6)
+- Gitea issue #7: close at this point
 
 ---
 
@@ -64,50 +67,54 @@ workflow-governor cross-review hallucination session:
    file-existence + distinctive-token grep, CSV results format stable
    across releases, per-run sidecar payload capture for offline audit.
    Ships with both the initial 9-call sanity-sweep data
-   (`sanity-sweep.csv`) and the 149-run four-phase expanded-sweep
+   (`sanity-sweep.csv`) and the 457-run five-phase expanded-sweep
    data (`expanded-sweep.csv`) so future sweeps can diff against
    either baseline.
 
 4. **Extended parse-failure classifier** added post-expanded-sweep.
    The initial 9-run sweep (medium diff) produced a schema=0 cell
    that user push-back correctly identified as possibly underpowered.
-   The 54-run expanded sweep on C1/C2/C3 surfaced five distinct
+   The five-phase expanded sweep on C1/C2/C3 surfaced five distinct
    parse-failure modes that the initial `classifyReviewPayload` did
    not cover — all now typed and correction-hinted:
    - `EMPTY_RESPONSE`, `REASONING_LEAK`, `MARKDOWN_FENCE_UNTERMINATED`,
      `TRUNCATED_JSON`, `PARSE_FAILURE`.
    - `stripMarkdownFences` also extended with open-only and close-only
      half-fence fallbacks.
-   - 15 new unit tests, total suite 149/149 passing (then expanded
-     to 156/156 in post-phase-7a with 7 new bigmodel-errors tests).
+   - 15 new unit tests, then +7 for the new vendor codes (Phase 7a)
+     and +14 for `buildChatRequestBody` extraction (beta1). Total
+     suite: 170/170.
 
 ## Out of Scope
 
-- **No default sampling parameter change.** Sweep expanded in four
-  phases to 149 total runs, reaching effective N=14-17 per cell on
-  C1 and C3 (Phase 7c N≥14 fill). At that sample size, every pairwise
-  Fisher exact test on C3 schema compliance returns p > 0.3, and the
-  observed ordering is non-monotonic (t=0.5 worst, t=0 best, t=1
-  middle); C1 is 49/49 across temperatures. Design power at this N
-  for a ~15pct per-step effect is approximately 16%, so the result
-  is "no detected effect at this sample size", not "no effect
-  exists". The plugin ships no default temperature change because
-  there is no detected effect to justify one; server default (unset)
-  is preserved. Issue #7 is closed with the current picture
-  documented; a future powered test would need ~80+ runs per cell.
-- **~~No BigModel error-code table update~~** — CANCELED. The sweep
-  across 149 runs surfaced 6 × `1234` and 3 × `500` (combining
-  raw-code and typed-code variants) plus 3 × EMPTY_RESPONSE.
-  Cross-checking https://docs.bigmodel.cn/cn/faq/api-code confirmed
-  both codes are documented (1234 = upstream network error, 500 =
-  upstream internal error), plus 3 more codes the v0.4.6 snapshot
-  missed (1311, 1312, 1313). Table expansion now ships in v0.4.7 —
-  see "Added" in CHANGELOG.
+- **No default sampling parameter change.** Sweep expanded in five
+  phases to **457 total runs**, reaching effective **N=81-84 per C3
+  cell** (Phase 7d N=80 power-up) and **N=42-44 per C1 cell**. At
+  that sample size Fisher exact two-sided p on C3 schema compliance
+  is **0.5348 / 0.7466 / 0.7812** for the three pairwise contrasts (all
+  p > 0.5); observed rates flatten to **95.1% / 91.6% / 92.9%**
+  across temperatures (max-min ≈ 3.5pct with overlapping Wilson
+  CIs). C1 is **129/129 across temperatures** at N=42-44 per cell
+  (Wilson lower bound ≥ 91.6%). Design power at N=81-84 for a ~15pct
+  per-step effect is ~80%, and for ~20pct is ~95% under that assumed
+  alternative. The plugin ships no default temperature change because
+  there is no detected effect to justify one; server default
+  (unset) is preserved. Issue #7 closes here; a future test
+  targeting per-step effects smaller than ~10pct would need N ≥ ~200
+  per cell.
+- **~~No BigModel error-code table update~~** — CANCELED. The 457-
+  run sweep surfaced 38 upstream-layer vendor errors (8.3%), the
+  majority 500s and 1234s. Cross-checking
+  https://docs.bigmodel.cn/cn/faq/api-code confirmed both codes are
+  documented (1234 = upstream network error, 500 = upstream internal
+  error), plus 3 more codes the v0.4.6 snapshot missed (1311, 1312,
+  1313). Table expansion now ships in v0.4.7 — see "Added" in
+  CHANGELOG.
 - **~~No C1 (small) / C3 (large) fixtures~~ — SUPERSEDED.** The
   original v0.4.7 sanity-sweep scope was C2 only; when the 9-call
   sanity data proved too thin, the scope expanded to add C1 (440
   lines, 6 files) and C3 (8336 lines, 84 files) in commit 7a971a7
-  so the 149-run sweep could cover small/medium/large. v0.4.7 now
+  so the 457-run sweep could cover small/medium/large. v0.4.7 now
   ships all three fixtures.
 - **No RAG / fine-tuning / context-packing variant.** Out-of-scope per
   user pushback — those are not review-workflow solutions, they're
@@ -188,10 +195,12 @@ workflow-governor cross-review hallucination session:
     `@anthropics → @anthropic-ai` rename claim) that the scoring
     rubric's token-in-window check does not catch, so the claim is
     narrowed to "0 wrong-file citations" rather than "0 fabrication".
-    CHANGELOG rewritten to reflect underpowered-null framing;
+    CHANGELOG at this step reflected underpowered-null framing;
     `commands/review.md` gains "Diff size guidance" section;
-    `commands/adversarial-review.md` sampling bullet aligned. No
-    prompt or default-sampling change ships in v0.4.7. ✓
+    `commands/adversarial-review.md` sampling bullet aligned.
+    (Superseded by Phase 7d at step 25e where N=81-84 detects no
+    C3 temperature effect. Phase 7c numbers retained below as
+    historical intermediate state.) ✓
 23. `Skill(simplify)` on N=149 doc diff — **DONE** (3-agent parallel
     + Python factual audit; caught 134-vs-127 success-count mismatch
     + 47/48-vs-40/42 C2 mismatch + stale `7/85`/`91.3%` numbers, all
@@ -235,32 +244,64 @@ workflow-governor cross-review hallucination session:
     exported helper in `glm-client.mjs` so response_format + sampling
     + thinking-mode body shape is unit-testable. 14 new tests in
     `tests/chat-request-body.test.mjs`. Total suite: 170/170 green. ✓
-25e. **(Pending — in flight)** Phase 7d N=80 power-up sweep (C3 +225
-    runs for ~80% Fisher exact power, C1 +83 runs to effective
-    N=40 for confirmation). Wall time ~8-10 hours single-threaded
-    on C3; parallel-worktree pattern halves to ~max(A,B). In flight
-    on 2 detached worktrees at time of commit. Results will update
-    § Expanded-sweep outcome + § Effective-N analysis post-sweep
-    via an amendment commit or separate v0.4.7-post-sweep rev.
-26. Push to Gitea only. Open PR → `develop`. Paste adversarial verdict
-    in PR body. — pending
-27. Gitea CI green → auto-merge PR to develop — pending
-28. Open Gitea PR: develop → main. Merge. — pending
-29. Tag v0.4.7 annotated on main merge commit. Pre-push hook runs
+25e. **(DONE)** Phase 7d N=80 power-up sweep — 308 runs (C3 +225 for
+    ~80% Fisher power, C1 +83 to effective N=42-44) delivered in
+    parallel from 2 detached worktrees (`/tmp/glm-eval-A` C3 at
+    d5fa754, `/tmp/glm-eval-B` C1 at 7766943), total wall time
+    ~3h. Final effective-N: C3 81/83/84 per temperature cell, C1
+    44/43/42. **Schema compliance**: C3 77/81 (95.1%) / 76/83
+    (91.6%) / 78/84 (92.9%); C1 100% across all three cells. **All
+    three pairwise C3 Fisher exact p > 0.5**: 0.5348 / 0.7466 / 0.7812.
+    Phase 7d upstream failures: 25/308. Non-upstream typed parse
+    failures across the full CSV: 12/457, including TRUNCATED_JSON
+    1/457. **C1 citation audit at final N=42-44**: 227 parsed
+    findings, 0 out-of-allowed, 0 known_false_files (Wallat
+    correctness-without-faithfulness failure mode still applies to
+    line-level content; scoped as v0.4.8 Tier 1 #1/#2). ✓
+25f. **(DONE post-Phase-7d)** CHANGELOG.md rewritten with final
+    Phase 7d numbers: 457-run outcome block, N=81-84/N=42-44
+    effective-N table, Fisher exact table with final p-values,
+    227-finding citation audit, final no-detected-temperature-effect
+    framing replacing the underpowered-null language. ✓
+25g. **(DONE post-Phase-7d)** Codex cross-review of final CHANGELOG
+    + release_card against raw CSV/payloads: Verdict BLOCK on 2
+    items — CRITICAL release_card staleness (149-run language) +
+    HIGH CHANGELOG parse-failure temp attribution (MARKDOWN_FENCE
+    + TRUNCATED_JSON were two distinct once-each observations at
+    different temps, not two occurrences of the same mode). Both
+    fixed in this amendment. Codex independently verified: CSV
+    row count, effective-N, Fisher p-values, 227/0/0 citation
+    audit, 0 known_false_files hits across all 457 payloads. ✓
+26. Manifest bump: package.json + plugin.json + marketplace.json
+    0.4.7-beta1 → 0.4.7. ✓
+27. `npm run ci:local` post-doc-updates re-run: syntax check,
+    170/170 tests, path-leak guard, plugin manifest validation, AI
+    quality gate, CHANGELOG update gate, and Co-Authored-By trailer
+    check all passed. ✓
+28. Corrective commit on top of `6f849e8` with Phase 7d doc/gate
+    corrections (`25/308`, `12/457`, Scope Completion release gate). ✓
+29. Push to Gitea. PR may already be open from beta1; if open, the
+    amend shows up on the existing PR. If closed, open new PR → develop. — pending
+30. Gitea CI green → auto-merge PR to develop. — pending
+31. Open Gitea PR: develop → main. Merge. — pending
+32. Tag v0.4.7 annotated on main merge commit. Pre-push hook runs
     `check-release-ready.sh v0.4.7`. — pending
-30. Publish Gitea release v0.4.7 (Latest auto-set) — pending
-31. Sync main + develop + tag to GitHub. Confirm PR Check + AI Quality
-    Gate green — pending
-32. Publish GitHub release v0.4.7, mark Latest — pending
-33. Fast-forward develop → main on both remotes (GitFlow cleanup) —
-    pending
-34. Upgrade local plugin cache to v0.4.7 — pending
-35. Close Gitea issue #7 with link to CHANGELOG entry + final 149-run
-    CSV. No v0.4.8 follow-up issue — all in-flight questions resolved
-    in this release. — pending
+33. Publish Gitea release v0.4.7, mark Latest (promotes past v0.4.6). — pending
+34. Sync main + develop + tag to GitHub. Confirm PR Check + AI
+    Quality Gate green. — pending
+35. Publish GitHub release v0.4.7, mark Latest (promotes past v0.4.6). — pending
+36. Fast-forward develop → main on both remotes (GitFlow cleanup). — pending
+37. Upgrade local plugin cache to v0.4.7. — pending
+38. Close Gitea issue #7 with link to CHANGELOG entry + final
+    457-run CSV. No v0.4.8 follow-up issue for temperature default
+    — 457-run sweep cannot support one; content-faithfulness
+    mitigations tracked in `docs/anti-hallucination-roadmap.md` as
+    v0.4.8 Tier 1 #1/#2. — pending
 
-## Scope Completion: will reach COMPLETE at step 35
-## Outstanding In-Scope Work: step 23 (simplify pass done for N=149 doc diff — clean), step 24 re-run after Codex F-1..F-5 fixes, step 25 adversarial (Codex returned REQUEST_CHANGES; 5 findings addressed, optional re-verify), steps 26-35 pending
+## Scope Completion: COMPLETE
+## Outstanding In-Scope Work: none — all technical scope (code, docs,
+Phase 7d data, Codex cross-review, CHANGELOG/release_card amendments)
+complete. Remaining steps 29-38 are mechanical release chain actions.
 
 ## Major Upgrade Review: N/A
 
@@ -306,10 +347,11 @@ the POST body when the caller explicitly passes a flag).
     with raw-payload sidecar capture + `--base` flag + schema-check
     alignment to classifyReviewPayload
   - `results/v0.4.7/sanity-sweep.csv` (initial 9 runs, v1 strictness)
-  - `results/v0.4.7/expanded-sweep.csv` (149 runs: 54 Phase 4/5 +
-    15 Phase 7a + 16 Phase 7b + 64 Phase 7c N≥14 fill)
-  - `results/v0.4.7/payloads/` (149 sidecar JSON files spanning all
-    four phases)
+  - `results/v0.4.7/expanded-sweep.csv` (457 runs: 54 Phase 4/5 +
+    15 Phase 7a + 16 Phase 7b + 64 Phase 7c N≥14 fill + 308 Phase 7d
+    N=80 power-up sweep)
+  - `results/v0.4.7/payloads/` (457 sidecar JSON files spanning all
+    five phases)
 - Modified: `scripts/ci/check-no-local-paths.sh` (exclude
   review-eval corpus + results paths from path-leak scanner).
 - Version bump in 3 manifest files + CHANGELOG v0.4.7 rewrite with
@@ -322,7 +364,7 @@ the POST body when the caller explicitly passes a flag).
 | Layer | Tool | Pass criterion |
 |---|---|---|
 | Static | `npm run check` | All modules parse; import graph resolves |
-| Unit | `npm test` | 156/156 pass (115 baseline + 34 review-payload + 7 bigmodel-errors new) |
+| Unit | `npm test` | 170/170 pass (115 baseline + 34 review-payload + 7 bigmodel-errors + 14 chat-request-body) |
 | Manifest | `check-plugin-manifest.sh` | Version 0.4.7 consistent across 3 JSON files |
 | CHANGELOG | `check-changelog-updated.sh` | `## v0.4.7` section present |
 | Leak guard | `check-no-local-paths.sh` | No internal paths leaked (corpus/results excluded) |
@@ -331,22 +373,27 @@ the POST body when the caller explicitly passes a flag).
 | Adversarial | `/codex:adversarial-review` preferred, else `/glm:adversarial-review` | No unresolved CRITICAL/HIGH |
 | Gitea CI | `ai-quality-gate.yml` + `pr-check.yml` | both green |
 | GitHub CI | same 2 workflows | both green |
-| **Release gate** | `bash scripts/ci/check-release-ready.sh v0.4.7` | All 4 checks pass (runs automatically in pre-push on tag push) |
-| **Expanded sweep data** | `node test-automation/review-eval/scripts/summarize.mjs results/v0.4.7/expanded-sweep.csv` | 149 rows, 0 SCHEMA_ECHO, 0 known_false_files hits across all 149 runs, 0 out-of-allowed citations on C1. Effective-N: C1=100%/100%/100% (N=16-17), C2=95% (40/42 across 12 cells), C3=93%/76%/86% (N=14-17). Fisher exact on C3 all pairwise p>0.3. Upstream failures 13/149 (8.7%) time-correlated across phases. |
+| **Release gate** | `bash scripts/ci/check-release-ready.sh v0.4.7` | Package/manifests match tag; CHANGELOG section exists; release_card is Status READY and Scope Completion COMPLETE |
+| **Expanded sweep data** | `node test-automation/review-eval/scripts/summarize.mjs results/v0.4.7/expanded-sweep.csv` + final audit script | 457 rows, 457 payloads, 0 SCHEMA_ECHO, 0 known_false_files hits across all payloads, 0 out-of-allowed citations on C1. Effective-N: C1=44/43/42 all schema-pass; C2=14/15, 14/15, 12/12; C3=77/81, 76/83, 78/84. Fisher exact on C3 p=0.5348 / 0.7466 / 0.7812. Upstream failures: 38/457 overall, 25/308 in Phase 7d. Typed non-upstream parse failures: 12/457 including TRUNCATED_JSON 1. |
 
 ## Local Verification
 
-- `npm test` green (156/156) at commit prior to Phase 7c doc updates.
-- Phase 7c sweep executed 2026-04-21 across ~82 minutes wall time: 30
-  C3 runs from `/tmp/glm-eval-A` (detached at d5fa754) + 34 C1 runs
-  from `/tmp/glm-eval-B` (detached at 7766943), all appended cleanly
-  to `expanded-sweep.csv` (149 unique timestamps, zero parallel-append
-  collisions). 4 upstream errors out of 64 Phase 7c runs; all other
-  60 runs produced valid schema payloads with typed correction-retry
-  paths exercised where needed.
-- To be appended after step 24 re-run + step 25 adversarial review:
-  final `npm run ci:local` result post-doc-updates + Codex/GLM
-  adversarial verdict.
+- `npm run ci:local` green after final doc/gate corrections: syntax
+  check, 170/170 tests, path-leak guard, plugin manifest validation,
+  AI quality gate, CHANGELOG update gate, and Co-Authored-By trailer
+  check all passed.
+- Phase 7c sweep 2026-04-21 ~82 min wall time: 30 C3 runs from
+  `/tmp/glm-eval-A` (d5fa754) + 34 C1 runs from `/tmp/glm-eval-B`
+  (7766943), zero parallel-append collisions.
+- Phase 7d sweep 2026-04-22 ~3h wall time: 225 C3 runs from
+  `/tmp/glm-eval-A` + 83 C1 runs from `/tmp/glm-eval-B`, total 308
+  appended, CSV now at 457 data rows. 25 upstream errors (8.12%).
+- Codex cross-review 2026-04-22: independently recomputed CSV row
+  count, effective-N per cell, schema-compliance rates, Fisher
+  exact p-values, 227-finding citation audit, and grep for
+  reference_runtime/governance.py/workflow_governor across all 457
+  payloads. All Claude-claimed numbers verified within ±0.01;
+  Codex surfaced 2 doc-consistency fixes (applied in amendment).
 
 ## CI Evidence
 

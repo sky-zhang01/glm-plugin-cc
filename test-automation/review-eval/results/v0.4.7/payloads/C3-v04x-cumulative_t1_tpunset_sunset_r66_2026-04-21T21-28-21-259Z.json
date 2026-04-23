@@ -1,0 +1,91 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 66
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 115831,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff is a large-scope change (+6600 lines across 84 files) touching core infrastructure: retry logic, error dispatch, state management, API client, and job tracking. The deletion of scripts/lib/process.mjs (67 lines removed) poses a dangling-import risk across multiple consumers. New retry.mjs (203 lines) and bigmodel-errors.mjs (168 lines) are safety-critical modules where edge-case gaps (retry storms, non-idempotent retries, error misclassification) could cause silent failures or resource exhaustion. I was unable to inspect the actual file contents or diff hunks, which itself is a concern — a change of this blast radius demands line-level review of the core modules before shipping.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "scripts/lib/process.mjs deleted — dangling import risk in consumers",
+        "body": "The diff stat shows scripts/lib/process.mjs was entirely removed (67 lines). Modules in the same lib/ directory — job-control.mjs (20 lines changed), render.mjs (79 lines changed), glm-companion.mjs (139 lines changed) — were likely consumers. If any surviving import references this module, it will cause a runtime ReferenceError/crash at call time, not at load time for ESM dynamic imports. The risk is highest in code paths exercised only under error or retry conditions, which may not be hit in UAT.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.72,
+        "recommendation": "Grep the entire codebase for any remaining import or require of 'process.mjs' or './process' or '../process'. Verify that every function previously exported from process.mjs has a replacement in the surviving codebase. Add a CI check that validates all imports resolve (the existing check-imports.mjs script may cover this — confirm it runs in CI)."
+      },
+      {
+        "severity": "high",
+        "title": "New retry.mjs (203 lines) — unverified idempotency and retry-budget guarantees",
+        "body": "A 203-line retry module is the backbone of the new auto-retry/backoff feature. The test file (retry.test.mjs, 352 lines) suggests substantial coverage, but retry logic is notorious for subtle failures under concurrent execution: retry storms when multiple jobs share no backoff coordination, retrying non-idempotent API calls (e.g., job submission that creates duplicates), and missing or incorrect jitter causing thundering-herd behavior. The diff stat shows glm-client.mjs (155 lines changed) and tracked-jobs.mjs (78 lines changed) both changed in the same release, suggesting retry was integrated broadly. A budget exhaustion scenario could silently drop all retries and return an opaque failure.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.68,
+        "recommendation": "Verify: (1) retries are only applied to idempotent operations or include idempotency keys; (2) there is a per-job and global retry budget with hard ceilings; (3) backoff includes jitter; (4) non-retryable errors (4xx client errors, auth failures) are never retried; (5) the retry budget is observable via logging/metrics when exhausted. Add a specific test for concurrent retry scenarios sharing a single budget."
+      },
+      {
+        "severity": "high",
+        "title": "bigmodel-errors.mjs error classification — misclassification causes silent data loss or retry storms",
+        "body": "A new 168-line error dispatch module for BigModel API errors determines which errors are retryable, which require backoff, and which should fail immediately. If a rate-limit error (429) is misclassified as non-retryable, jobs fail permanently when they could have succeeded. If a permissions/auth error (401/403) is misclassified as retryable, the system will burn through its retry budget on requests that will never succeed, delaying the inevitable failure and potentially triggering API abuse detection. The test file (bigmodel-errors.test.mjs, 189 lines) covers the module, but the critical question is whether the error classification handles all HTTP status codes and non-HTTP error shapes (network timeouts, DNS failures, malformed responses) that BigModel can produce.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.65,
+        "recommendation": "Audit the error classifier for: (1) explicit handling of every HTTP status code BigModel returns, especially 408, 429, 500, 502, 503, 504; (2) handling of non-HTTP errors (ECONNRESET, ETIMEDOUT, ENOTFOUND, malformed JSON); (3) a default/fallback classification that is conservative (fail-fast rather than retry); (4) logging at the classification boundary so misclassifications are observable in production."
+      },
+      {
+        "severity": "medium",
+        "title": "Concurrent state mutation in state.mjs and tracked-jobs.mjs — race condition risk",
+        "body": "state.mjs (32 lines changed) and tracked-jobs.mjs (78 lines changed) manage persisted job state. If the new --background/--wait execution modes (from v0.4.5) allow multiple processes to read-modify-write the same state file concurrently, there is a TOCTOU race that can cause lost job updates, duplicate tracking entries, or corrupted JSON state files. File-based state without advisory locking is inherently vulnerable to this. The UAT tests (v0.4.4, v0.4.5) likely run single-threaded and would not surface this.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.55,
+        "recommendation": "Verify that all state mutations use atomic write patterns (write-to-temp then rename). If multiple processes can run simultaneously, add file-level locking (flock, lockfile) or switch to a concurrency-safe store. Add a test that runs two concurrent state mutations and asserts both are reflected in the final state."
+      },
+      {
+        "severity": "medium",
+        "title": "Scope of change (84 files, +6600/-480) across core infrastructure — regression surface too large for a single cumulative release",
+        "body": "This diff touches the API client, retry logic, error handling, state management, job tracking, rendering, argument parsing, configuration, the main companion script, CI pipelines, and 14 test files. A regression in any single module could cascade through the others (e.g., a retry bug in retry.mjs manifests as a state corruption in tracked-jobs.mjs which then causes render.mjs to fail). The UAT evidence covers v0.4.4 and v0.4.5 scenarios, but there is no v0.4.6 or cumulative v0.4.0→v0.4.6 UAT report visible in the diff, meaning the integrated behavior of all changes together has no explicit test evidence.",
+        "file": "CHANGELOG.md",
+        "line_start": 1,
+        "line_end": 521,
+        "confidence": 0.7,
+        "recommendation": "Before shipping, run a cumulative integration test (v0.4.0→v0.4.6) covering at minimum: (1) a job that requires retry due to transient API errors; (2) a job that fails with a non-retryable error; (3) concurrent --background and --wait invocations against the same state; (4) recovery from a corrupted state file. Document the results as a v0.4.6 UAT report."
+      }
+    ],
+    "next_steps": [
+      "Read the full contents of scripts/lib/process.mjs deletion diff and grep for all surviving imports of that module path.",
+      "Read scripts/lib/retry.mjs in full; verify idempotency guards, jitter, budget ceilings, and non-retryable-error exclusion.",
+      "Read scripts/lib/bigmodel-errors.mjs in full; verify handling of 429/503/timeout/malformed-response cases and the default classification.",
+      "Read scripts/lib/state.mjs and scripts/lib/tracked-jobs.mjs; verify atomic write patterns and check for TOCTOU races under concurrent access.",
+      "Run the full test suite against the cumulative v0.4.0→v0.4.6 state and confirm all tests pass.",
+      "Produce a v0.4.6 cumulative UAT report covering retry, error dispatch, concurrent state access, and background/wait mode integration."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 diff is a large-scope change (+6600 lines across 84 files) touching core infrastructure: retry logic, error dispatch, state management, API client, and job tracking. The deletion of scripts/lib/process.mjs (67 lines removed) poses a dangling-import risk across multiple consumers. New retry.mjs (203 lines) and bigmodel-errors.mjs (168 lines) are safety-critical modules where edge-case gaps (retry storms, non-idempotent retries, error misclassification) could cause silent failures or resource exhaustion. I was unable to inspect the actual file contents or diff hunks, which itself is a concern — a change of this blast radius demands line-level review of the core modules before shipping.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"scripts/lib/process.mjs deleted — dangling import risk in consumers\",\n      \"body\": \"The diff stat shows scripts/lib/process.mjs was entirely removed (67 lines). Modules in the same lib/ directory — job-control.mjs (20 lines changed), render.mjs (79 lines changed), glm-companion.mjs (139 lines changed) — were likely consumers. If any surviving import references this module, it will cause a runtime ReferenceError/crash at call time, not at load time for ESM dynamic imports. The risk is highest in code paths exercised only under error or retry conditions, which may not be hit in UAT.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Grep the entire codebase for any remaining import or require of 'process.mjs' or './process' or '../process'. Verify that every function previously exported from process.mjs has a replacement in the surviving codebase. Add a CI check that validates all imports resolve (the existing check-imports.mjs script may cover this — confirm it runs in CI).\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"New retry.mjs (203 lines) — unverified idempotency and retry-budget guarantees\",\n      \"body\": \"A 203-line retry module is the backbone of the new auto-retry/backoff feature. The test file (retry.test.mjs, 352 lines) suggests substantial coverage, but retry logic is notorious for subtle failures under concurrent execution: retry storms when multiple jobs share no backoff coordination, retrying non-idempotent API calls (e.g., job submission that creates duplicates), and missing or incorrect jitter causing thundering-herd behavior. The diff stat shows glm-client.mjs (155 lines changed) and tracked-jobs.mjs (78 lines changed) both changed in the same release, suggesting retry was integrated broadly. A budget exhaustion scenario could silently drop all retries and return an opaque failure.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Verify: (1) retries are only applied to idempotent operations or include idempotency keys; (2) there is a per-job and global retry budget with hard ceilings; (3) backoff includes jitter; (4) non-retryable errors (4xx client errors, auth failures) are never retried; (5) the retry budget is observable via logging/metrics when exhausted. Add a specific test for concurrent retry scenarios sharing a single budget.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"bigmodel-errors.mjs error classification — misclassification causes silent data loss or retry storms\",\n      \"body\": \"A new 168-line error dispatch module for BigModel API errors determines which errors are retryable, which require backoff, and which should fail immediately. If a rate-limit error (429) is misclassified as non-retryable, jobs fail permanently when they could have succeeded. If a permissions/auth error (401/403) is misclassified as retryable, the system will burn through its retry budget on requests that will never succeed, delaying the inevitable failure and potentially triggering API abuse detection. The test file (bigmodel-errors.test.mjs, 189 lines) covers the module, but the critical question is whether the error classification handles all HTTP status codes and non-HTTP error shapes (network timeouts, DNS failures, malformed responses) that BigModel can produce.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Audit the error classifier for: (1) explicit handling of every HTTP status code BigModel returns, especially 408, 429, 500, 502, 503, 504; (2) handling of non-HTTP errors (ECONNRESET, ETIMEDOUT, ENOTFOUND, malformed JSON); (3) a default/fallback classification that is conservative (fail-fast rather than retry); (4) logging at the classification boundary so misclassifications are observable in production.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Concurrent state mutation in state.mjs and tracked-jobs.mjs — race condition risk\",\n      \"body\": \"state.mjs (32 lines changed) and tracked-jobs.mjs (78 lines changed) manage persisted job state. If the new --background/--wait execution modes (from v0.4.5) allow multiple processes to read-modify-write the same state file concurrently, there is a TOCTOU race that can cause lost job updates, duplicate tracking entries, or corrupted JSON state files. File-based state without advisory locking is inherently vulnerable to this. The UAT tests (v0.4.4, v0.4.5) likely run single-threaded and would not surface this.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Verify that all state mutations use atomic write patterns (write-to-temp then rename). If multiple processes can run simultaneously, add file-level locking (flock, lockfile) or switch to a concurrency-safe store. Add a test that runs two concurrent state mutations and asserts both are reflected in the final state.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Scope of change (84 files, +6600/-480) across core infrastructure — regression surface too large for a single cumulative release\",\n      \"body\": \"This diff touches the API client, retry logic, error handling, state management, job tracking, rendering, argument parsing, configuration, the main companion script, CI pipelines, and 14 test files. A regression in any single module could cascade through the others (e.g., a retry bug in retry.mjs manifests as a state corruption in tracked-jobs.mjs which then causes render.mjs to fail). The UAT evidence covers v0.4.4 and v0.4.5 scenarios, but there is no v0.4.6 or cumulative v0.4.0→v0.4.6 UAT report visible in the diff, meaning the integrated behavior of all changes together has no explicit test evidence.\",\n      \"file\": \"CHANGELOG.md\",\n      \"line_start\": 1,\n      \"line_end\": 521,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Before shipping, run a cumulative integration test (v0.4.0→v0.4.6) covering at minimum: (1) a job that requires retry due to transient API errors; (2) a job that fails with a non-retryable error; (3) concurrent --background and --wait invocations against the same state; (4) recovery from a corrupted state file. Document the results as a v0.4.6 UAT report.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Read the full contents of scripts/lib/process.mjs deletion diff and grep for all surviving imports of that module path.\",\n    \"Read scripts/lib/retry.mjs in full; verify idempotency guards, jitter, budget ceilings, and non-retryable-error exclusion.\",\n    \"Read scripts/lib/bigmodel-errors.mjs in full; verify handling of 429/503/timeout/malformed-response cases and the default classification.\",\n    \"Read scripts/lib/state.mjs and scripts/lib/tracked-jobs.mjs; verify atomic write patterns and check for TOCTOU races under concurrent access.\",\n    \"Run the full test suite against the cumulative v0.4.0→v0.4.6 state and confirm all tests pass.\",\n    \"Produce a v0.4.6 cumulative UAT report covering retry, error dispatch, concurrent state access, and background/wait mode integration.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T21:28:21.307Z"
+}

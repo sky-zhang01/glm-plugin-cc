@@ -1,0 +1,91 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 73
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 46685,
+    "error_code": ""
+  },
+  "parsed": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces a retry/backoff system (retry.mjs), BigModel error dispatch (bigmodel-errors.mjs), and significant changes to glm-client.mjs and job-control state management. While there are extensive unit tests, several high-severity concerns survive: (1) retry.mjs and glm-client.mjs have potential unhandled-exception paths on transient failures that could silently swallow jobs, (2) state.mjs mutations lack atomicity guarantees that could corrupt tracked-jobs under concurrent access, and (3) the new BigModel error classification can misclassify unknown error shapes as non-retryable, causing permanent job loss without recovery. These are the kinds of failures that are expensive and hard to detect in production.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs may silently swallow errors when max retries exhausted without caller notification of final failure state",
+        "body": "The retry module (scripts/lib/retry.mjs) implements exponential backoff but the contract for what happens after all retries are exhausted is not clearly propagated. If a caller expects a thrown error on final failure but the retry wrapper returns undefined or a stale result, the job is lost silently. Tests in tests/retry.test.mjs cover happy-path retry counts but the exhaustion terminal case needs careful verification — if it returns a falsy value instead of throwing, downstream glm-client.mjs would proceed as if the request succeeded, potentially creating orphaned state in tracked-jobs.mjs.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 50,
+        "confidence": 0.72,
+        "recommendation": "Verify that retry exhaustion always throws the last error (never returns undefined). Add an explicit guard at the end of the retry loop that throws if all attempts failed, and add a unit test that asserts the thrown error is the *last* error, not a generic wrapper."
+      },
+      {
+        "severity": "high",
+        "title": "bigmodel-errors.mjs unknown error classification defaults to non-retryable, causing irreversible job loss on unexpected API responses",
+        "body": "scripts/lib/bigmodel-errors.mjs classifies errors from the BigModel API. Any error shape not explicitly handled falls through to a default case that marks it as non-retryable. This is dangerous because API providers change error formats, add new error codes, or return undocumented responses during incidents. A non-retryable classification means the job is permanently abandoned with no recovery path. The safe default should be retryable — fail open, not closed — especially for a system that manages long-running jobs tracked in state.mjs.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 60,
+        "confidence": 0.78,
+        "recommendation": "Invert the default: classify unknown/unrecognized error shapes as retryable rather than non-retryable. Add logging/metrics for unrecognized error shapes so they can be classified correctly in a follow-up. This prevents silent permanent job loss on unexpected API behavior."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs and tracked-jobs.mjs lack atomic writes — concurrent processes can corrupt state file",
+        "body": "scripts/lib/state.mjs and scripts/lib/tracked-jobs.mjs read and write a JSON state file without file locking or atomic write (write-to-temp-then-rename). If two glm-companion.mjs processes or hooks fire concurrently (e.g., a session lifecycle hook overlapping with a manual command), the last writer wins and intermediate state is lost. This is a classic TOCTOU race that causes job tracking corruption — jobs appear to vanish or duplicate. The fs.mjs utility writes directly to the target path without atomicity.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.74,
+        "recommendation": "Implement atomic file writes in fs.mjs using the write-to-temp-then-rename pattern (fs.writeFile to a .tmp file, then fs.rename). For read-modify-write cycles in state.mjs/tracked-jobs.mjs, add advisory file locking (lockfile or flock) to serialize concurrent access."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs error handling path may leave tracked-jobs in permanently stuck 'running' state",
+        "body": "scripts/lib/glm-client.mjs dispatches API calls and interacts with tracked-jobs.mjs for job state. If the BigModel API returns an error after the job was marked 'running' but before the response is processed, and the error is classified as non-retryable by bigmodel-errors.mjs, the job remains in 'running' state forever with no timeout-based cleanup. There is no visible TTL or stale-job reaper that would transition orphaned 'running' jobs to 'failed'. Over time, this leaks tracked job slots and confuses status reporting.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 60,
+        "confidence": 0.68,
+        "recommendation": "Add a TTL field to tracked jobs and a cleanup/reaper function that transitions jobs stuck in 'running' beyond a threshold (e.g., 30 minutes) to 'failed' with a reason like 'timeout'. Ensure all error paths in glm-client.mjs explicitly transition the job to a terminal state."
+      },
+      {
+        "severity": "medium",
+        "title": "Retry backoff jitter implementation may be insufficient to prevent thundering herd on shared API rate-limit recovery",
+        "body": "scripts/lib/retry.mjs implements exponential backoff but the jitter strategy (if present) needs verification. If all instances of the plugin share the same BigModel API key and hit a rate limit simultaneously, they will all retry at nearly the same time without adequate jitter, causing cascading retry storms. This is amplified by the non-retryable default in bigmodel-errors.mjs — rate-limit errors that are misclassified will not be retried, while correctly classified ones may thundering-herd.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 80,
+        "confidence": 0.58,
+        "recommendation": "Ensure retry.mjs uses full-jitter or decorrelated jitter (not just base * 2^n + small random). Verify that HTTP 429 / rate-limit responses are explicitly classified as retryable with the Retry-After header honored. Add a test that verifies jitter spread under simulated concurrent retry scenarios."
+      }
+    ],
+    "next_steps": [
+      "Inspect retry.mjs exhaust handler: confirm it throws (never returns) on final failure and that the thrown error preserves the original error chain.",
+      "Audit bigmodel-errors.mjs default classification branch: change unknown errors to retryable and add structured logging for classification misses.",
+      "Add atomic write (temp+rename) to fs.mjs and add a stale-job reaper to tracked-jobs.mjs with configurable TTL.",
+      "Run the existing test suite (tests/retry.test.mjs, tests/bigmodel-errors.test.mjs) with injected unknown error shapes to verify failure modes.",
+      "Verify that glm-client.mjs always transitions tracked jobs to a terminal state on every error path — trace each catch/rejection handler to its job-state transition."
+    ]
+  },
+  "rawOutputHead": "{\n  \"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff introduces a retry/backoff system (retry.mjs), BigModel error dispatch (bigmodel-errors.mjs), and significant changes to glm-client.mjs and job-control state management. While there are extensive unit tests, several high-severity concerns survive: (1) retry.mjs and glm-client.mjs have potential unhandled-exception paths on transient failures that could silently swallow jobs, (2) state.mjs mutations lack atomicity guarantees that could corrupt tracked-jobs under concurrent access, and (3) the new BigModel error classification can misclassify unknown error shapes as non-retryable, causing permanent job loss without recovery. These are the kinds of failures that are expensive and hard to detect in production.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"retry.mjs may silently swallow errors when max retries exhausted without caller notification of final failure state\",\n      \"body\": \"The retry module (scripts/lib/retry.mjs) implements exponential backoff but the contract for what happens after all retries are exhausted is not clearly propagated. If a caller expects a thrown error on final failure but the retry wrapper returns undefined or a stale result, the job is lost silently. Tests in tests/retry.test.mjs cover happy-path retry counts but the exhaustion terminal case needs careful verification — if it returns a falsy value instead of throwing, downstream glm-client.mjs would proceed as if the request succeeded, potentially creating orphaned state in tracked-jobs.mjs.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 50,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Verify that retry exhaustion always throws the last error (never returns undefined). Add an explicit guard at the end of the retry loop that throws if all attempts failed, and add a unit test that asserts the thrown error is the *last* error, not a generic wrapper.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"bigmodel-errors.mjs unknown error classification defaults to non-retryable, causing irreversible job loss on unexpected API responses\",\n      \"body\": \"scripts/lib/bigmodel-errors.mjs classifies errors from the BigModel API. Any error shape not explicitly handled falls through to a default case that marks it as non-retryable. This is dangerous because API providers change error formats, add new error codes, or return undocumented responses during incidents. A non-retryable classification means the job is permanently abandoned with no recovery path. The safe default should be retryable — fail open, not closed — especially for a system that manages long-running jobs tracked in state.mjs.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 60,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Invert the default: classify unknown/unrecognized error shapes as retryable rather than non-retryable. Add logging/metrics for unrecognized error shapes so they can be classified correctly in a follow-up. This prevents silent permanent job loss on unexpected API behavior.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"state.mjs and tracked-jobs.mjs lack atomic writes — concurrent processes can corrupt state file\",\n      \"body\": \"scripts/lib/state.mjs and scripts/lib/tracked-jobs.mjs read and write a JSON state file without file locking or atomic write (write-to-temp-then-rename). If two glm-companion.mjs processes or hooks fire concurrently (e.g., a session lifecycle hook overlapping with a manual command), the last writer wins and intermediate state is lost. This is a classic TOCTOU race that causes job tracking corruption — jobs appear to vanish or duplicate. The fs.mjs utility writes directly to the target path without atomicity.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.74,\n      \"recommendation\": \"Implement atomic file writes in fs.mjs using the write-to-temp-then-rename pattern (fs.writeFile to a .tmp file, then fs.rename). For read-modify-write cycles in state.mjs/tracked-jobs.mjs, add advisory file locking (lockfile or flock) to serialize concurrent access.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client.mjs error handling path may leave tracked-jobs in permanently stuck 'running' state\",\n      \"body\": \"scripts/lib/glm-client.mjs dispatches API calls and interacts with tracked-jobs.mjs for job state. If the BigModel API returns an error after the job was marked 'running' but before the response is processed, and the error is classified as non-retryable by bigmodel-errors.mjs, the job remains in 'running' state forever with no timeout-based cleanup. There is no visible TTL or stale-job reaper that would transition orphaned 'running' jobs to 'failed'. Over time, this leaks tracked job slots and confuses status reporting.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 60,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Add a TTL field to tracked jobs and a cleanup/reaper function that transitions jobs stuck in 'running' beyond a threshold (e.g., 30 minutes) to 'failed' with a reason like 'timeout'. Ensure all error paths in glm-client.mjs explicitly transition the job to a terminal state.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Retry backoff jitter implementation may be insufficient to prevent thundering herd on shared API rate-limit recovery\",\n      \"body\": \"scripts/lib/retry.mjs implements exponential backoff but the jitter strategy (if present) needs verification. If all instances of the plugin share the same BigModel API key and hit a rate limit simultaneously, they will all retry at nearly the same time without adequate jitter, causing cascading retry storms. This is amplified by the non-retryable default in bigmodel-errors.mjs — rate-limit errors that are misclassified will not be retried, while correctly classified ones may thundering-herd.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 80,\n      \"confidence\": 0.58,\n      \"recommendation\": \"Ensure retry.mjs uses full-jitter or decorrelated jitter (not just base * 2^n + small random). Verify that HTTP 429 / rate-limit responses are explicitly classified as retryable with the Retry-After header honored. Add a test that verifies jitter spread under simulated concurrent retry scenarios.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect retry.mjs exhaust handler: confirm it throws (never returns) on final failure and that the thrown error preserves the original error chain.\",\n    \"Audit bigmodel-errors.mjs default classification branch: change unknown errors to retryable and add structured logging for classification misses.\",\n    \"Add atomic write (temp+rename) to fs.mjs and add a stale-job reaper to tracked-jobs.mjs with configurable TTL.\",\n    \"Run the existing test suite (tests/retry.test.mjs, tests/bigmodel-errors.test.mjs) with injected unknown error shapes to verify failure modes.\",\n    \"Verify that glm-client.mjs always transitions tracked jobs to a terminal state on every error path — trace each catch/rejection handler to its job-state transition.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T21:35:37.586Z"
+}

@@ -1,0 +1,112 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 9
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 7,
+    "citation_accuracy": 0.714,
+    "citation_false_file_hits": 0,
+    "latency_ms": 62732,
+    "error_code": ""
+  },
+  "parsed": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces retry/backoff logic, BigModel error dispatch, job tracking, and state management. Several code paths have material defects: retry logic that can silently swallow terminal errors, job-state races on concurrent operations, missing cleanup on partial failure in tracked jobs, and shell scripts with unchecked exit codes that can report false CI passes. These are not stylistic — they represent silent-failure and data-corruption vectors under real production stress.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs — retryDelay can return NaN for unrecognized error types, causing silent no-retry with no logging",
+        "body": "In retry.mjs, the classifyError / retryDelay dispatch depends on matching BigModel error codes. If the API returns an unrecognized error structure (e.g. a new error code from a provider version bump, or a malformed response where errorCode is undefined), the retryDelay function falls through all cases and returns undefined. The calling code in executeWithRetry treats a falsy/NaN delay as 'do not retry' — meaning a transient but unrecognized error is silently treated as terminal with no indication to the user WHY their request was dropped. This is a silent-failure vector that is invisible without debug logging.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 50,
+        "confidence": 0.72,
+        "recommendation": "Add an explicit default/fallthrough case in retryDelay that logs a warning with the unrecognized error structure and returns a conservative backoff (e.g. baseDelay) rather than undefined. Alternatively, return a sentinel that the caller must explicitly handle rather than silently falling through."
+      },
+      {
+        "severity": "high",
+        "title": "tracked-jobs.mjs — TOCTOU race between job existence check and state mutation",
+        "body": "The tracked-jobs module reads job state from disk (JSON file), checks conditions, then writes back. If two concurrent processes (e.g. a background review and a status check, or two review invocations on different threads) both read the state file before either writes, they can both pass validation checks and write conflicting state — the last writer wins and silently loses the other's mutations. This can cause job status to be permanently wrong (e.g. a completed job appears stuck as 'running') with no error surfaced.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.68,
+        "recommendation": "Use atomic file writes (write to temp file + rename) and consider a lockfile or append-only log for concurrent access. At minimum, wrap the read-check-write cycle in a file lock (e.g. proper-lockfile or flock) to prevent interleaving."
+      },
+      {
+        "severity": "high",
+        "title": "bigmodel-errors.mjs — error classifier trusts HTTP status alone for retryable vs terminal classification",
+        "body": "The BigModel error dispatch maps HTTP status codes to retry/terminal decisions. However, some providers return 200 with an error payload in the body (e.g. OpenAI-compatible APIs returning {error: {...}} with HTTP 200), or return 429 with a Retry-After header that the classifier ignores. The current dispatch will treat a 200-with-error-body as a success and pass garbage downstream, and will use a fixed backoff for 429 instead of respecting Retry-After. Under rate limiting, this causes either unnecessary 429 storms or excessively long waits.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 60,
+        "confidence": 0.65,
+        "recommendation": "After HTTP-level classification, add a second pass that inspects the response body for error structures even on 200 status. For 429 responses, parse the Retry-After header and use it as the delay floor. Add a test case for 200-with-error-body."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs — connection teardown on retry leaves hanging sockets",
+        "body": "When executeWithRetry triggers a retry, the existing HTTP connection may not be properly cleaned up before creating a new one. If the server is slow to respond and retries pile up, this can exhaust the local ephemeral port range or hit file descriptor limits, causing subsequent requests to fail with ECONNREFUSED or EMFILE — which would then be misclassified as server errors and retried further, creating a positive feedback loop.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 100,
+        "confidence": 0.55,
+        "recommendation": "Ensure the AbortController or equivalent cancellation mechanism is triggered before each retry, and that the previous response body is fully consumed or the stream destroyed. Add a max-retry budget with a ceiling on total retry time (not just count) to prevent runaway retry loops."
+      },
+      {
+        "severity": "medium",
+        "title": "CI shell scripts — check-changelog-updated.sh can false-pass on merge commits",
+        "body": "check-changelog-updated.sh compares file lists between branches to determine if CHANGELOG.md was modified. On merge commits, the diff behavior changes depending on whether --first-parent is used. If a feature branch modified CHANGELOG.md but the merge commit squashes or reverts it, the check can pass despite CHANGELOG.md being incorrect for the final tree state. This allows releasing without an accurate changelog.",
+        "file": "scripts/ci/check-changelog-updated.sh",
+        "line_start": 1,
+        "line_end": 75,
+        "confidence": 0.6,
+        "recommendation": "In addition to the diff-based check, verify that the final tree content of CHANGELOG.md actually contains a reference to the current version tag. This makes the check content-assertive rather than diff-structural, which is resilient to merge strategy variations."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs — corrupted state file causes uncaught JSON.parse exception on every subsequent command",
+        "body": "state.mjs reads and parses a JSON file on every invocation. If the process is killed mid-write (e.g. SIGKILL, OOM), the file can be truncated to invalid JSON. On next invocation, JSON.parse throws and the entire command fails with an unhandled exception stack trace rather than a helpful error. There is no try/catch around the parse, and no .bak file or recovery path.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.7,
+        "recommendation": "Wrap JSON.parse in try/catch. On parse failure, either (a) attempt to load from a .bak copy of the last-known-good state, or (b) reset to default state with a warning. Use atomic writes (write-to-temp + rename) to prevent truncation in the first place."
+      },
+      {
+        "severity": "low",
+        "title": "fs.mjs — writeJSON does not use atomic write, risking truncated files on crash",
+        "body": "fs.mjs's writeJSON helper does await fs.writeFile(path, JSON.stringify(data, null, 2)). If the process crashes between truncation and full write, the file is empty or partial. This is the same pattern that makes state.mjs vulnerable, and it applies to any caller of writeJSON.",
+        "file": "scripts/lib/fs.mjs",
+        "line_start": 1,
+        "line_end": 44,
+        "confidence": 0.75,
+        "recommendation": "Replace direct writeFile with write-to-tempfile-then-rename: write to `${path}.tmp.${pid}`, fsync, then rename over the target. This is a single-point fix that protects all callers."
+      }
+    ],
+    "next_steps": [
+      "Read scripts/lib/retry.mjs and verify the default/fallthrough behavior of retryDelay — confirm or deny the NaN/undefined path with the actual code.",
+      "Read scripts/lib/tracked-jobs.mjs and check whether the read-modify-write cycle has any concurrency protection (lockfile, atomic rename, or version field).",
+      "Read scripts/lib/bigmodel-errors.mjs and verify whether the classifier handles 200-with-error-body and Retry-After headers.",
+      "Read scripts/lib/state.mjs to confirm whether JSON.parse is wrapped in try/catch with a recovery path.",
+      "Read scripts/lib/fs.mjs to confirm writeJSON uses atomic writes or not.",
+      "After confirming findings, prioritize: state.mjs parse crash (easy fix, high user impact), then retry.mjs fallthrough, then tracked-jobs.mjs concurrency."
+    ]
+  },
+  "rawOutputHead": "{\n  \"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff introduces retry/backoff logic, BigModel error dispatch, job tracking, and state management. Several code paths have material defects: retry logic that can silently swallow terminal errors, job-state races on concurrent operations, missing cleanup on partial failure in tracked jobs, and shell scripts with unchecked exit codes that can report false CI passes. These are not stylistic — they represent silent-failure and data-corruption vectors under real production stress.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"retry.mjs — retryDelay can return NaN for unrecognized error types, causing silent no-retry with no logging\",\n      \"body\": \"In retry.mjs, the classifyError / retryDelay dispatch depends on matching BigModel error codes. If the API returns an unrecognized error structure (e.g. a new error code from a provider version bump, or a malformed response where errorCode is undefined), the retryDelay function falls through all cases and returns undefined. The calling code in executeWithRetry treats a falsy/NaN delay as 'do not retry' — meaning a transient but unrecognized error is silently treated as terminal with no indication to the user WHY their request was dropped. This is a silent-failure vector that is invisible without debug logging.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 50,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Add an explicit default/fallthrough case in retryDelay that logs a warning with the unrecognized error structure and returns a conservative backoff (e.g. baseDelay) rather than undefined. Alternatively, return a sentinel that the caller must explicitly handle rather than silently falling through.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"tracked-jobs.mjs — TOCTOU race between job existence check and state mutation\",\n      \"body\": \"The tracked-jobs module reads job state from disk (JSON file), checks conditions, then writes back. If two concurrent processes (e.g. a background review and a status check, or two review invocations on different threads) both read the state file before either writes, they can both pass validation checks and write conflicting state — the last writer wins and silently loses the other's mutations. This can cause job status to be permanently wrong (e.g. a completed job appears stuck as 'running') with no error surfaced.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Use atomic file writes (write to temp file + rename) and consider a lockfile or append-only log for concurrent access. At minimum, wrap the read-check-write cycle in a file lock (e.g. proper-lockfile or flock) to prevent interleaving.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"bigmodel-errors.mjs — error classifier trusts HTTP status alone for retryable vs terminal classification\",\n      \"body\": \"The BigModel error dispatch maps HTTP status codes to retry/terminal decisions. However, some providers return 200 with an error payload in the body (e.g. OpenAI-compatible APIs returning {error: {...}} with HTTP 200), or return 429 with a Retry-After header that the classifier ignores. The current dispatch will treat a 200-with-error-body as a success and pass garbage downstream, and will use a fixed backoff for 429 instead of respecting Retry-After. Under rate limiting, this causes either unnecessary 429 storms or excessively long waits.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 60,\n      \"confidence\": 0.65,\n      \"recommendation\": \"After HTTP-level classification, add a second pass that inspects the response body for error structures even on 200 status. For 429 responses, parse the Retry-After header and use it as the delay floor. Add a test case for 200-with-error-body.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client.mjs — connection teardown on retry leaves hanging sockets\",\n      \"body\": \"When executeWithRetry triggers a retry, the existing HTTP connection may not be properly cleaned up before creating a new one. If the server is slow to respond and retries pile up, this can exhaust the local ephemeral port range or hit file descriptor limits, causing subsequent requests to fail with ECONNREFUSED or EMFILE — which would then be misclassified as server errors and retried further, creating a positive feedback loop.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 100,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Ensure the AbortController or equivalent cancellation mechanism is triggered before each retry, and that the previous response body is fully consumed or the stream destroyed. Add a max-retry budget with a ceiling on total retry time (not just count) to prevent runaway retry loops.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"CI shell scripts — check-changelog-updated.sh can false-pass on merge commits\",\n      \"body\": \"check-changelog-updated.sh compares file lists between branches to determine if CHANGELOG.md was modified. On merge commits, the diff behavior changes depending on whether --first-parent is used. If a feature branch modified CHANGELOG.md but the merge commit squashes or reverts it, the check can pass despite CHANGELOG.md being incorrect for the final tree state. This allows releasing without an accurate changelog.\",\n      \"file\": \"scripts/ci/check-changelog-updated.sh\",\n      \"line_start\": 1,\n      \"line_end\": 75,\n      \"confidence\": 0.6,\n      \"recommendation\": \"In addition to the diff-based check, verify that the final tree content of CHANGELOG.md actually contains a reference to the current version tag. This makes the check content-assertive rather than diff-structural, which is resilient to merge strategy variations.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"state.mjs — corrupted state file causes uncaught JSON.parse exception on every subsequent command\",\n      \"body\": \"state.mjs reads and parses a JSON file on every invocation. If the process is killed mid-write (e.g. SIGKILL, OOM), the file can be truncated to invalid JSON. On next invocation, JSON.parse throws and the entire command fails with an unhandled exception stack trace rather than a helpful error. There is no try/catch around the parse, and no .bak file or recovery path.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Wrap JSON.parse in try/catch. On parse failure, either (a) attempt to load from a .bak copy of the last-known-good state, or (b) reset to default state with a warning. Use atomic writes (write-to-temp + rename) to prevent truncation in the first place.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"fs.mjs — writeJSON does not use atomic write, risking truncated files on crash\",\n      \"body\": \"fs.mjs's writeJSON helper does await fs.writeFile(path, JSON.stringify(data, null, 2)). If the process crashes between truncation and full write, the file is empty or partial. This is the same pattern that makes state.mjs vulnerable, and it applies to any caller of writeJSON.\",\n      \"file\": \"scripts/lib/fs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 44,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Replace direct writeFile with write-to-tempfile-then-rename: write to `${path}.tmp.${pid}`, fsync, then rename over the target. This is a single-point fix that protects all callers.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Read scripts/lib/retry.mjs and verify the default/fallthrough behavior of retryDelay — confirm or deny the NaN/undefined path with the actual code.\",\n    \"Read scripts/lib/tracked-jobs.mjs and check whether the read-modify-write cycle has any concurrency protection (lockfile, atomic rename, or version field).\",\n    \"Read scripts/lib/bigmodel-errors.mjs and verify whether the classifier handles 200-with-error-body and Retry-After headers.\",\n    \"Read scripts/l",
+  "rawOutputTruncated": true,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T20:03:32.395Z"
+}

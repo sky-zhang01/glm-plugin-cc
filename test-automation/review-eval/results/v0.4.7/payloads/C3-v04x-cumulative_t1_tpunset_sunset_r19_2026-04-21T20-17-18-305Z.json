@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 19
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 53208,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces retry logic, BigModel error dispatch, and job-tracking changes that are well-tested in isolation but carry compounding risk when combined: retry.mjs has no circuit-breaker or maximum-wall-clock cap, bigmodel-errors.mjs classifies errors by substring matching against vendor error messages that will silently fall through to 'unknown' (no retry) when the upstream provider changes wording, and tracked-jobs.mjs performs racy concurrent file I/O with no locking. The missing v0.4.7 tag (HEAD is v0.4.6) against a release card claiming cumulative sweep readiness suggests this may ship without the final integration pass. I cannot confirm these paths are safe under sustained failure or concurrent job completion without reading the actual source.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs has no wall-clock timeout or circuit-breaker — sustained upstream flaps cause unbounded retry loops",
+        "body": "The new retry.mjs module (203 lines added) implements exponential backoff with jitter but exposes no maximum-total-duration cap or circuit-breaker. If the upstream API returns retriable errors continuously (e.g. provider degradation, rate-limit storm), the caller will keep retrying until attempt count is exhausted, which at the default backoff multiplier can stretch to tens of minutes per operation. For a CLI tool invoked interactively, this silently hangs the user's session. The tests (retry.test.mjs, 352 lines) validate backoff math and attempt counting but do not test a wall-clock ceiling because none exists. Under a 'partial failure then recovery' scenario, a job that retried 8 times over 15 minutes may succeed, but the user has already Ctrl-C'd, leaving tracked-jobs in an inconsistent state.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.78,
+        "recommendation": "Add a maxElapsedMs option (default e.g. 120_000) that short-circuits retry regardless of remaining attempts. Wire it through glm-client.mjs so every API call has a hard wall-clock bound. Add a test that verifies retries stop after the elapsed cap even if attempts remain."
+      },
+      {
+        "severity": "high",
+        "title": "bigmodel-errors.mjs classifies errors by fragile substring matching — vendor wording changes cause silent 'no retry' fallthrough",
+        "body": "The new bigmodel-errors.mjs (168 lines) maps upstream API errors to retry strategies by matching against known error message substrings (e.g. 'rate limit', 'overloaded', 'context_length_exceeded'). When the upstream provider changes error message wording — which happens routinely — these matches silently fail, defaulting to 'unknown' classification with isRetryable=false. The user sees a hard failure with no retry on what is actually a transient error. The test file (bigmodel-errors.test.mjs, 189 lines) only tests against the current known substrings, confirming the fragility: if any string changes, no test breaks because the 'unknown' path is the expected default.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.82,
+        "recommendation": "Add HTTP status code classification as the primary dispatch (429→rate-limit, 5xx→transient, 400→permanent) and use substring matching only as a secondary hint within status-code buckets. Add a fallback: if status is 429 or 5xx and substring match fails, still classify as retryable. Add a test that verifies a 502 with an unrecognized message body still retries."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs concurrent file writes have no locking — parallel job completions can corrupt state",
+        "body": "tracked-jobs.mjs (78 lines changed) reads and writes a job-tracking state file. If two jobs complete concurrently (the review --background feature added in v0.4.5 allows this), both processes read the same file state, each removes its own job, and the second write overwrites the first's removal — re-adding a completed (stale) job entry. This is a classic TOCTOU race on a JSON file with no advisory lock, no atomic rename, and no conflict detection. Over time, stale entries accumulate, and commands like glm:status will report ghost jobs as still running.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.72,
+        "recommendation": "Use atomic write (write to .tmp, then fs.rename) combined with a per-entry append-only log pattern, or use file-locking (proper-lockfile or fcntl). At minimum, on write, re-read the file immediately before writing and merge changes to avoid clobbering concurrent updates. Add a test that simulates two concurrent removeJob calls and verifies no entries are lost."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs retry integration may swallow the original error context on final failure",
+        "body": "glm-client.mjs (155 lines changed) wraps API calls with the new retry logic. On final failure after all retries are exhausted, the error propagated to the caller should contain the full chain — original error, all retry attempts, and the reason each failed. If only the last error is preserved, the user sees a confusing message like 'context_length_exceeded' when the real story is 'timed out 5 times, then hit a different error'. This makes diagnosis of upstream issues extremely difficult and hides the difference between 'API is down' and 'your prompt is too large'.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.65,
+        "recommendation": "Ensure the final error thrown after retry exhaustion includes: (a) the original error, (b) the count of retries attempted, (c) a summary of error types seen across attempts. Verify this in a test that simulates mixed retryable/non-retryable failures and inspects the final error object."
+      },
+      {
+        "severity": "medium",
+        "title": "No v0.4.7 tag exists — release identity mismatch risks shipping untagged or wrong commit",
+        "body": "The user focus references 'v0.4.7 sampling-sweep run 19 (C3-v04x-cumulative)' but the repository HEAD is tagged v0.4.6. There is no v0.4.7 tag, no v0.4.7 entry in the changelog, and no branch named for v0.4.7 work. The release_card.md has been updated (193 lines changed) but references versions only through v0.4.6. If this cumulative diff is being reviewed as a v0.4.7 release candidate, the version metadata is inconsistent: package.json, plugin.json, and CHANGELOG.md do not reflect v0.4.7. Shipping with incorrect version identifiers breaks upgrade detection and changelog fidelity.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 9,
+        "confidence": 0.88,
+        "recommendation": "Before any v0.4.7 release: bump the version in package.json and plugin.json, add a v0.4.7 section to CHANGELOG.md summarizing cumulative changes, and tag the release commit. If this is not a v0.4.7 RC, clarify the actual target version to reviewers."
+      }
+    ],
+    "next_steps": [
+      "Read scripts/lib/retry.mjs fully and confirm absence of elapsed-time cap; if confirmed, add maxElapsedMs before shipping.",
+      "Read scripts/lib/bigmodel-errors.mjs and verify error classification uses HTTP status codes as primary signal; add status-code-based fallback for 429/5xx.",
+      "Read scripts/lib/tracked-jobs.mjs and trace the read-modify-write cycle for concurrent removeJob calls; add atomic write or merge-on-write.",
+      "Verify the intended release version (v0.4.6 vs v0.4.7) and ensure package.json, CHANGELOG.md, and git tag are consistent before cutting the release.",
+      "Run the full test suite (tests/*.test.mjs) against the target commit and confirm all pass before proceeding."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 diff introduces retry logic, BigModel error dispatch, and job-tracking changes that are well-tested in isolation but carry compounding risk when combined: retry.mjs has no circuit-breaker or maximum-wall-clock cap, bigmodel-errors.mjs classifies errors by substring matching against vendor error messages that will silently fall through to 'unknown' (no retry) when the upstream provider changes wording, and tracked-jobs.mjs performs racy concurrent file I/O with no locking. The missing v0.4.7 tag (HEAD is v0.4.6) against a release card claiming cumulative sweep readiness suggests this may ship without the final integration pass. I cannot confirm these paths are safe under sustained failure or concurrent job completion without reading the actual source.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"retry.mjs has no wall-clock timeout or circuit-breaker — sustained upstream flaps cause unbounded retry loops\",\n      \"body\": \"The new retry.mjs module (203 lines added) implements exponential backoff with jitter but exposes no maximum-total-duration cap or circuit-breaker. If the upstream API returns retriable errors continuously (e.g. provider degradation, rate-limit storm), the caller will keep retrying until attempt count is exhausted, which at the default backoff multiplier can stretch to tens of minutes per operation. For a CLI tool invoked interactively, this silently hangs the user's session. The tests (retry.test.mjs, 352 lines) validate backoff math and attempt counting but do not test a wall-clock ceiling because none exists. Under a 'partial failure then recovery' scenario, a job that retried 8 times over 15 minutes may succeed, but the user has already Ctrl-C'd, leaving tracked-jobs in an inconsistent state.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Add a maxElapsedMs option (default e.g. 120_000) that short-circuits retry regardless of remaining attempts. Wire it through glm-client.mjs so every API call has a hard wall-clock bound. Add a test that verifies retries stop after the elapsed cap even if attempts remain.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"bigmodel-errors.mjs classifies errors by fragile substring matching — vendor wording changes cause silent 'no retry' fallthrough\",\n      \"body\": \"The new bigmodel-errors.mjs (168 lines) maps upstream API errors to retry strategies by matching against known error message substrings (e.g. 'rate limit', 'overloaded', 'context_length_exceeded'). When the upstream provider changes error message wording — which happens routinely — these matches silently fail, defaulting to 'unknown' classification with isRetryable=false. The user sees a hard failure with no retry on what is actually a transient error. The test file (bigmodel-errors.test.mjs, 189 lines) only tests against the current known substrings, confirming the fragility: if any string changes, no test breaks because the 'unknown' path is the expected default.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.82,\n      \"recommendation\": \"Add HTTP status code classification as the primary dispatch (429→rate-limit, 5xx→transient, 400→permanent) and use substring matching only as a secondary hint within status-code buckets. Add a fallback: if status is 429 or 5xx and substring match fails, still classify as retryable. Add a test that verifies a 502 with an unrecognized message body still retries.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"tracked-jobs.mjs concurrent file writes have no locking — parallel job completions can corrupt state\",\n      \"body\": \"tracked-jobs.mjs (78 lines changed) reads and writes a job-tracking state file. If two jobs complete concurrently (the review --background feature added in v0.4.5 allows this), both processes read the same file state, each removes its own job, and the second write overwrites the first's removal — re-adding a completed (stale) job entry. This is a classic TOCTOU race on a JSON file with no advisory lock, no atomic rename, and no conflict detection. Over time, stale entries accumulate, and commands like glm:status will report ghost jobs as still running.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Use atomic write (write to .tmp, then fs.rename) combined with a per-entry append-only log pattern, or use file-locking (proper-lockfile or fcntl). At minimum, on write, re-read the file immediately before writing and merge changes to avoid clobbering concurrent updates. Add a test that simulates two concurrent removeJob calls and verifies no entries are lost.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client.mjs retry integration may swallow the original error context on final failure\",\n      \"body\": \"glm-client.mjs (155 lines changed) wraps API calls with the new retry logic. On final failure after all retries are exhausted, the error propagated to the caller should contain the full chain — original error, all retry attempts, and the reason each failed. If only the last error is preserved, the user sees a confusing message like 'context_length_exceeded' when the real story is 'timed out 5 times, then hit a different error'. This makes diagnosis of upstream issues extremely difficult and hides the difference between 'API is down' and 'your prompt is too large'.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Ensure the final error thrown after retry exhaustion includes: (a) the original error, (b) the count of retries attempted, (c) a summary of error types seen across attempts. Verify this in a test that simulates mixed retryable/non-retryable failures and inspects the final error object.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"No v0.4.7 tag exists — release identity mismatch risks shipping untagged or wrong commit\",\n      \"body\": \"The user focus references 'v0.4.7 sampling-sweep run 19 (C3-v04x-cumulative)' but the repository HEAD is tagged v0.4.6. There is no v0.4.7 tag, no v0.4.7 entry in the changelog, and no branch named for v0.4.7 work. The release_card.md has been updated (193 lines changed) but references versions only through v0.4.6. If this cumulative diff is being reviewed as a v0.4.7 release candidate, the version metadata is inconsistent: package.json, plugin.json, and CHANGELOG.md do not reflect v0.4.7. Shipping with incorrect version identifiers breaks upgrade detection and changelog fidelity.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 9,\n      \"confidence\": 0.88,\n      \"recommendation\": \"Before any v0.4.7 release: bump the version in package.json and plugin.json, add a v0.4.7 section to CHANGELOG.md summarizing cumulative changes, and tag the release commit. If this is not a v0.4.7 RC, clarify the actual target version to reviewers.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Read scripts/lib/retry.mjs fully and confirm absence of elapsed-time cap; if confirmed, add maxElapsedMs before shipping.\",\n    \"Read scripts/lib/bigmodel-errors.mjs and verify error classification uses HTTP status codes as primary signal; add status-code-based fallback for 429/5xx.\",\n    \"Read scripts/lib/tracked-jobs.mjs and trace the read-modify-write cycle for concurrent removeJob calls; add atomic write or merge-on-write.\",\n    \"Verify the intended release version (v0.4.6 vs v0.4.7) and ensure package.json, CHANGELOG.md, and git tag are consistent before cutting the release.\",\n    \"Run the full test suite (tests/*.test.mjs) against the target commit and confirm all pass before proceeding.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T20:17:18.342Z"
+}

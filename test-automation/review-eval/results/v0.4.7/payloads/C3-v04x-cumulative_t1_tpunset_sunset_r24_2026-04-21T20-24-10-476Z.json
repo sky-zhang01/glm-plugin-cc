@@ -1,0 +1,91 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 24
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 44609,
+    "error_code": ""
+  },
+  "parsed": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces significant new infrastructure (retry logic, BigModel error dispatch, job tracking, background execution) but several paths have silent-failure or state-corruption risks. The most concerning is the retry module's interaction with tracked-jobs state: a partial retry cycle can leave orphaned job state that corrupts subsequent operations. Additionally, glm-client error handling has a path where non-JSON responses silently resolve to undefined rather than throwing, which would cascade as cryptic downstream failures.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry module lacks idempotency guard — re-entrancy on partial retry corrupts tracked-jobs state",
+        "body": "scripts/lib/retry.mjs is new (203 lines) and scripts/lib/tracked-jobs.mjs was substantially modified (+78/-0). If a retry cycle is interrupted (process signal, timeout) after the tracked-job state is updated but before the operation completes, the next invocation will see stale/inconsistent job state. There is no evidence of a transactional guard or cleanup-on-failure path in tracked-jobs.mjs. Under the --background execution mode added in v0.4.5 (commands/review.md), this race window widens because the process can be killed externally while retry logic is mid-flight. The retry.test.mjs file (352 lines) tests retry behavior but the tests visible in the diff stat don't appear to cover concurrent/interrupted retry scenarios against real tracked-jobs state.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Add a guard in tracked-jobs that detects and recovers from orphaned/in-progress state on startup (e.g., a staleness TTL or a lock file with PID check). Add an explicit test case for retry interruption mid-flight verifying state remains consistent."
+      },
+      {
+        "severity": "high",
+        "title": "glm-client non-JSON response silently resolves to undefined instead of throwing",
+        "body": "scripts/lib/glm-client.mjs was modified (+155 lines). In HTTP client code handling API responses, if the upstream returns a non-200 status with a non-JSON body (e.g., HTML error page from a proxy/gateway), the JSON parse will throw but the catch path may return undefined or an empty object rather than a structured error. Combined with the BigModel error dispatch (scripts/lib/bigmodel-errors.mjs, 168 lines new), this means certain failure modes (502 from reverse proxy, rate-limit HTML pages) will bypass the error classification entirely and manifest as 'cannot read property X of undefined' far downstream in render.mjs or the companion script, making diagnosis extremely difficult.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.68,
+        "recommendation": "Ensure glm-client.mjs wraps all response parsing in a try/catch that produces a structured error object (with status code, raw body snippet, and a classify-able error code) rather than letting undefined propagate. Add a unit test that feeds a non-JSON 502 response and asserts a thrown/returned error, not undefined."
+      },
+      {
+        "severity": "medium",
+        "title": "fs.mjs write operations lack atomic-write (write-then-rename) pattern — crash during write corrupts state file",
+        "body": "scripts/lib/fs.mjs was modified (+44 lines). State persistence (scripts/lib/state.mjs, also modified +32 lines) appears to write JSON directly to the target path. If the process crashes or the system loses power mid-write, the state file will be truncated/corrupt. On next startup, JSON.parse will throw on the corrupt file. There is no visible recovery path (backup file, atomic rename, or try-parse-with-fallback). This affects all persisted state including job tracking and configuration.",
+        "file": "scripts/lib/fs.mjs",
+        "line_start": 1,
+        "line_end": 44,
+        "confidence": 0.65,
+        "recommendation": "Adopt write-then-rename (write to .tmp file, fs.rename to final path) for all state writes in fs.mjs. Add a fallback in state.mjs load that handles corrupt JSON gracefully (reset to defaults with a warning, or load from a .bak file)."
+      },
+      {
+        "severity": "medium",
+        "title": "Background execution mode (--wait/--background) has no timeout or watchdog — hung processes leak indefinitely",
+        "body": "commands/review.md adds --wait/--background execution-mode flags and scripts/lib/job-control.mjs was modified (+20 lines). A background review job that hangs (e.g., upstream API never responds, TCP connection stalls) has no visible timeout or watchdog mechanism. The --wait flag presumably polls for completion, but there is no max-wait duration visible in the diff. This means a user running review with --wait could block indefinitely with no feedback, and a --background job could consume resources forever. Under the sampling-sweep context (C3-v04x-cumulative), multiple hung background jobs would accumulate.",
+        "file": "scripts/lib/job-control.mjs",
+        "line_start": 1,
+        "line_end": 20,
+        "confidence": 0.6,
+        "recommendation": "Add a configurable max-wait timeout (with a sane default, e.g., 10 minutes) to the --wait polling loop. For --background jobs, record a deadline in tracked-jobs state and add a cleanup/reap step that marks timed-out jobs as failed."
+      },
+      {
+        "severity": "medium",
+        "title": "Missing test coverage for bigmodel-errors retry interaction with actual API error codes",
+        "body": "scripts/lib/bigmodel-errors.mjs is new (168 lines) with a dedicated test file (tests/bigmodel-errors.test.mjs, 189 lines). However, the integration between bigmodel-errors classification and retry.mjs retry-strategy selection is untested at the integration level. If bigmodel-errors classifies a transient error as non-retryable (or vice versa), the retry module will either hammer the API or give up prematurely. The error code mapping in bigmodel-errors.mjs appears to be manually curated against BigModel API docs — any drift between the documented codes and actual API responses will cause silent misclassification.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.55,
+        "recommendation": "Add an integration test that feeds realistic HTTP error responses (with actual status codes and response bodies from BigModel docs) through the full classify→retry→backoff pipeline and asserts correct retry/no-retry decisions. Consider logging the classification result at debug level for observability."
+      }
+    ],
+    "next_steps": [
+      "Inspect scripts/lib/glm-client.mjs response handling to confirm non-JSON responses produce structured errors rather than undefined — this is the highest-confidence failure path.",
+      "Review scripts/lib/retry.mjs and scripts/lib/tracked-jobs.mjs for crash-safety: trace what happens if SIGTERM arrives between a retry attempt and the tracked-jobs state update.",
+      "Check scripts/lib/fs.mjs write paths for atomic-write patterns; if missing, assess whether state corruption on crash is recoverable by the current load logic in state.mjs.",
+      "Verify job-control.mjs has a timeout/watchdog for --wait and --background modes before enabling in cumulative sweep runs.",
+      "Run the existing test suite (tests/*.test.mjs) against the current tree to confirm no regressions before proceeding with v0.4.7 sweep."
+    ]
+  },
+  "rawOutputHead": "{\n  \"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 diff introduces significant new infrastructure (retry logic, BigModel error dispatch, job tracking, background execution) but several paths have silent-failure or state-corruption risks. The most concerning is the retry module's interaction with tracked-jobs state: a partial retry cycle can leave orphaned job state that corrupts subsequent operations. Additionally, glm-client error handling has a path where non-JSON responses silently resolve to undefined rather than throwing, which would cascade as cryptic downstream failures.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Retry module lacks idempotency guard — re-entrancy on partial retry corrupts tracked-jobs state\",\n      \"body\": \"scripts/lib/retry.mjs is new (203 lines) and scripts/lib/tracked-jobs.mjs was substantially modified (+78/-0). If a retry cycle is interrupted (process signal, timeout) after the tracked-job state is updated but before the operation completes, the next invocation will see stale/inconsistent job state. There is no evidence of a transactional guard or cleanup-on-failure path in tracked-jobs.mjs. Under the --background execution mode added in v0.4.5 (commands/review.md), this race window widens because the process can be killed externally while retry logic is mid-flight. The retry.test.mjs file (352 lines) tests retry behavior but the tests visible in the diff stat don't appear to cover concurrent/interrupted retry scenarios against real tracked-jobs state.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Add a guard in tracked-jobs that detects and recovers from orphaned/in-progress state on startup (e.g., a staleness TTL or a lock file with PID check). Add an explicit test case for retry interruption mid-flight verifying state remains consistent.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"glm-client non-JSON response silently resolves to undefined instead of throwing\",\n      \"body\": \"scripts/lib/glm-client.mjs was modified (+155 lines). In HTTP client code handling API responses, if the upstream returns a non-200 status with a non-JSON body (e.g., HTML error page from a proxy/gateway), the JSON parse will throw but the catch path may return undefined or an empty object rather than a structured error. Combined with the BigModel error dispatch (scripts/lib/bigmodel-errors.mjs, 168 lines new), this means certain failure modes (502 from reverse proxy, rate-limit HTML pages) will bypass the error classification entirely and manifest as 'cannot read property X of undefined' far downstream in render.mjs or the companion script, making diagnosis extremely difficult.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Ensure glm-client.mjs wraps all response parsing in a try/catch that produces a structured error object (with status code, raw body snippet, and a classify-able error code) rather than letting undefined propagate. Add a unit test that feeds a non-JSON 502 response and asserts a thrown/returned error, not undefined.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"fs.mjs write operations lack atomic-write (write-then-rename) pattern — crash during write corrupts state file\",\n      \"body\": \"scripts/lib/fs.mjs was modified (+44 lines). State persistence (scripts/lib/state.mjs, also modified +32 lines) appears to write JSON directly to the target path. If the process crashes or the system loses power mid-write, the state file will be truncated/corrupt. On next startup, JSON.parse will throw on the corrupt file. There is no visible recovery path (backup file, atomic rename, or try-parse-with-fallback). This affects all persisted state including job tracking and configuration.\",\n      \"file\": \"scripts/lib/fs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 44,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Adopt write-then-rename (write to .tmp file, fs.rename to final path) for all state writes in fs.mjs. Add a fallback in state.mjs load that handles corrupt JSON gracefully (reset to defaults with a warning, or load from a .bak file).\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Background execution mode (--wait/--background) has no timeout or watchdog — hung processes leak indefinitely\",\n      \"body\": \"commands/review.md adds --wait/--background execution-mode flags and scripts/lib/job-control.mjs was modified (+20 lines). A background review job that hangs (e.g., upstream API never responds, TCP connection stalls) has no visible timeout or watchdog mechanism. The --wait flag presumably polls for completion, but there is no max-wait duration visible in the diff. This means a user running review with --wait could block indefinitely with no feedback, and a --background job could consume resources forever. Under the sampling-sweep context (C3-v04x-cumulative), multiple hung background jobs would accumulate.\",\n      \"file\": \"scripts/lib/job-control.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 20,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Add a configurable max-wait timeout (with a sane default, e.g., 10 minutes) to the --wait polling loop. For --background jobs, record a deadline in tracked-jobs state and add a cleanup/reap step that marks timed-out jobs as failed.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Missing test coverage for bigmodel-errors retry interaction with actual API error codes\",\n      \"body\": \"scripts/lib/bigmodel-errors.mjs is new (168 lines) with a dedicated test file (tests/bigmodel-errors.test.mjs, 189 lines). However, the integration between bigmodel-errors classification and retry.mjs retry-strategy selection is untested at the integration level. If bigmodel-errors classifies a transient error as non-retryable (or vice versa), the retry module will either hammer the API or give up prematurely. The error code mapping in bigmodel-errors.mjs appears to be manually curated against BigModel API docs — any drift between the documented codes and actual API responses will cause silent misclassification.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Add an integration test that feeds realistic HTTP error responses (with actual status codes and response bodies from BigModel docs) through the full classify→retry→backoff pipeline and asserts correct retry/no-retry decisions. Consider logging the classification result at debug level for observability.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect scripts/lib/glm-client.mjs response handling to confirm non-JSON responses produce structured errors rather than undefined — this is the highest-confidence failure path.\",\n    \"Review scripts/lib/retry.mjs and scripts/lib/tracked-jobs.mjs for crash-safety: trace what happens if SIGTERM arrives between a retry attempt and the tracked-jobs state update.\",\n    \"Check scripts/lib/fs.mjs write paths for atomic-write patterns; if missing, assess whether state corruption on crash is recoverable by the current load logic in state.mjs.\",\n    \"Verify job-control.mjs has a timeout/watchdog for --wait and --background modes before enabling in cumulative sweep runs.\",\n    \"Run the existing test suite (tests/*.test.mjs) against the current tree to confirm no regressions before proceeding with v0.4.7 sweep.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T20:24:10.515Z"
+}

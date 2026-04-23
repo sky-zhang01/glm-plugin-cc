@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 68
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 37004,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces critical retry/backoff logic, job tracking, BigModel error dispatch, and state management changes across multiple new modules. While test coverage is broad, several high-risk areas warrant blocking attention: (1) retry.mjs has no upper-bound cap verification on total wait time, risking effectively infinite blocking; (2) tracked-jobs state mutations lack atomicity guarantees under concurrent CLI invocations; (3) bigmodel-errors.mjs pattern-matching on error messages is fragile and can silently misclassify API changes as non-retryable; (4) the deleted process.mjs (67 lines removed) may leave dangling imports or behavioral regressions not caught by existing tests.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs total wait time may be effectively unbounded in practice",
+        "body": "The retry module (203 lines added) implements exponential backoff with jitter but the diff context shows no hard ceiling on cumulative wait time. If the maxAttempts configuration is high or unbounded, a degraded dependency can cause the CLI to hang for tens of minutes with no user-visible progress or escape hatch. This is a silent failure: the user sees the process appear frozen. No test evidence was found proving a maximum-total-wait invariant is enforced. Under the sampling-sweep focus (C3-v04x-cumulative), this is the most likely user-visible degradation.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Add an explicit maxTotalWaitMs parameter with a sane default (e.g. 5 minutes). Fail fast with a clear error message when the budget is exhausted. Add a unit test that proves retry terminates within the budget regardless of attempt count."
+      },
+      {
+        "severity": "high",
+        "title": "tracked-jobs.mjs concurrent writes to shared state file risk corruption",
+        "body": "The tracked-jobs module (78 lines changed) reads and writes job state to a filesystem location. If two CLI processes run concurrently (e.g. two terminals invoking review), the read-modify-write cycle on the state file has no locking mechanism. This can produce corrupted JSON state (truncated or merged writes), causing subsequent commands to crash or silently lose track of running jobs. The existing test suite (job-render.test.mjs) appears to test rendering, not concurrent mutation safety.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.68,
+        "recommendation": "Implement advisory file locking (e.g. lockfile with stale-lock timeout) around state reads and writes. Add a test that runs two concurrent write operations and verifies the final state is valid and consistent."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs classifies errors by string pattern matching on API error messages — fragile to upstream API changes",
+        "body": "The new bigmodel-errors.mjs (168 lines) dispatches retry vs. fail decisions based on pattern matching against error messages or codes from the BigModel API. If the upstream API changes error wording or adds new error codes, errors may silently fall into the wrong category (e.g. a transient rate-limit error treated as permanent, or vice versa). A permanent error treated as retryable wastes user time; a transient error treated as permanent fails the operation immediately. There is no fallback logging or metric that would surface misclassification in production.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.65,
+        "recommendation": "Add an explicit 'unknown' classification for errors that match no known pattern, and log the unmapped error code/message at warning level. Consider adding a configurable 'treat-unknown-as-retryable' flag so users can self-correct without a code change. Add tests with garbled/unexpected error payloads."
+      },
+      {
+        "severity": "medium",
+        "title": "process.mjs deletion (67 lines removed) may leave behavioral gaps not covered by tests",
+        "body": "scripts/lib/process.mjs was entirely removed (67 lines deleted). If any surviving code paths depended on utilities from this module (process spawning, signal handling, cleanup), the behavioral regression would manifest as silent failures — processes not cleaned up on SIGINT/SIGTERM, or orphaned child processes. The check-imports.mjs script (5 lines changed) may catch dangling imports, but does not verify behavioral equivalence of replacement code.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.55,
+        "recommendation": "Verify that every function exported from the old process.mjs has a verified replacement in the remaining codebase. Add an integration test that sends SIGINT/SIGTERM to the CLI during a long-running operation and asserts clean shutdown with no orphan processes."
+      }
+    ],
+    "next_steps": [
+      "Inspect retry.mjs in full to confirm whether a total-wait ceiling exists and is tested",
+      "Inspect tracked-jobs.mjs for any file-locking or atomic-write mechanism",
+      "Audit bigmodel-errors.mjs for an exhaustive match with fallback classification",
+      "grep -r 'from.*process\\.mjs\\|require.*process' to verify no dangling imports after process.mjs deletion",
+      "Run the full test suite against the cumulative diff to confirm no regressions before shipping"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 cumulative diff introduces critical retry/backoff logic, job tracking, BigModel error dispatch, and state management changes across multiple new modules. While test coverage is broad, several high-risk areas warrant blocking attention: (1) retry.mjs has no upper-bound cap verification on total wait time, risking effectively infinite blocking; (2) tracked-jobs state mutations lack atomicity guarantees under concurrent CLI invocations; (3) bigmodel-errors.mjs pattern-matching on error messages is fragile and can silently misclassify API changes as non-retryable; (4) the deleted process.mjs (67 lines removed) may leave dangling imports or behavioral regressions not caught by existing tests.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs total wait time may be effectively unbounded in practice\",\"body\":\"The retry module (203 lines added) implements exponential backoff with jitter but the diff context shows no hard ceiling on cumulative wait time. If the maxAttempts configuration is high or unbounded, a degraded dependency can cause the CLI to hang for tens of minutes with no user-visible progress or escape hatch. This is a silent failure: the user sees the process appear frozen. No test evidence was found proving a maximum-total-wait invariant is enforced. Under the sampling-sweep focus (C3-v04x-cumulative), this is the most likely user-visible degradation.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.72,\"recommendation\":\"Add an explicit maxTotalWaitMs parameter with a sane default (e.g. 5 minutes). Fail fast with a clear error message when the budget is exhausted. Add a unit test that proves retry terminates within the budget regardless of attempt count.\"},{\"severity\":\"high\",\"title\":\"tracked-jobs.mjs concurrent writes to shared state file risk corruption\",\"body\":\"The tracked-jobs module (78 lines changed) reads and writes job state to a filesystem location. If two CLI processes run concurrently (e.g. two terminals invoking review), the read-modify-write cycle on the state file has no locking mechanism. This can produce corrupted JSON state (truncated or merged writes), causing subsequent commands to crash or silently lose track of running jobs. The existing test suite (job-render.test.mjs) appears to test rendering, not concurrent mutation safety.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.68,\"recommendation\":\"Implement advisory file locking (e.g. lockfile with stale-lock timeout) around state reads and writes. Add a test that runs two concurrent write operations and verifies the final state is valid and consistent.\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors.mjs classifies errors by string pattern matching on API error messages — fragile to upstream API changes\",\"body\":\"The new bigmodel-errors.mjs (168 lines) dispatches retry vs. fail decisions based on pattern matching against error messages or codes from the BigModel API. If the upstream API changes error wording or adds new error codes, errors may silently fall into the wrong category (e.g. a transient rate-limit error treated as permanent, or vice versa). A permanent error treated as retryable wastes user time; a transient error treated as permanent fails the operation immediately. There is no fallback logging or metric that would surface misclassification in production.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.65,\"recommendation\":\"Add an explicit 'unknown' classification for errors that match no known pattern, and log the unmapped error code/message at warning level. Consider adding a configurable 'treat-unknown-as-retryable' flag so users can self-correct without a code change. Add tests with garbled/unexpected error payloads.\"},{\"severity\":\"medium\",\"title\":\"process.mjs deletion (67 lines removed) may leave behavioral gaps not covered by tests\",\"body\":\"scripts/lib/process.mjs was entirely removed (67 lines deleted). If any surviving code paths depended on utilities from this module (process spawning, signal handling, cleanup), the behavioral regression would manifest as silent failures — processes not cleaned up on SIGINT/SIGTERM, or orphaned child processes. The check-imports.mjs script (5 lines changed) may catch dangling imports, but does not verify behavioral equivalence of replacement code.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":67,\"confidence\":0.55,\"recommendation\":\"Verify that every function exported from the old process.mjs has a verified replacement in the remaining codebase. Add an integration test that sends SIGINT/SIGTERM to the CLI during a long-running operation and asserts clean shutdown with no orphan processes.\"}],\"next_steps\":[\"Inspect retry.mjs in full to confirm whether a total-wait ceiling exists and is tested\",\"Inspect tracked-jobs.mjs for any file-locking or atomic-write mechanism\",\"Audit bigmodel-errors.mjs for an exhaustive match with fallback classification\",\"grep -r 'from.*process\\\\.mjs\\\\|require.*process' to verify no dangling imports after process.mjs deletion\",\"Run the full test suite against the cumulative diff to confirm no regressions before shipping\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T18:10:03.810Z"
+}

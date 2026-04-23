@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 40
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 135103,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff spans 84 files with 6600+ insertions. The most actionable risk is the deletion of scripts/lib/process.mjs (67 lines removed) alongside heavy modifications to consumer modules. If any import path—static or dynamic—still references the deleted module, it will produce a runtime ERR_MODULE_NOT_FOUND that only surfaces when the affected code path is exercised. New retry and error-dispatch modules (retry.mjs, bigmodel-errors.mjs) are critical for resilience but their integration with the API client and job lifecycle has no visible integration-level test coverage against real failure modes.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Deleted process.mjs may leave dangling imports in consumer modules",
+        "body": "scripts/lib/process.mjs (67 lines) was removed entirely. The diff simultaneously modifies render.mjs, glm-companion.mjs, state.mjs, and job-control.mjs—all plausible consumers of process.mjs. If any of these (or a command file, hook, or test) still contains a static or dynamic import of './process.mjs' or '../lib/process.mjs', the import will fail at runtime with ERR_MODULE_NOT_FOUND. This class of failure is invisible to CI unless the specific code path is exercised during test, and it produces a hard crash with no fallback. The risk is amplified because dynamic imports or lazy-loaded command handlers would only fail in production when the user invokes the affected subcommand.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.72,
+        "recommendation": "Run `grep -rn 'process\\.mjs' scripts/ commands/ tests/ hooks/` from the repository root to confirm zero remaining references. If any are found, either redirect the import to the replacement module or restore process.mjs as a re-export shim. Add an import-resolution CI check (e.g., `node --check` or a static import graph validator) to prevent regressions."
+      },
+      {
+        "severity": "high",
+        "title": "Retry semantics in new retry.mjs may mask or compound partial failures",
+        "body": "scripts/lib/retry.mjs is a new 203-line module that governs retry/backoff behavior for BigModel API calls. The companion glm-client.mjs (155 lines changed) consumes it. If retry.mjs does not correctly distinguish retriable errors (rate-limit, timeout, 5xx) from non-retriable errors (4xx client errors, auth failures), it will either: (a) silently swallow permanent failures by retrying indefinitely or until max-count, delaying user-visible errors; or (b) fail to retry transient failures, causing dropped operations. The bigmodel-errors.mjs module (168 lines) classifies errors and drives retry decisions—if classification is wrong, retry behavior is wrong. Tests exist (352 + 189 lines) but they are unit-level and likely use mocked errors; they cannot validate whether the retry contract holds against real API error responses, network timeouts, or concurrent request interleaving.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.65,
+        "recommendation": "Verify retry.mjs: (1) has a hard upper bound on total retry time and count; (2) respects Retry-After headers; (3) uses jitter on backoff to avoid thundering herd; (4) propagates AbortSignal for cancellation; (5) never retries non-idempotent write operations without explicit opt-in. For bigmodel-errors.mjs, audit every error classification branch against the actual BigModel API error catalog. Add an integration test that simulates real error responses to confirm retry/no-retry behavior."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs rewrite may silently change request/response contract",
+        "body": "scripts/lib/glm-client.mjs has 155 lines changed. As the primary API client, any change to request serialization, header handling, auth token propagation, or response parsing can cause silent data corruption, authentication failures, or truncated responses. If error handling was refactored to use the new bigmodel-errors.mjs dispatcher, previously-thrown errors may now be caught and retried (or vice versa), changing the observable behavior of any caller that expected a specific error shape. The result-propagation.test.mjs (69 lines) suggests some coverage, but 69 lines is thin for a client rewrite affecting all API interactions.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.6,
+        "recommendation": "Diff the old and new glm-client.mjs response/error handling paths explicitly. Confirm that every error type previously thrown is still thrown (or intentionally mapped) and that no new error-swallowing catch blocks were introduced. Add contract tests that assert error types and message shapes are preserved across the refactor."
+      },
+      {
+        "severity": "medium",
+        "title": "State and tracked-jobs modules changed without evidence of concurrency safety",
+        "body": "scripts/lib/state.mjs (32 lines changed) and scripts/lib/tracked-jobs.mjs (78 lines changed) manage persistent job state. If multiple concurrent processes (e.g., parallel review invocations) access the same state files, there is no visible locking mechanism in the diff stat. File-based state without advisory locking is vulnerable to TOCTOU races that can corrupt job state, lose track of running jobs, or report stale status. This is especially relevant with the new --background execution mode (from d573807) which explicitly enables concurrent operation.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.55,
+        "recommendation": "Audit state.mjs and tracked-jobs.mjs for file read-modify-write sequences that execute without atomic file operations (e.g., writeFile without rename-swap, or JSON parse/modify/stringify without locking). If the --background flag enables parallel access, add either file-level locking (proper-lockfile, flock) or switch to an atomic store (SQLite, atomically-renamed temp files). Add a concurrency test that runs two simultaneous state mutations and asserts final state is consistent."
+      }
+    ],
+    "next_steps": [
+      "Run `grep -rn 'process\\.mjs' scripts/ commands/ tests/ hooks/` and verify zero hits—this is a hard blocker if any references remain.",
+      "Audit retry.mjs for: max retry bounds, Retry-After handling, jitter, AbortSignal propagation, and idempotency guards.",
+      "Diff the old and new glm-client.mjs to confirm error type/shapes are preserved and no new error-swallowing paths exist.",
+      "Verify state.mjs and tracked-jobs.mjs use atomic file writes (rename-swap) when --background mode enables concurrent access.",
+      "Consider a smoke test that exercises the full happy-path and one transient-failure scenario end-to-end before tagging v0.4.7."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 diff spans 84 files with 6600+ insertions. The most actionable risk is the deletion of scripts/lib/process.mjs (67 lines removed) alongside heavy modifications to consumer modules. If any import path—static or dynamic—still references the deleted module, it will produce a runtime ERR_MODULE_NOT_FOUND that only surfaces when the affected code path is exercised. New retry and error-dispatch modules (retry.mjs, bigmodel-errors.mjs) are critical for resilience but their integration with the API client and job lifecycle has no visible integration-level test coverage against real failure modes.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Deleted process.mjs may leave dangling imports in consumer modules\",\n      \"body\": \"scripts/lib/process.mjs (67 lines) was removed entirely. The diff simultaneously modifies render.mjs, glm-companion.mjs, state.mjs, and job-control.mjs—all plausible consumers of process.mjs. If any of these (or a command file, hook, or test) still contains a static or dynamic import of './process.mjs' or '../lib/process.mjs', the import will fail at runtime with ERR_MODULE_NOT_FOUND. This class of failure is invisible to CI unless the specific code path is exercised during test, and it produces a hard crash with no fallback. The risk is amplified because dynamic imports or lazy-loaded command handlers would only fail in production when the user invokes the affected subcommand.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Run `grep -rn 'process\\\\.mjs' scripts/ commands/ tests/ hooks/` from the repository root to confirm zero remaining references. If any are found, either redirect the import to the replacement module or restore process.mjs as a re-export shim. Add an import-resolution CI check (e.g., `node --check` or a static import graph validator) to prevent regressions.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"Retry semantics in new retry.mjs may mask or compound partial failures\",\n      \"body\": \"scripts/lib/retry.mjs is a new 203-line module that governs retry/backoff behavior for BigModel API calls. The companion glm-client.mjs (155 lines changed) consumes it. If retry.mjs does not correctly distinguish retriable errors (rate-limit, timeout, 5xx) from non-retriable errors (4xx client errors, auth failures), it will either: (a) silently swallow permanent failures by retrying indefinitely or until max-count, delaying user-visible errors; or (b) fail to retry transient failures, causing dropped operations. The bigmodel-errors.mjs module (168 lines) classifies errors and drives retry decisions—if classification is wrong, retry behavior is wrong. Tests exist (352 + 189 lines) but they are unit-level and likely use mocked errors; they cannot validate whether the retry contract holds against real API error responses, network timeouts, or concurrent request interleaving.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Verify retry.mjs: (1) has a hard upper bound on total retry time and count; (2) respects Retry-After headers; (3) uses jitter on backoff to avoid thundering herd; (4) propagates AbortSignal for cancellation; (5) never retries non-idempotent write operations without explicit opt-in. For bigmodel-errors.mjs, audit every error classification branch against the actual BigModel API error catalog. Add an integration test that simulates real error responses to confirm retry/no-retry behavior.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client.mjs rewrite may silently change request/response contract\",\n      \"body\": \"scripts/lib/glm-client.mjs has 155 lines changed. As the primary API client, any change to request serialization, header handling, auth token propagation, or response parsing can cause silent data corruption, authentication failures, or truncated responses. If error handling was refactored to use the new bigmodel-errors.mjs dispatcher, previously-thrown errors may now be caught and retried (or vice versa), changing the observable behavior of any caller that expected a specific error shape. The result-propagation.test.mjs (69 lines) suggests some coverage, but 69 lines is thin for a client rewrite affecting all API interactions.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Diff the old and new glm-client.mjs response/error handling paths explicitly. Confirm that every error type previously thrown is still thrown (or intentionally mapped) and that no new error-swallowing catch blocks were introduced. Add contract tests that assert error types and message shapes are preserved across the refactor.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"State and tracked-jobs modules changed without evidence of concurrency safety\",\n      \"body\": \"scripts/lib/state.mjs (32 lines changed) and scripts/lib/tracked-jobs.mjs (78 lines changed) manage persistent job state. If multiple concurrent processes (e.g., parallel review invocations) access the same state files, there is no visible locking mechanism in the diff stat. File-based state without advisory locking is vulnerable to TOCTOU races that can corrupt job state, lose track of running jobs, or report stale status. This is especially relevant with the new --background execution mode (from d573807) which explicitly enables concurrent operation.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Audit state.mjs and tracked-jobs.mjs for file read-modify-write sequences that execute without atomic file operations (e.g., writeFile without rename-swap, or JSON parse/modify/stringify without locking). If the --background flag enables parallel access, add either file-level locking (proper-lockfile, flock) or switch to an atomic store (SQLite, atomically-renamed temp files). Add a concurrency test that runs two simultaneous state mutations and asserts final state is consistent.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `grep -rn 'process\\\\.mjs' scripts/ commands/ tests/ hooks/` and verify zero hits—this is a hard blocker if any references remain.\",\n    \"Audit retry.mjs for: max retry bounds, Retry-After handling, jitter, AbortSignal propagation, and idempotency guards.\",\n    \"Diff the old and new glm-client.mjs to confirm error type/shapes are preserved and no new error-swallowing paths exist.\",\n    \"Verify state.mjs and tracked-jobs.mjs use atomic file writes (rename-swap) when --background mode enables concurrent access.\",\n    \"Consider a smoke test that exercises the full happy-path and one transient-failure scenario end-to-end before tagging v0.4.7.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T20:47:38.913Z"
+}

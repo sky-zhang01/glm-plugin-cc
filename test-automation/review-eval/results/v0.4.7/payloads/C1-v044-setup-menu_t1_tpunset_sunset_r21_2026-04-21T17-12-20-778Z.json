@@ -1,0 +1,36 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 21
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 11485,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "approve",
+    "summary": "This commit is a low-risk configuration/documentation change: it renames an npm scope, updates plugin metadata, adds a CHANGELOG entry, modifies the /glm:setup command prompt to include an interactive menu when already configured, and updates the release card. No executable logic, auth boundaries, data mutations, or runtime code paths are affected. The changes are confined to JSON metadata files, markdown documentation, and a markdown-based command template. No material adversarial finding can be sustained from the diff.",
+    "findings": [],
+    "next_steps": [
+      "Verify that the npm scope rename in package.json and plugin.json doesn't break existing installations referencing the old scope name.",
+      "Confirm the interactive menu in commands/setup.md renders correctly in the target Claude plugin environment, since markdown-based command files may have platform-specific behavior."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"approve\",\n  \"summary\": \"This commit is a low-risk configuration/documentation change: it renames an npm scope, updates plugin metadata, adds a CHANGELOG entry, modifies the /glm:setup command prompt to include an interactive menu when already configured, and updates the release card. No executable logic, auth boundaries, data mutations, or runtime code paths are affected. The changes are confined to JSON metadata files, markdown documentation, and a markdown-based command template. No material adversarial finding can be sustained from the diff.\",\n  \"findings\": [],\n  \"next_steps\": [\n    \"Verify that the npm scope rename in package.json and plugin.json doesn't break existing installations referencing the old scope name.\",\n    \"Confirm the interactive menu in commands/setup.md renders correctly in the target Claude plugin environment, since markdown-based command files may have platform-specific behavior.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T17:12:20.779Z"
+}

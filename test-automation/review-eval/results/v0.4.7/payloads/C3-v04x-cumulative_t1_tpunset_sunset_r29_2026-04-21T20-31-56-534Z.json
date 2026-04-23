@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 29
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 77222,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.x cumulative diff introduces new retry, error-dispatch, and client infrastructure (retry.mjs, bigmodel-errors.mjs, glm-client.mjs) but leaves the primary API client glm-client.mjs with 155 lines of changes and zero dedicated test coverage. The job-tracking subsystem (tracked-jobs.mjs, job-control.mjs) is similarly untested despite handling persistent state that is vulnerable to partial-write corruption and race conditions. These gaps sit directly on the happy-path boundary between user requests and the external BigModel API — exactly where silent failures and credential mis-handling are most dangerous and hardest to detect in production.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "glm-client.mjs has no dedicated test file despite 155 lines of changes",
+        "body": "The primary BigModel API client (scripts/lib/glm-client.mjs) was substantially modified — 155 lines changed — yet no corresponding glm-client.test.mjs exists in the test directory. This client sits at the trust boundary between the plugin and an external API. It handles auth tokens, request dispatch, and response parsing. Without direct test coverage, misrouted auth headers, silently swallowed API errors, or incorrect retry delegation (via the new retry.mjs + bigmodel-errors.mjs pipeline) would only surface at runtime against a live endpoint. The retry.test.mjs (352 lines) and bigmodel-errors.test.mjs (189 lines) test their respective units in isolation, but the integration path through glm-client.mjs — where misclassification actually causes damage — is completely uncovered.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.85,
+        "recommendation": "Add tests/glm-client.test.mjs covering at minimum: (1) auth header propagation, (2) error classification handoff to bigmodel-errors for retryable vs non-retryable errors, (3) timeout and network-failure behavior, (4) retry exhaustion propagation to the caller. Without this, ship-readiness cannot be confirmed for the retry/backoff pipeline."
+      },
+      {
+        "severity": "high",
+        "title": "tracked-jobs.mjs and job-control.mjs have no test coverage despite managing persistent job state",
+        "body": "scripts/lib/tracked-jobs.mjs (78 lines changed) and scripts/lib/job-control.mjs (20 lines changed) manage persistent job state that survives across process restarts. Neither has a corresponding test file. These modules likely read and write JSON state files, and without atomic write patterns (write-to-temp + rename) or file-locking, concurrent invocations or SIGTERM interruptions can produce truncated or corrupted state files. A corrupted jobs file would cause all subsequent job queries to fail or return stale data, with no recovery path visible in the diff. The lack of tests means these failure modes are not being exercised.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.75,
+        "recommendation": "Add tests/tracked-jobs.test.mjs covering: (1) concurrent write safety, (2) partial-write recovery (write a truncated JSON file and verify the module handles it gracefully), (3) job state transitions. Audit fs.mjs write helpers for atomic-write patterns (write-to-temp + fs.rename)."
+      },
+      {
+        "severity": "medium",
+        "title": "process.mjs deleted (67 lines) with no clear evidence of functionality migration or test coverage gap analysis",
+        "body": "scripts/lib/process.mjs was entirely deleted (67 lines removed). While some functionality may have been absorbed into retry.mjs or other modules, there is no test file that specifically validates that all previously-supported process-management behaviors (signal handling, subprocess lifecycle, timeout enforcement) survive the deletion. If any signal-handling or cleanup logic was lost, it would manifest as orphaned child processes or unclean shutdowns under interrupted workflows — failures that are invisible until they accumulate in long-running sessions.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.65,
+        "recommendation": "Verify that every exported function from the deleted process.mjs has a direct replacement in the new codebase. Add a test that validates signal-handling behavior (SIGINT/SIGTERM cleanup) still works correctly. If the functionality was intentionally removed, document the removal rationale in CHANGELOG.md."
+      },
+      {
+        "severity": "medium",
+        "title": "Retry + error-dispatch integration path untested end-to-end",
+        "body": "The v0.4.6 changelog entry ('BigModel error dispatch + auto retry/backoff') introduces a pipeline: glm-client encounters error → bigmodel-errors classifies it → retry.mjs applies backoff → glm-client re-dispatches. Each component has unit tests, but no integration test exercises the full chain. A misclassification in bigmodel-errors.mjs (e.g., treating a 401 as retryable, or a 429 as non-retryable) would cause either credential lockout via repeated auth failures, or silent unrecoverable drops of valid requests. The existing bigmodel-errors.test.mjs (189 lines) may validate classification in isolation but cannot catch integration-context regressions where the error object shape differs from what the tests assume.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.7,
+        "recommendation": "Add an integration test (tests/retry-integration.test.mjs or extend result-propagation.test.mjs) that mocks the HTTP layer and exercises the full error → classify → retry → success/exhaustion path with realistic error shapes (HTTP 429 with Retry-After header, HTTP 401, network timeout, malformed response body)."
+      }
+    ],
+    "next_steps": [
+      "Add tests/glm-client.test.mjs with auth, timeout, and error-delegation coverage before promoting to v0.4.7.",
+      "Audit tracked-jobs.mjs and state.mjs for atomic file-write patterns; add concurrent-write and partial-corruption tests.",
+      "Verify all exports from deleted process.mjs are covered by replacements; add regression test for signal handling.",
+      "Add an end-to-end integration test for the retry pipeline (client → error-classify → backoff → re-dispatch) using mocked HTTP responses.",
+      "Run the existing UAT suite (test-automation/uat-reports/v0.4.5/run-uat.sh) against a live BigModel endpoint to validate the retry/backoff pipeline under real conditions."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.x cumulative diff introduces new retry, error-dispatch, and client infrastructure (retry.mjs, bigmodel-errors.mjs, glm-client.mjs) but leaves the primary API client glm-client.mjs with 155 lines of changes and zero dedicated test coverage. The job-tracking subsystem (tracked-jobs.mjs, job-control.mjs) is similarly untested despite handling persistent state that is vulnerable to partial-write corruption and race conditions. These gaps sit directly on the happy-path boundary between user requests and the external BigModel API — exactly where silent failures and credential mis-handling are most dangerous and hardest to detect in production.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"glm-client.mjs has no dedicated test file despite 155 lines of changes\",\n      \"body\": \"The primary BigModel API client (scripts/lib/glm-client.mjs) was substantially modified — 155 lines changed — yet no corresponding glm-client.test.mjs exists in the test directory. This client sits at the trust boundary between the plugin and an external API. It handles auth tokens, request dispatch, and response parsing. Without direct test coverage, misrouted auth headers, silently swallowed API errors, or incorrect retry delegation (via the new retry.mjs + bigmodel-errors.mjs pipeline) would only surface at runtime against a live endpoint. The retry.test.mjs (352 lines) and bigmodel-errors.test.mjs (189 lines) test their respective units in isolation, but the integration path through glm-client.mjs — where misclassification actually causes damage — is completely uncovered.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.85,\n      \"recommendation\": \"Add tests/glm-client.test.mjs covering at minimum: (1) auth header propagation, (2) error classification handoff to bigmodel-errors for retryable vs non-retryable errors, (3) timeout and network-failure behavior, (4) retry exhaustion propagation to the caller. Without this, ship-readiness cannot be confirmed for the retry/backoff pipeline.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"tracked-jobs.mjs and job-control.mjs have no test coverage despite managing persistent job state\",\n      \"body\": \"scripts/lib/tracked-jobs.mjs (78 lines changed) and scripts/lib/job-control.mjs (20 lines changed) manage persistent job state that survives across process restarts. Neither has a corresponding test file. These modules likely read and write JSON state files, and without atomic write patterns (write-to-temp + rename) or file-locking, concurrent invocations or SIGTERM interruptions can produce truncated or corrupted state files. A corrupted jobs file would cause all subsequent job queries to fail or return stale data, with no recovery path visible in the diff. The lack of tests means these failure modes are not being exercised.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Add tests/tracked-jobs.test.mjs covering: (1) concurrent write safety, (2) partial-write recovery (write a truncated JSON file and verify the module handles it gracefully), (3) job state transitions. Audit fs.mjs write helpers for atomic-write patterns (write-to-temp + fs.rename).\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"process.mjs deleted (67 lines) with no clear evidence of functionality migration or test coverage gap analysis\",\n      \"body\": \"scripts/lib/process.mjs was entirely deleted (67 lines removed). While some functionality may have been absorbed into retry.mjs or other modules, there is no test file that specifically validates that all previously-supported process-management behaviors (signal handling, subprocess lifecycle, timeout enforcement) survive the deletion. If any signal-handling or cleanup logic was lost, it would manifest as orphaned child processes or unclean shutdowns under interrupted workflows — failures that are invisible until they accumulate in long-running sessions.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Verify that every exported function from the deleted process.mjs has a direct replacement in the new codebase. Add a test that validates signal-handling behavior (SIGINT/SIGTERM cleanup) still works correctly. If the functionality was intentionally removed, document the removal rationale in CHANGELOG.md.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Retry + error-dispatch integration path untested end-to-end\",\n      \"body\": \"The v0.4.6 changelog entry ('BigModel error dispatch + auto retry/backoff') introduces a pipeline: glm-client encounters error → bigmodel-errors classifies it → retry.mjs applies backoff → glm-client re-dispatches. Each component has unit tests, but no integration test exercises the full chain. A misclassification in bigmodel-errors.mjs (e.g., treating a 401 as retryable, or a 429 as non-retryable) would cause either credential lockout via repeated auth failures, or silent unrecoverable drops of valid requests. The existing bigmodel-errors.test.mjs (189 lines) may validate classification in isolation but cannot catch integration-context regressions where the error object shape differs from what the tests assume.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Add an integration test (tests/retry-integration.test.mjs or extend result-propagation.test.mjs) that mocks the HTTP layer and exercises the full error → classify → retry → success/exhaustion path with realistic error shapes (HTTP 429 with Retry-After header, HTTP 401, network timeout, malformed response body).\"\n    }\n  ],\n  \"next_steps\": [\n    \"Add tests/glm-client.test.mjs with auth, timeout, and error-delegation coverage before promoting to v0.4.7.\",\n    \"Audit tracked-jobs.mjs and state.mjs for atomic file-write patterns; add concurrent-write and partial-corruption tests.\",\n    \"Verify all exports from deleted process.mjs are covered by replacements; add regression test for signal handling.\",\n    \"Add an end-to-end integration test for the retry pipeline (client → error-classify → backoff → re-dispatch) using mocked HTTP responses.\",\n    \"Run the existing UAT suite (test-automation/uat-reports/v0.4.5/run-uat.sh) against a live BigModel endpoint to validate the retry/backoff pipeline under real conditions.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T20:31:56.562Z"
+}

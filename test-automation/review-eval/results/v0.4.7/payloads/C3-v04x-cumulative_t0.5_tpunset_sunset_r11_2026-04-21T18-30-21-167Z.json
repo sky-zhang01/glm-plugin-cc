@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 11
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 58687,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.4-v0.4.6 cumulative diff adds significant complexity (retry logic, BigModel error dispatch, job tracking) but several high-severity gaps remain: the new retry.mjs and bigmodel-errors.mjs modules have no integration tests proving they work end-to-end with glm-client.mjs, the retry logic appears to be designed for transient failures but may silently retry on non-idempotent operations, and the removed process.mjs suggests a refactor that could have left dangling imports or changed signal handling behavior. The risk of silent data corruption or duplicate side-effects under retry is material enough to warrant attention before shipping.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs may silently duplicate side-effects on non-idempotent API calls",
+        "body": "The new scripts/lib/retry.mjs (203 lines added) implements generic retry/backoff logic. If glm-client.mjs wraps API calls that are not idempotent (e.g., job submission, state mutations), retries on network timeout or 5xx could cause duplicate operations. Without seeing the retry integration in glm-client.mjs, the risk is that transient failures get silently retried on mutating endpoints without deduplication guards or idempotency keys, leading to duplicate jobs or corrupted state.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Audit every call site in glm-client.mjs that uses retry. For each, verify the underlying HTTP operation is idempotent (GET, PUT) or that a deduplication mechanism (idempotency key, conditional request) exists. Document which operations are safe to retry and which must fail fast."
+      },
+      {
+        "severity": "high",
+        "title": "bigmodel-errors.mjs error classification may misroute non-BigModel errors",
+        "body": "scripts/lib/bigmodel-errors.mjs (168 lines added) introduces BigModel-specific error dispatch. If the error classifier assumes a particular error structure (e.g., presence of specific fields like error.code or error.type), errors from other sources (network failures, Node.js system errors, malformed responses) could fall through to a default handler that either swallows the error or applies incorrect retry logic. This is a classic silent failure vector: errors get misclassified, retry logic fires inappropriately, and the real failure is hidden from the user.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.68,
+        "recommendation": "Verify that bigmodel-errors.mjs has an explicit catch-all/default classification that logs the unexpected error structure and surfaces it to the caller rather than silently retrying or discarding. Add unit tests for malformed error objects, null errors, and non-BigModel error shapes."
+      },
+      {
+        "severity": "medium",
+        "title": "process.mjs removal may leave changed signal/exit handling semantics",
+        "body": "scripts/lib/process.mjs was entirely removed (67 lines deleted). This module likely handled process lifecycle concerns (signal handlers, exit hooks, cleanup). If glm-client.mjs, glm-companion.mjs, or tracked-jobs.mjs previously depended on process.mjs for graceful shutdown or signal propagation, its removal could mean: (1) SIGTERM/SIGINT no longer triggers cleanup, leaving stale job state on disk; (2) orphaned child processes; (3) incomplete state files that corrupt the next run. No corresponding addition of equivalent signal handling is visible in the diff stat.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.65,
+        "recommendation": "Confirm that signal handling and process cleanup from process.mjs has been migrated elsewhere (perhaps into retry.mjs or glm-client.mjs). Search all files for imports of process.mjs to ensure none remain. Add a test that verifies graceful state cleanup on SIGTERM."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs changes (+155/-unknown lines) combined with retry and error dispatch create untested integration surface",
+        "body": "glm-client.mjs was significantly modified (155 lines changed) to integrate the new retry.mjs and bigmodel-errors.mjs modules. The test suite includes retry.test.mjs (352 lines), bigmodel-errors.test.mjs (189 lines), and result-propagation.test.mjs (69 lines), but these appear to be unit-level tests. There are no visible integration tests that exercise the full pipeline: client call → BigModel error → classification → retry decision → backoff → final success/failure propagation. Under production conditions (rate limiting, partial responses, socket timeouts), the interaction between these three modules could produce behaviors not covered by unit tests alone.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.6,
+        "recommendation": "Add at least one integration-level test that simulates a realistic failure sequence (e.g., first call returns 429 rate limit, second returns 500, third succeeds) and verifies correct retry behavior, error propagation, and no duplicate side-effects. Consider running this against the actual UAT scenarios in test-automation/."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs state file corruption risk under concurrent access or crash mid-write",
+        "body": "scripts/lib/tracked-jobs.mjs (78 lines changed) manages persisted job state. If state is written to disk without atomic write semantics (write-to-temp + rename), a crash during write or concurrent access from multiple glm-companion processes could corrupt the state file, leading to lost job tracking or inability to query status. The fs.mjs changes (44 lines) may or may not address atomic writes.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.55,
+        "recommendation": "Verify that all state writes in tracked-jobs.mjs use atomic write patterns (write to .tmp file, then fs.rename). Add a test that simulates a crash mid-write and verifies state file integrity on recovery."
+      }
+    ],
+    "next_steps": [
+      "Inspect retry.mjs call sites in glm-client.mjs to confirm no non-idempotent operations are retried without guards",
+      "Verify bigmodel-errors.mjs handles unexpected error shapes without silent swallowing",
+      "Confirm process.mjs signal handling has been replaced or is no longer needed",
+      "Add integration test covering multi-retry failure scenario with the full client+retry+error pipeline",
+      "Verify tracked-jobs.mjs uses atomic file writes for state persistence"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.4-v0.4.6 cumulative diff adds significant complexity (retry logic, BigModel error dispatch, job tracking) but several high-severity gaps remain: the new retry.mjs and bigmodel-errors.mjs modules have no integration tests proving they work end-to-end with glm-client.mjs, the retry logic appears to be designed for transient failures but may silently retry on non-idempotent operations, and the removed process.mjs suggests a refactor that could have left dangling imports or changed signal handling behavior. The risk of silent data corruption or duplicate side-effects under retry is material enough to warrant attention before shipping.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs may silently duplicate side-effects on non-idempotent API calls\",\"body\":\"The new scripts/lib/retry.mjs (203 lines added) implements generic retry/backoff logic. If glm-client.mjs wraps API calls that are not idempotent (e.g., job submission, state mutations), retries on network timeout or 5xx could cause duplicate operations. Without seeing the retry integration in glm-client.mjs, the risk is that transient failures get silently retried on mutating endpoints without deduplication guards or idempotency keys, leading to duplicate jobs or corrupted state.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.72,\"recommendation\":\"Audit every call site in glm-client.mjs that uses retry. For each, verify the underlying HTTP operation is idempotent (GET, PUT) or that a deduplication mechanism (idempotency key, conditional request) exists. Document which operations are safe to retry and which must fail fast.\"},{\"severity\":\"high\",\"title\":\"bigmodel-errors.mjs error classification may misroute non-BigModel errors\",\"body\":\"scripts/lib/bigmodel-errors.mjs (168 lines added) introduces BigModel-specific error dispatch. If the error classifier assumes a particular error structure (e.g., presence of specific fields like error.code or error.type), errors from other sources (network failures, Node.js system errors, malformed responses) could fall through to a default handler that either swallows the error or applies incorrect retry logic. This is a classic silent failure vector: errors get misclassified, retry logic fires inappropriately, and the real failure is hidden from the user.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.68,\"recommendation\":\"Verify that bigmodel-errors.mjs has an explicit catch-all/default classification that logs the unexpected error structure and surfaces it to the caller rather than silently retrying or discarding. Add unit tests for malformed error objects, null errors, and non-BigModel error shapes.\"},{\"severity\":\"medium\",\"title\":\"process.mjs removal may leave changed signal/exit handling semantics\",\"body\":\"scripts/lib/process.mjs was entirely removed (67 lines deleted). This module likely handled process lifecycle concerns (signal handlers, exit hooks, cleanup). If glm-client.mjs, glm-companion.mjs, or tracked-jobs.mjs previously depended on process.mjs for graceful shutdown or signal propagation, its removal could mean: (1) SIGTERM/SIGINT no longer triggers cleanup, leaving stale job state on disk; (2) orphaned child processes; (3) incomplete state files that corrupt the next run. No corresponding addition of equivalent signal handling is visible in the diff stat.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":67,\"confidence\":0.65,\"recommendation\":\"Confirm that signal handling and process cleanup from process.mjs has been migrated elsewhere (perhaps into retry.mjs or glm-client.mjs). Search all files for imports of process.mjs to ensure none remain. Add a test that verifies graceful state cleanup on SIGTERM.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs changes (+155/-unknown lines) combined with retry and error dispatch create untested integration surface\",\"body\":\"glm-client.mjs was significantly modified (155 lines changed) to integrate the new retry.mjs and bigmodel-errors.mjs modules. The test suite includes retry.test.mjs (352 lines), bigmodel-errors.test.mjs (189 lines), and result-propagation.test.mjs (69 lines), but these appear to be unit-level tests. There are no visible integration tests that exercise the full pipeline: client call → BigModel error → classification → retry decision → backoff → final success/failure propagation. Under production conditions (rate limiting, partial responses, socket timeouts), the interaction between these three modules could produce behaviors not covered by unit tests alone.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.6,\"recommendation\":\"Add at least one integration-level test that simulates a realistic failure sequence (e.g., first call returns 429 rate limit, second returns 500, third succeeds) and verifies correct retry behavior, error propagation, and no duplicate side-effects. Consider running this against the actual UAT scenarios in test-automation/.\"},{\"severity\":\"medium\",\"title\":\"tracked-jobs.mjs state file corruption risk under concurrent access or crash mid-write\",\"body\":\"scripts/lib/tracked-jobs.mjs (78 lines changed) manages persisted job state. If state is written to disk without atomic write semantics (write-to-temp + rename), a crash during write or concurrent access from multiple glm-companion processes could corrupt the state file, leading to lost job tracking or inability to query status. The fs.mjs changes (44 lines) may or may not address atomic writes.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.55,\"recommendation\":\"Verify that all state writes in tracked-jobs.mjs use atomic write patterns (write to .tmp file, then fs.rename). Add a test that simulates a crash mid-write and verifies state file integrity on recovery.\"}],\"next_steps\":[\"Inspect retry.mjs call sites in glm-client.mjs to confirm no non-idempotent operations are retried without guards\",\"Verify bigmodel-errors.mjs handles unexpected error shapes without silent swallowing\",\"Confirm process.mjs signal handling has been replaced or is no longer needed\",\"Add integration test covering multi-retry failure scenario with the full client+retry+error pipeline\",\"Verify tracked-jobs.mjs uses atomic file writes for state persistence\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T18:30:21.204Z"
+}

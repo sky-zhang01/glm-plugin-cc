@@ -1,0 +1,28 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 69
+  },
+  "metrics": {
+    "schema_compliance": 0,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 6242,
+    "error_code": "EMPTY_RESPONSE"
+  },
+  "parsed": null,
+  "rawOutputHead": "",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "EMPTY_RESPONSE",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T21:30:02.811Z"
+}

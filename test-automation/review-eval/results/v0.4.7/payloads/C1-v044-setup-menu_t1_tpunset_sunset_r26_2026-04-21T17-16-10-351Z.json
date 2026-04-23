@@ -1,0 +1,70 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 26
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 98432,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit performs an npm scope rename alongside a behavioral change to the setup command. The scope rename is inherently breaking for existing consumers — any user, CI pipeline, or documentation referencing the old package name will fail. The setup menu change introduces new interactive behavior in an already-configured state, which is the kind of fork that can silently corrupt or discard user configuration if the flow isn't guarded. Neither risk is mitigated by the diff as described.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change for all existing consumers",
+        "body": "The commit message explicitly states 'rename npm scope' and package.json shows 4 lines changed. Renaming an npm package scope (e.g., @old-scope/pkg → @new-scope/pkg) breaks every existing installation, import, CI reference, and lockfile that uses the old name. There is no indication of a deprecation path, dual-publishing, or migration guide. The CHANGELOG entry for v0.4.7 does not signal this as a breaking change. Consumers upgrading will experience unresolved dependency failures with no clear remediation.",
+        "file": "package.json",
+        "line_start": 2,
+        "line_end": 5,
+        "confidence": 0.85,
+        "recommendation": "Either (a) publish under both scopes with the old scope depending on the new one, or (b) treat this as a major version bump with explicit migration instructions in the CHANGELOG. At minimum, verify the new scope is already published and resolvable before shipping."
+      },
+      {
+        "severity": "medium",
+        "title": "Setup reconfiguration menu may silently discard existing configuration",
+        "body": "The commit adds an interactive menu to /glm:setup 'when already configured.' This introduces a decision fork in a previously-idempotent path. If the menu offers destructive options (reconfigure, reset) without explicit confirmation or backup of the existing configuration, a user selecting the wrong option can lose their working setup. The risk is higher because this is a Claude plugin command — the 'menu' is prompt-driven and may not have clear undo semantics.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.65,
+        "recommendation": "Before presenting destructive options, the setup flow should: (1) detect and display the current configuration, (2) require explicit confirmation before overwriting, and (3) ideally create a backup of the existing config that can be restored. Add a 'cancel / keep current' option that exits without modification."
+      },
+      {
+        "severity": "medium",
+        "title": "Plugin metadata files may be inconsistent after scope rename",
+        "body": "Both .claude-plugin/marketplace.json (4 lines changed) and .claude-plugin/plugin.json (2 lines changed) were modified alongside the package.json scope rename. If any of these files still reference the old scope internally — or if the marketplace registry hasn't been updated to recognize the new scope — the plugin will be uninstallable or undiscoverable. The risk is a silent failure where the plugin appears to install but cannot resolve its own commands.",
+        "file": ".claude-plugin/marketplace.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.55,
+        "recommendation": "Audit all three files (marketplace.json, plugin.json, package.json) to confirm every reference to the package identity uses the new scope consistently. Verify the plugin installs and resolves commands correctly from a clean slate using the new scope name."
+      }
+    ],
+    "next_steps": [
+      "Run `git show 7766943 -- package.json` to confirm the exact scope change and whether both old and new names are handled.",
+      "Run `git show 7766943 -- commands/setup.md` to review the full interactive menu flow and verify it has guards against destructive reconfiguration.",
+      "Verify the new npm scope is published and installable before merging: `npm view <new-scope>/<package>`.",
+      "Check if CHANGELOG.md frames the scope rename as a breaking change; if not, update it.",
+      "Test the full setup → reconfigure → cancel path to confirm no configuration is lost on abort."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"This commit performs an npm scope rename alongside a behavioral change to the setup command. The scope rename is inherently breaking for existing consumers — any user, CI pipeline, or documentation referencing the old package name will fail. The setup menu change introduces new interactive behavior in an already-configured state, which is the kind of fork that can silently corrupt or discard user configuration if the flow isn't guarded. Neither risk is mitigated by the diff as described.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename is a breaking change for all existing consumers\",\n      \"body\": \"The commit message explicitly states 'rename npm scope' and package.json shows 4 lines changed. Renaming an npm package scope (e.g., @old-scope/pkg → @new-scope/pkg) breaks every existing installation, import, CI reference, and lockfile that uses the old name. There is no indication of a deprecation path, dual-publishing, or migration guide. The CHANGELOG entry for v0.4.7 does not signal this as a breaking change. Consumers upgrading will experience unresolved dependency failures with no clear remediation.\",\n      \"file\": \"package.json\",\n      \"line_start\": 2,\n      \"line_end\": 5,\n      \"confidence\": 0.85,\n      \"recommendation\": \"Either (a) publish under both scopes with the old scope depending on the new one, or (b) treat this as a major version bump with explicit migration instructions in the CHANGELOG. At minimum, verify the new scope is already published and resolvable before shipping.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Setup reconfiguration menu may silently discard existing configuration\",\n      \"body\": \"The commit adds an interactive menu to /glm:setup 'when already configured.' This introduces a decision fork in a previously-idempotent path. If the menu offers destructive options (reconfigure, reset) without explicit confirmation or backup of the existing configuration, a user selecting the wrong option can lose their working setup. The risk is higher because this is a Claude plugin command — the 'menu' is prompt-driven and may not have clear undo semantics.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Before presenting destructive options, the setup flow should: (1) detect and display the current configuration, (2) require explicit confirmation before overwriting, and (3) ideally create a backup of the existing config that can be restored. Add a 'cancel / keep current' option that exits without modification.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Plugin metadata files may be inconsistent after scope rename\",\n      \"body\": \"Both .claude-plugin/marketplace.json (4 lines changed) and .claude-plugin/plugin.json (2 lines changed) were modified alongside the package.json scope rename. If any of these files still reference the old scope internally — or if the marketplace registry hasn't been updated to recognize the new scope — the plugin will be uninstallable or undiscoverable. The risk is a silent failure where the plugin appears to install but cannot resolve its own commands.\",\n      \"file\": \".claude-plugin/marketplace.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Audit all three files (marketplace.json, plugin.json, package.json) to confirm every reference to the package identity uses the new scope consistently. Verify the plugin installs and resolves commands correctly from a clean slate using the new scope name.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `git show 7766943 -- package.json` to confirm the exact scope change and whether both old and new names are handled.\",\n    \"Run `git show 7766943 -- commands/setup.md` to review the full interactive menu flow and verify it has guards against destructive reconfiguration.\",\n    \"Verify the new npm scope is published and installable before merging: `npm view <new-scope>/<package>`.\",\n    \"Check if CHANGELOG.md frames the scope rename as a breaking change; if not, update it.\",\n    \"Test the full setup → reconfigure → cancel path to confirm no configuration is lost on abort.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T17:16:10.378Z"
+}

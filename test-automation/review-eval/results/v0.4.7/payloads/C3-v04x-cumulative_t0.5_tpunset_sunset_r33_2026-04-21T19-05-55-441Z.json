@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 33
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.6,
+    "citation_false_file_hits": 0,
+    "latency_ms": 83273,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff is a 6600+ line change across 84 files that deletes a core module (process.mjs), introduces new retry and error-dispatch infrastructure, and modifies job-tracking state management — all without a v0.4.7 tag to anchor the sampling-sweep target. Several structural risks merit blocking resolution before a clean v0.4.7 release cut.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Deleted process.mjs may leave dangling imports at runtime",
+        "body": "scripts/lib/process.mjs was entirely removed (67 lines deleted per diff stat). If any runtime or test path still imports from './lib/process.mjs' or '../lib/process.mjs', Node will throw ERR_MODULE_NOT_FOUND at invocation time — a silent launch failure invisible to CI if the affected code path isn't exercised in tests. The modification to scripts/check-imports.mjs (5 lines changed) suggests import paths were updated, but a grep-based check cannot catch dynamic imports or re-export chains. The test suite (14 test files) may not cover every consumer.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.72,
+        "recommendation": "Run `grep -r \"process\\.mjs\" scripts/ commands/ tests/ --include='*.mjs' --include='*.js'` and verify zero hits. Add a CI guard that fails if any .mjs file references a non-existent import target."
+      },
+      {
+        "severity": "high",
+        "title": "New retry.mjs (203 lines) — retry logic without visible idempotency guarantees",
+        "body": "A new 203-line retry module is a high-leverage addition. If the GLM client operations (job submission, status polling) are not idempotent, retries under backoff can duplicate jobs, corrupt tracked-job state, or produce double-reported results. The concurrent modifications to tracked-jobs.mjs (78 lines changed) and glm-client.mjs (155 lines changed) suggest the retry layer wraps these calls, but without seeing the actual retry predicates, there is no evidence that only safe-to-retry operations are retried. The retry.test.mjs (352 lines) suggests extensive test coverage, but test coverage alone does not prove idempotency.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.68,
+        "recommendation": "Verify that every retry-wrapped call in glm-client.mjs and tracked-jobs.mjs is idempotent by design (e.g., uses idempotency keys, or only retries on read/status operations). Add a comment annotation or contract marker at each retry site declaring the idempotency assumption."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error dispatch may silently swallow unrecognized errors",
+        "body": "A new 168-line error classification module for BigModel API errors risks misclassifying or dropping unrecognized error shapes. If the dispatch logic has a default/fallback that returns a generic result instead of rethrowing, downstream callers will proceed as if the operation succeeded or failed gracefully — a silent failure that is extremely hard to diagnose in production. The 189-line test file suggests coverage, but the gap between tested error shapes and real API error variance is unknowable.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.65,
+        "recommendation": "Ensure the error dispatch always rethrows (or wraps-and-throws) when it encounters an unrecognized error shape, rather than returning a default. Add a log/warn for any error that falls through classification so it is observable in production."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs state mutations under concurrent access without visible locking",
+        "body": "tracked-jobs.mjs was modified (78 lines changed) and depends on state.mjs (32 lines changed) and fs.mjs (44 lines changed). If multiple GLM client instances or retry loops write to the same job-tracking state file concurrently, JSON file corruption (truncated writes, interleaved writes) is a real risk on local filesystems. No file-locking primitive is visible in the diff stat. This is especially dangerous under retry storms where multiple backoff timers may fire near-simultaneously.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.6,
+        "recommendation": "Verify that all state file writes in tracked-jobs.mjs are serialized (e.g., via a write queue or atomic rename pattern). If concurrent writes are possible in any scenario, add a file-lock or serialize through a single write channel."
+      },
+      {
+        "severity": "medium",
+        "title": "No v0.4.7 tag exists — sampling-sweep target is ambiguous",
+        "body": "The commit log shows tags only through v0.4.6 (HEAD). The user focus references 'v0.4.7 sampling-sweep run 33 (C3-v04x-cumulative)', implying the review target is a future release cut from the current branch state. However, without a tagged commit, the exact code under review is ambiguous — any new commits to develop would change the content. This is a configuration risk, not a code defect, but it undermines review grounding.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 9,
+        "confidence": 0.55,
+        "recommendation": "Create a v0.4.7-rc.1 tag or branch point before running the sampling sweep so the reviewed artifact is immutable. Pin the sweep configuration to a specific commit SHA."
+      }
+    ],
+    "next_steps": [
+      "Grep the entire codebase for any remaining import of the deleted process.mjs and confirm zero hits.",
+      "Audit retry.mjs call sites in glm-client.mjs and tracked-jobs.mjs for idempotency; document the assumption at each site.",
+      "Inspect bigmodel-errors.mjs fallback/default branch to confirm unrecognized errors are always rethrown, not silently consumed.",
+      "Verify tracked-jobs.mjs write serialization — check for atomic write patterns (write-to-temp + rename) or mutual exclusion.",
+      "Tag the exact commit under review as v0.4.7-rc.1 before proceeding with the sampling sweep."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff is a 6600+ line change across 84 files that deletes a core module (process.mjs), introduces new retry and error-dispatch infrastructure, and modifies job-tracking state management — all without a v0.4.7 tag to anchor the sampling-sweep target. Several structural risks merit blocking resolution before a clean v0.4.7 release cut.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Deleted process.mjs may leave dangling imports at runtime\",\n      \"body\": \"scripts/lib/process.mjs was entirely removed (67 lines deleted per diff stat). If any runtime or test path still imports from './lib/process.mjs' or '../lib/process.mjs', Node will throw ERR_MODULE_NOT_FOUND at invocation time — a silent launch failure invisible to CI if the affected code path isn't exercised in tests. The modification to scripts/check-imports.mjs (5 lines changed) suggests import paths were updated, but a grep-based check cannot catch dynamic imports or re-export chains. The test suite (14 test files) may not cover every consumer.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Run `grep -r \\\"process\\\\.mjs\\\" scripts/ commands/ tests/ --include='*.mjs' --include='*.js'` and verify zero hits. Add a CI guard that fails if any .mjs file references a non-existent import target.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"New retry.mjs (203 lines) — retry logic without visible idempotency guarantees\",\n      \"body\": \"A new 203-line retry module is a high-leverage addition. If the GLM client operations (job submission, status polling) are not idempotent, retries under backoff can duplicate jobs, corrupt tracked-job state, or produce double-reported results. The concurrent modifications to tracked-jobs.mjs (78 lines changed) and glm-client.mjs (155 lines changed) suggest the retry layer wraps these calls, but without seeing the actual retry predicates, there is no evidence that only safe-to-retry operations are retried. The retry.test.mjs (352 lines) suggests extensive test coverage, but test coverage alone does not prove idempotency.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Verify that every retry-wrapped call in glm-client.mjs and tracked-jobs.mjs is idempotent by design (e.g., uses idempotency keys, or only retries on read/status operations). Add a comment annotation or contract marker at each retry site declaring the idempotency assumption.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"bigmodel-errors.mjs error dispatch may silently swallow unrecognized errors\",\n      \"body\": \"A new 168-line error classification module for BigModel API errors risks misclassifying or dropping unrecognized error shapes. If the dispatch logic has a default/fallback that returns a generic result instead of rethrowing, downstream callers will proceed as if the operation succeeded or failed gracefully — a silent failure that is extremely hard to diagnose in production. The 189-line test file suggests coverage, but the gap between tested error shapes and real API error variance is unknowable.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Ensure the error dispatch always rethrows (or wraps-and-throws) when it encounters an unrecognized error shape, rather than returning a default. Add a log/warn for any error that falls through classification so it is observable in production.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"tracked-jobs.mjs state mutations under concurrent access without visible locking\",\n      \"body\": \"tracked-jobs.mjs was modified (78 lines changed) and depends on state.mjs (32 lines changed) and fs.mjs (44 lines changed). If multiple GLM client instances or retry loops write to the same job-tracking state file concurrently, JSON file corruption (truncated writes, interleaved writes) is a real risk on local filesystems. No file-locking primitive is visible in the diff stat. This is especially dangerous under retry storms where multiple backoff timers may fire near-simultaneously.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Verify that all state file writes in tracked-jobs.mjs are serialized (e.g., via a write queue or atomic rename pattern). If concurrent writes are possible in any scenario, add a file-lock or serialize through a single write channel.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"No v0.4.7 tag exists — sampling-sweep target is ambiguous\",\n      \"body\": \"The commit log shows tags only through v0.4.6 (HEAD). The user focus references 'v0.4.7 sampling-sweep run 33 (C3-v04x-cumulative)', implying the review target is a future release cut from the current branch state. However, without a tagged commit, the exact code under review is ambiguous — any new commits to develop would change the content. This is a configuration risk, not a code defect, but it undermines review grounding.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 9,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Create a v0.4.7-rc.1 tag or branch point before running the sampling sweep so the reviewed artifact is immutable. Pin the sweep configuration to a specific commit SHA.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Grep the entire codebase for any remaining import of the deleted process.mjs and confirm zero hits.\",\n    \"Audit retry.mjs call sites in glm-client.mjs and tracked-jobs.mjs for idempotency; document the assumption at each site.\",\n    \"Inspect bigmodel-errors.mjs fallback/default branch to confirm unrecognized errors are always rethrown, not silently consumed.\",\n    \"Verify tracked-jobs.mjs write serialization — check for atomic write patterns (write-to-temp + rename) or mutual exclusion.\",\n    \"Tag the exact commit under review as v0.4.7-rc.1 before proceeding with the sampling sweep.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T19:05:55.471Z"
+}

@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 19
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 48257,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces a retry/backoff system (retry.mjs), BigModel error dispatch, job tracking, and state management changes across ~6600 lines. Several material risks merit attention: the retry module's cancellation path, error classification coverage in bigmodel-errors.mjs, and state file atomicity. I need to inspect the actual code before I can confirm specific defects.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs: retry with exponential backoff may silently swallow AbortError or mask irrecoverable failures",
+        "body": "The retry module (203 lines added) is the backbone of the new auto-retry/backoff feature. Without seeing the implementation, the most common defect pattern in such modules is: (1) not propagating AbortError/signal cancellation immediately, causing the caller to hang; (2) treating all errors as retryable when only transient ones should be; (3) not resetting the retry counter on different operations sharing the same retry context. Given the BigModel error dispatch was added in the same commit (e0a9ba8), the retry classification likely depends on bigmodel-errors.mjs's error taxonomy. If the taxonomy misses an error class (e.g., HTTP 413 payload-too-large, HTTP 451 legal block), those errors get retried indefinitely until max retries exhaust — wasting quota and delaying user feedback. The 352-line test file suggests coverage exists, but the interaction between retry.mjs and glm-client.mjs under concurrent job cancellation is the highest-risk untested path.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Verify that AbortError/CancelError is checked as the FIRST condition in the retry loop (before error classification), and that non-transient HTTP errors (4xx except 429/408/409) are never retried. Add an explicit test for signal.abort() during an active retry backoff wait."
+      },
+      {
+        "severity": "high",
+        "title": "state.mjs: non-atomic state file writes risk corruption on crash or concurrent access",
+        "body": "scripts/lib/state.mjs (32 lines changed) manages persistent state. If the state file is written with direct fs.writeFile instead of write-to-temp-then-rename, a process crash or concurrent glm-companion invocation mid-write leaves a truncated/partial JSON file. On next read, JSON.parse throws, and the user gets an unrecoverable error with no automatic recovery path. This is the classic silent data-loss vector for CLI tools. The state.test.mjs (81 lines) may not test crash-mid-write scenarios.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.68,
+        "recommendation": "Ensure state writes use atomic-rename (write to .tmp file, fs.rename to final path). Add a test that corrupts the state file mid-write and verifies recovery. If state.mjs already does this, verify the temp file cleanup on error paths."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs: race condition between job start and tracked-jobs registration",
+        "body": "scripts/lib/tracked-jobs.mjs (78 lines changed) presumably tracks submitted jobs. If a job is submitted to the BigModel API but the process crashes before the job ID is persisted to tracked-jobs, the job is orphaned — it runs on the server but the client has no record. On restart/resume, the user sees a missing job with no way to cancel or retrieve results. The job-control.mjs (20 lines changed) interaction with tracked-jobs needs to guarantee the job is registered BEFORE the API call returns, or at minimum within a try/finally that cleans up on failure.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.65,
+        "recommendation": "Verify the submit-then-track ordering: the job ID must be persisted to tracked-jobs synchronously before the caller returns. If registration fails after API submission, the system should attempt cancellation or at minimum log the orphaned job ID for manual recovery."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs: error dispatch may misclassify unknown error shapes as retryable",
+        "body": "scripts/lib/bigmodel-errors.mjs (168 lines added) classifies BigModel API errors for the retry system. If the error response shape changes (e.g., BigModel adds a new error type, or the response envelope changes), errors that should be terminal may fall through to a default 'retryable' classification. The 189-line test file covers known error types, but the default/fallback case in the dispatch is the dangerous path. A misclassified terminal error retried with exponential backoff amplifies rate-limit consumption and delays user-visible failure by minutes.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.6,
+        "recommendation": "Ensure the default/fallback case in error classification returns NOT retryable (fail-closed), not retryable. Add a test with a completely unrecognized error shape and assert it is classified as non-retryable. Log a warning when an unrecognized error shape is encountered."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs: credential/token handling during retry loops may leak or expire",
+        "body": "scripts/lib/glm-client.mjs (155 lines changed) wraps the BigModel API client. If retries span multiple minutes (exponential backoff with multiple attempts), the API key or session token may expire mid-retry-sequence. The retry system in retry.mjs may not re-authenticate or refresh credentials between attempts. Additionally, if the API key is logged in error output during retry diagnostics, this is a credential leak vector.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.55,
+        "recommendation": "Verify that each retry attempt re-reads credentials (or validates token freshness) rather than caching them from the initial attempt. Ensure error logging redacts API keys and tokens. Add a test for retry-after-token-expiry scenario."
+      }
+    ],
+    "next_steps": [
+      "Inspect scripts/lib/retry.mjs lines 1-203 to verify AbortError is propagated immediately and non-transient errors are fail-closed",
+      "Inspect scripts/lib/state.mjs to confirm atomic write (write-to-temp + rename) pattern is used",
+      "Inspect scripts/lib/bigmodel-errors.mjs default/fallback error classification to confirm it returns non-retryable",
+      "Inspect scripts/lib/tracked-jobs.mjs submit + register ordering for crash-safety guarantees",
+      "Inspect scripts/lib/glm-client.mjs for credential caching across retries and logging redaction"
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff introduces a retry/backoff system (retry.mjs), BigModel error dispatch, job tracking, and state management changes across ~6600 lines. Several material risks merit attention: the retry module's cancellation path, error classification coverage in bigmodel-errors.mjs, and state file atomicity. I need to inspect the actual code before I can confirm specific defects.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"retry.mjs: retry with exponential backoff may silently swallow AbortError or mask irrecoverable failures\",\n      \"body\": \"The retry module (203 lines added) is the backbone of the new auto-retry/backoff feature. Without seeing the implementation, the most common defect pattern in such modules is: (1) not propagating AbortError/signal cancellation immediately, causing the caller to hang; (2) treating all errors as retryable when only transient ones should be; (3) not resetting the retry counter on different operations sharing the same retry context. Given the BigModel error dispatch was added in the same commit (e0a9ba8), the retry classification likely depends on bigmodel-errors.mjs's error taxonomy. If the taxonomy misses an error class (e.g., HTTP 413 payload-too-large, HTTP 451 legal block), those errors get retried indefinitely until max retries exhaust — wasting quota and delaying user feedback. The 352-line test file suggests coverage exists, but the interaction between retry.mjs and glm-client.mjs under concurrent job cancellation is the highest-risk untested path.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Verify that AbortError/CancelError is checked as the FIRST condition in the retry loop (before error classification), and that non-transient HTTP errors (4xx except 429/408/409) are never retried. Add an explicit test for signal.abort() during an active retry backoff wait.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"state.mjs: non-atomic state file writes risk corruption on crash or concurrent access\",\n      \"body\": \"scripts/lib/state.mjs (32 lines changed) manages persistent state. If the state file is written with direct fs.writeFile instead of write-to-temp-then-rename, a process crash or concurrent glm-companion invocation mid-write leaves a truncated/partial JSON file. On next read, JSON.parse throws, and the user gets an unrecoverable error with no automatic recovery path. This is the classic silent data-loss vector for CLI tools. The state.test.mjs (81 lines) may not test crash-mid-write scenarios.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Ensure state writes use atomic-rename (write to .tmp file, fs.rename to final path). Add a test that corrupts the state file mid-write and verifies recovery. If state.mjs already does this, verify the temp file cleanup on error paths.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"tracked-jobs.mjs: race condition between job start and tracked-jobs registration\",\n      \"body\": \"scripts/lib/tracked-jobs.mjs (78 lines changed) presumably tracks submitted jobs. If a job is submitted to the BigModel API but the process crashes before the job ID is persisted to tracked-jobs, the job is orphaned — it runs on the server but the client has no record. On restart/resume, the user sees a missing job with no way to cancel or retrieve results. The job-control.mjs (20 lines changed) interaction with tracked-jobs needs to guarantee the job is registered BEFORE the API call returns, or at minimum within a try/finally that cleans up on failure.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Verify the submit-then-track ordering: the job ID must be persisted to tracked-jobs synchronously before the caller returns. If registration fails after API submission, the system should attempt cancellation or at minimum log the orphaned job ID for manual recovery.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"bigmodel-errors.mjs: error dispatch may misclassify unknown error shapes as retryable\",\n      \"body\": \"scripts/lib/bigmodel-errors.mjs (168 lines added) classifies BigModel API errors for the retry system. If the error response shape changes (e.g., BigModel adds a new error type, or the response envelope changes), errors that should be terminal may fall through to a default 'retryable' classification. The 189-line test file covers known error types, but the default/fallback case in the dispatch is the dangerous path. A misclassified terminal error retried with exponential backoff amplifies rate-limit consumption and delays user-visible failure by minutes.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Ensure the default/fallback case in error classification returns NOT retryable (fail-closed), not retryable. Add a test with a completely unrecognized error shape and assert it is classified as non-retryable. Log a warning when an unrecognized error shape is encountered.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client.mjs: credential/token handling during retry loops may leak or expire\",\n      \"body\": \"scripts/lib/glm-client.mjs (155 lines changed) wraps the BigModel API client. If retries span multiple minutes (exponential backoff with multiple attempts), the API key or session token may expire mid-retry-sequence. The retry system in retry.mjs may not re-authenticate or refresh credentials between attempts. Additionally, if the API key is logged in error output during retry diagnostics, this is a credential leak vector.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Verify that each retry attempt re-reads credentials (or validates token freshness) rather than caching them from the initial attempt. Ensure error logging redacts API keys and tokens. Add a test for retry-after-token-expiry scenario.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect scripts/lib/retry.mjs lines 1-203 to verify AbortError is propagated immediately and non-transient errors are fail-closed\",\n    \"Inspect scripts/lib/state.mjs to confirm atomic write (write-to-temp + rename) pattern is used\",\n    \"Inspect scripts/lib/bigmodel-errors.mjs default/fallback error classification to confirm it returns non-retryable\",\n    \"Inspect scripts/lib/tracked-jobs.mjs submit + register ordering for crash-safety guarantees\",\n    \"Inspect scripts/lib/glm-client.mjs for credential caching across retries and logging redaction\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T18:45:54.271Z"
+}

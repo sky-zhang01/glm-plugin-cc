@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 26
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 52380,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces significant new infrastructure (retry logic, BigModel error dispatch, job tracking, state management) with multiple material defects: a retry/backoff layer that can silently swallow errors or double-fire operations, a state management module with TOCTOU race conditions on filesystem reads/writes, and a job tracker that can leak jobs on process crash. The error dispatch in bigmodel-errors.mjs has an incomplete error classification that will silently fall through to generic handling for several documented BigModel error codes, masking real failures. These are the kind of defects that hide during happy-path UAT and surface under load, concurrent use, or network degradation.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry layer silently retries non-idempotent operations with no guard",
+        "body": "The retry.mjs module provides generic retry with exponential backoff. When used by glm-client.mjs for API calls that have side effects (e.g., job submission, status transitions), a retried request can cause duplicate operations. There is no idempotency key mechanism, no deduplication guard, and no distinction between retriable (GET/status) and non-retriable (POST/submit) operations visible in the retry configuration. Under network timeout or 5xx from the upstream BigModel API, this will cause silent double-submission of jobs.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.82,
+        "recommendation": "Add an `idempotent` flag to the retry options. When false (default for mutating calls), retry only on explicitly safelistied status codes and log a warning. At minimum, document which callers pass retriable vs non-retriable operations and audit each call site in glm-client.mjs."
+      },
+      {
+        "severity": "high",
+        "title": "TOCTOU race condition in state.mjs filesystem operations",
+        "body": "State management in state.mjs reads a JSON file, mutates in memory, then writes back. Two concurrent invocations of glm-companion (e.g., parallel agent calls) can both read the same state, each mutate independently, and the second write silently overwrites the first's changes. This is a classic TOCTOU race. No file locking (flock, lockfile, atomic rename) is visible. The impact is lost job tracking data, corrupted state, or phantom jobs.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.78,
+        "recommendation": "Implement atomic state writes via write-to-temp-then-rename, or add advisory file locking. For a single-process guarantee, document that concurrent invocation is unsupported and add a PID lockfile check. At minimum, catch and surface write conflicts rather than silently overwriting."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs incomplete error classification — unhandled codes silently fall through",
+        "body": "The error dispatch table in bigmodel-errors.mjs maps specific BigModel error codes to retry/backoff strategies, but the fallthrough/default path treats unmapped errors as non-retriable without logging the unmapped code. When BigModel introduces new error codes or returns undocumented ones (common during API version transitions), these errors are silently swallowed and reported as generic failures, making diagnosis extremely difficult. The test file covers known codes but has no negative test for an unrecognized error code.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.75,
+        "recommendation": "In the default/unmatched branch of the error dispatcher, explicitly log the unmapped error code at WARN level so new codes are discoverable. Add a test case for an unrecognized error code verifying it is classified correctly and logged."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs can orphan jobs on unclean process exit",
+        "body": "The job tracker registers jobs in memory and in state files but relies on the process completing a cleanup path to finalize or expire entries. If the process is killed (SIGKILL, OOM, CI timeout), jobs remain in 'running' state indefinitely. No TTL, heartbeat, or stale-job reaper is implemented. Subsequent runs will see stale 'running' jobs and may skip them or report incorrect status. The test suite has no coverage for crash recovery or stale job detection.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.72,
+        "recommendation": "Add a startup stale-job reaper that marks jobs older than a configurable TTL as 'lost' or 'crashed'. Add a process signal handler (SIGTERM/SIGINT) for best-effort cleanup. Add a test for stale job detection on startup."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs error propagation loses upstream error context on retry exhaustion",
+        "body": "When the retry layer exhausts all attempts in glm-client.mjs, the final error thrown to the caller wraps only the last failure, discarding the chain of prior failures. This makes it impossible to diagnose intermittent issues (e.g., first 3 attempts hit rate-limit, 4th hit a different error). The caller sees only the last error's message and stack.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.68,
+        "recommendation": "Aggregate retry history into the final error — include attempt count, error codes seen, and timestamps. This can be an `errors` array on a custom error class. This is critical for the adversarial-review and review commands which surface errors to the user."
+      }
+    ],
+    "next_steps": [
+      "Audit every call site in glm-client.mjs that uses retry.mjs and classify each as idempotent or non-idempotent; add guards for non-idempotent calls",
+      "Add file-locking or atomic-write to state.mjs and add a concurrent-write test",
+      "Add unmapped-error-code logging and negative test to bigmodel-errors.mjs",
+      "Add stale-job reaper to tracked-jobs.mjs with TTL-based expiration on startup",
+      "Preserve retry history in final error thrown by glm-client.mjs after retry exhaustion"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 diff introduces significant new infrastructure (retry logic, BigModel error dispatch, job tracking, state management) with multiple material defects: a retry/backoff layer that can silently swallow errors or double-fire operations, a state management module with TOCTOU race conditions on filesystem reads/writes, and a job tracker that can leak jobs on process crash. The error dispatch in bigmodel-errors.mjs has an incomplete error classification that will silently fall through to generic handling for several documented BigModel error codes, masking real failures. These are the kind of defects that hide during happy-path UAT and surface under load, concurrent use, or network degradation.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Retry layer silently retries non-idempotent operations with no guard\",\"body\":\"The retry.mjs module provides generic retry with exponential backoff. When used by glm-client.mjs for API calls that have side effects (e.g., job submission, status transitions), a retried request can cause duplicate operations. There is no idempotency key mechanism, no deduplication guard, and no distinction between retriable (GET/status) and non-retriable (POST/submit) operations visible in the retry configuration. Under network timeout or 5xx from the upstream BigModel API, this will cause silent double-submission of jobs.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.82,\"recommendation\":\"Add an `idempotent` flag to the retry options. When false (default for mutating calls), retry only on explicitly safelistied status codes and log a warning. At minimum, document which callers pass retriable vs non-retriable operations and audit each call site in glm-client.mjs.\"},{\"severity\":\"high\",\"title\":\"TOCTOU race condition in state.mjs filesystem operations\",\"body\":\"State management in state.mjs reads a JSON file, mutates in memory, then writes back. Two concurrent invocations of glm-companion (e.g., parallel agent calls) can both read the same state, each mutate independently, and the second write silently overwrites the first's changes. This is a classic TOCTOU race. No file locking (flock, lockfile, atomic rename) is visible. The impact is lost job tracking data, corrupted state, or phantom jobs.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.78,\"recommendation\":\"Implement atomic state writes via write-to-temp-then-rename, or add advisory file locking. For a single-process guarantee, document that concurrent invocation is unsupported and add a PID lockfile check. At minimum, catch and surface write conflicts rather than silently overwriting.\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors.mjs incomplete error classification — unhandled codes silently fall through\",\"body\":\"The error dispatch table in bigmodel-errors.mjs maps specific BigModel error codes to retry/backoff strategies, but the fallthrough/default path treats unmapped errors as non-retriable without logging the unmapped code. When BigModel introduces new error codes or returns undocumented ones (common during API version transitions), these errors are silently swallowed and reported as generic failures, making diagnosis extremely difficult. The test file covers known codes but has no negative test for an unrecognized error code.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.75,\"recommendation\":\"In the default/unmatched branch of the error dispatcher, explicitly log the unmapped error code at WARN level so new codes are discoverable. Add a test case for an unrecognized error code verifying it is classified correctly and logged.\"},{\"severity\":\"medium\",\"title\":\"tracked-jobs.mjs can orphan jobs on unclean process exit\",\"body\":\"The job tracker registers jobs in memory and in state files but relies on the process completing a cleanup path to finalize or expire entries. If the process is killed (SIGKILL, OOM, CI timeout), jobs remain in 'running' state indefinitely. No TTL, heartbeat, or stale-job reaper is implemented. Subsequent runs will see stale 'running' jobs and may skip them or report incorrect status. The test suite has no coverage for crash recovery or stale job detection.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.72,\"recommendation\":\"Add a startup stale-job reaper that marks jobs older than a configurable TTL as 'lost' or 'crashed'. Add a process signal handler (SIGTERM/SIGINT) for best-effort cleanup. Add a test for stale job detection on startup.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs error propagation loses upstream error context on retry exhaustion\",\"body\":\"When the retry layer exhausts all attempts in glm-client.mjs, the final error thrown to the caller wraps only the last failure, discarding the chain of prior failures. This makes it impossible to diagnose intermittent issues (e.g., first 3 attempts hit rate-limit, 4th hit a different error). The caller sees only the last error's message and stack.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.68,\"recommendation\":\"Aggregate retry history into the final error — include attempt count, error codes seen, and timestamps. This can be an `errors` array on a custom error class. This is critical for the adversarial-review and review commands which surface errors to the user.\"}],\"next_steps\":[\"Audit every call site in glm-client.mjs that uses retry.mjs and classify each as idempotent or non-idempotent; add guards for non-idempotent calls\",\"Add file-locking or atomic-write to state.mjs and add a concurrent-write test\",\"Add unmapped-error-code logging and negative test to bigmodel-errors.mjs\",\"Add stale-job reaper to tracked-jobs.mjs with TTL-based expiration on startup\",\"Preserve retry history in final error thrown by glm-client.mjs after retry exhaustion\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T18:52:57.064Z"
+}

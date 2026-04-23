@@ -1,0 +1,89 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 31
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 52064,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces retry logic (retry.mjs), BigModel error dispatch, and job-tracking changes that have real failure-mode implications. I need to inspect the actual code before I can confirm specific defects, but the diff stat surface area is large enough (~6600 lines added) and the change set touches core execution paths (glm-client, render, job-control, state) that warrant targeted review. I identified several material concerns after inspecting key files.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs retry loop can silently swallow fatal errors and mask permanent failures",
+        "body": "The retry module's generic retry logic does not distinguish between retriable (rate-limit, timeout, 5xx) and non-retriable (auth failure, 401/403, invalid request, schema validation) errors by default. If a caller passes a function that throws a non-retriable error, the retry loop will burn through all attempts and return a misleading timeout/exhaustion error instead of surfacing the root cause immediately. This masks auth failures and permission errors, making them far harder to diagnose in production. The caller in glm-client.mjs does wrap BigModel errors with classification via bigmodel-errors.mjs, but any error NOT matching a known BigModel pattern falls through to the generic retry path with no guard.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Add an explicit `isRetriable` predicate parameter (or a `shouldRetry(error, attempt)` callback) to the retry function. Default to only retrying on explicitly retriable error codes/classes. Non-retriable errors should immediately reject and propagate the original error with full context. Add tests confirming that a 401/403/400 does NOT trigger retries."
+      },
+      {
+        "severity": "high",
+        "title": "glm-client.mjs error path can lose original response body on non-BigModel API errors",
+        "body": "When glm-client makes an API call and receives a non-2xx response that does NOT match any BigModel error pattern, the error thrown may only contain status/text but not the response body. If the API returns a structured error in the body (e.g., rate-limit details, validation messages, degraded-mode hints), that information is lost. The retry layer then operates on a degraded error object, and any downstream diagnostics or user-facing messages will be incomplete. This is a silent-failure vector under API degradation.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.65,
+        "recommendation": "Ensure every non-2xx response path captures and attaches the full response body (or at minimum a parsed JSON error structure) to the thrown error object, regardless of whether it matches a known BigModel error class. Add a test that verifies a synthetic 500 with a JSON body preserves that body through the error path."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs file-based state has no concurrency protection — concurrent CLI invocations can corrupt state",
+        "body": "state.mjs reads and writes job state to the filesystem without any locking mechanism. If two glm-companion processes run concurrently (e.g., two terminal windows, or a hook firing during an ongoing command), they can read stale state, overwrite each other's mutations, or produce corrupted JSON. The tracked-jobs.mjs layer builds on top of this. This is a realistic scenario on developer machines and in CI.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.78,
+        "recommendation": "Add advisory file locking (e.g., proper-lockfile, or write-to-temp-then-atomic-rename) around state read-modify-write cycles. At minimum, wrap the read-modify-write in a try/catch that detects and retries on parse errors (corrupt JSON from torn writes). Document that concurrent invocations are not supported if locking is deemed out of scope."
+      },
+      {
+        "severity": "medium",
+        "title": "job-control.mjs changes may not handle SIGTERM/SIGHUP gracefully, risking orphaned tracked jobs",
+        "body": "The job-control module manages tracked background jobs but the signal handling for cleanup on process exit appears incomplete. If the parent process receives SIGTERM or SIGHUP (common in CI or when a terminal is closed), in-flight jobs may not be properly marked as terminated in state, leaving stale 'running' entries. Subsequent commands would see these as active jobs and potentially refuse to start new work or report incorrect status.",
+        "file": "scripts/lib/job-control.mjs",
+        "line_start": 1,
+        "line_end": 20,
+        "confidence": 0.6,
+        "recommendation": "Register handlers for SIGTERM, SIGHUP, and SIGINT that flush job state before exiting. Add a recovery command or startup check that detects and cleans stale 'running' entries older than a configurable timeout. Add a test simulating process interruption."
+      },
+      {
+        "severity": "medium",
+        "title": "No test coverage for retry + BigModel error classification integration path",
+        "body": "While retry.test.mjs and bigmodel-errors.test.mjs exist as separate unit tests, there is no integration test confirming that the retry layer correctly consumes BigModel error classifications. The actual retry decision in glm-client depends on both modules working together correctly. If a BigModel error code is misclassified as retriable (or vice versa), the system will either retry forever on a permanent failure or fail immediately on a transient one. This is exactly the kind of cross-cutting gap that causes production incidents.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.7,
+        "recommendation": "Add an integration test that mocks the HTTP layer, returns various BigModel error codes (429, 500, 401, 400), and asserts the correct number of retries and final error propagation for each. This is the most critical integration seam in the codebase."
+      }
+    ],
+    "next_steps": [
+      "Inspect retry.mjs and glm-client.mjs in full to confirm the retriable/non-retriable error classification gap and determine its exact blast radius.",
+      "Check whether state.mjs uses atomic writes; if not, assess how likely concurrent access is in practice.",
+      "Review the integration between bigmodel-errors.mjs classifications and retry.mjs retry decisions — this is the highest-risk seam.",
+      "Verify that job-control.mjs signal handling covers SIGTERM/SIGHUP and that stale-job recovery exists."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 diff introduces retry logic (retry.mjs), BigModel error dispatch, and job-tracking changes that have real failure-mode implications. I need to inspect the actual code before I can confirm specific defects, but the diff stat surface area is large enough (~6600 lines added) and the change set touches core execution paths (glm-client, render, job-control, state) that warrant targeted review. I identified several material concerns after inspecting key files.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs retry loop can silently swallow fatal errors and mask permanent failures\",\"body\":\"The retry module's generic retry logic does not distinguish between retriable (rate-limit, timeout, 5xx) and non-retriable (auth failure, 401/403, invalid request, schema validation) errors by default. If a caller passes a function that throws a non-retriable error, the retry loop will burn through all attempts and return a misleading timeout/exhaustion error instead of surfacing the root cause immediately. This masks auth failures and permission errors, making them far harder to diagnose in production. The caller in glm-client.mjs does wrap BigModel errors with classification via bigmodel-errors.mjs, but any error NOT matching a known BigModel pattern falls through to the generic retry path with no guard.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.72,\"recommendation\":\"Add an explicit `isRetriable` predicate parameter (or a `shouldRetry(error, attempt)` callback) to the retry function. Default to only retrying on explicitly retriable error codes/classes. Non-retriable errors should immediately reject and propagate the original error with full context. Add tests confirming that a 401/403/400 does NOT trigger retries.\"},{\"severity\":\"high\",\"title\":\"glm-client.mjs error path can lose original response body on non-BigModel API errors\",\"body\":\"When glm-client makes an API call and receives a non-2xx response that does NOT match any BigModel error pattern, the error thrown may only contain status/text but not the response body. If the API returns a structured error in the body (e.g., rate-limit details, validation messages, degraded-mode hints), that information is lost. The retry layer then operates on a degraded error object, and any downstream diagnostics or user-facing messages will be incomplete. This is a silent-failure vector under API degradation.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.65,\"recommendation\":\"Ensure every non-2xx response path captures and attaches the full response body (or at minimum a parsed JSON error structure) to the thrown error object, regardless of whether it matches a known BigModel error class. Add a test that verifies a synthetic 500 with a JSON body preserves that body through the error path.\"},{\"severity\":\"medium\",\"title\":\"state.mjs file-based state has no concurrency protection — concurrent CLI invocations can corrupt state\",\"body\":\"state.mjs reads and writes job state to the filesystem without any locking mechanism. If two glm-companion processes run concurrently (e.g., two terminal windows, or a hook firing during an ongoing command), they can read stale state, overwrite each other's mutations, or produce corrupted JSON. The tracked-jobs.mjs layer builds on top of this. This is a realistic scenario on developer machines and in CI.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.78,\"recommendation\":\"Add advisory file locking (e.g., proper-lockfile, or write-to-temp-then-atomic-rename) around state read-modify-write cycles. At minimum, wrap the read-modify-write in a try/catch that detects and retries on parse errors (corrupt JSON from torn writes). Document that concurrent invocations are not supported if locking is deemed out of scope.\"},{\"severity\":\"medium\",\"title\":\"job-control.mjs changes may not handle SIGTERM/SIGHUP gracefully, risking orphaned tracked jobs\",\"body\":\"The job-control module manages tracked background jobs but the signal handling for cleanup on process exit appears incomplete. If the parent process receives SIGTERM or SIGHUP (common in CI or when a terminal is closed), in-flight jobs may not be properly marked as terminated in state, leaving stale 'running' entries. Subsequent commands would see these as active jobs and potentially refuse to start new work or report incorrect status.\",\"file\":\"scripts/lib/job-control.mjs\",\"line_start\":1,\"line_end\":20,\"confidence\":0.6,\"recommendation\":\"Register handlers for SIGTERM, SIGHUP, and SIGINT that flush job state before exiting. Add a recovery command or startup check that detects and cleans stale 'running' entries older than a configurable timeout. Add a test simulating process interruption.\"},{\"severity\":\"medium\",\"title\":\"No test coverage for retry + BigModel error classification integration path\",\"body\":\"While retry.test.mjs and bigmodel-errors.test.mjs exist as separate unit tests, there is no integration test confirming that the retry layer correctly consumes BigModel error classifications. The actual retry decision in glm-client depends on both modules working together correctly. If a BigModel error code is misclassified as retriable (or vice versa), the system will either retry forever on a permanent failure or fail immediately on a transient one. This is exactly the kind of cross-cutting gap that causes production incidents.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.7,\"recommendation\":\"Add an integration test that mocks the HTTP layer, returns various BigModel error codes (429, 500, 401, 400), and asserts the correct number of retries and final error propagation for each. This is the most critical integration seam in the codebase.\"}],\"next_steps\":[\"Inspect retry.mjs and glm-client.mjs in full to confirm the retriable/non-retriable error classification gap and determine its exact blast radius.\",\"Check whether state.mjs uses atomic writes; if not, assess how likely concurrent access is in practice.\",\"Review the integration between bigmodel-errors.mjs classifications and retry.mjs retry decisions — this is the highest-risk seam.\",\"Verify that job-control.mjs signal handling covers SIGTERM/SIGHUP and that stale-job recovery exists.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T20:33:52.236Z"
+}

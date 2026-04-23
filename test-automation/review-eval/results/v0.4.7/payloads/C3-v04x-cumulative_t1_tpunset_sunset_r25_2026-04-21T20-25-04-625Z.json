@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 25
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 54109,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces a new retry subsystem (retry.mjs), BigModel error dispatch, and significant changes to glm-client.mjs, state.mjs, and tracked-jobs.mjs. Multiple high-severity concerns around retry idempotency, silent error swallowing, and race conditions in job state management were identified that could cause user-visible failures under stress or partial-outage conditions.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry wrapper may silently swallow errors and return undefined",
+        "body": "In retry.mjs, the retryWithBackoff function wraps the caller's operation in a loop. If the final attempt fails and the error doesn't match the retryable predicate, or if the catch block has a control-flow path that falls through without re-throwing, the function returns undefined instead of propagating the error. Callers in glm-client.mjs that await retryWithBackoff(...) and then use the result without a null-check will operate on undefined, causing downstream TypeErrors or silent data corruption (e.g., spreading undefined into JSON payloads). Under a BigModel outage where all retries exhaust, this becomes the dominant path.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.75,
+        "recommendation": "Audit retryWithBackoff's return paths: ensure every exhausted-retry or non-retryable-error path either re-throws the error or wraps it in a thrown Result. Add an explicit guard: if the function reaches the bottom of the loop without returning a value, throw the last error. Add a unit test that verifies a non-retryable error on attempt 1 propagates as a thrown exception, not as undefined."
+      },
+      {
+        "severity": "high",
+        "title": "Tracked-jobs state file writes are not atomic — crash mid-write corrupts job state",
+        "body": "tracked-jobs.mjs manages persistent job state. If the process crashes (OOM, SIGKILL, power loss) during writeJobFile or the equivalent state-flush operation, the JSON file on disk will be truncated or partially written. On next load, JSON.parse will throw, and all tracked job history is lost. There is no evidence of write-to-temp-then-rename (atomic rename) or any crash-recovery mechanism (e.g., validating a backup copy).",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.8,
+        "recommendation": "Replace direct fs.writeFile with an atomic write pattern: write to a .tmp file in the same directory, fsync, then rename over the target. On load, if the primary file fails to parse, attempt to load from a .bak or the .tmp. Add a test that simulates a truncated state file and verifies recovery."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs retry integration may duplicate side-effectful API calls",
+        "body": "glm-client.mjs wraps BigModel API calls with the new retry logic. If the HTTP request was sent and the server processed it, but the response was lost (network timeout, connection reset), the retry will re-issue the same request, causing duplicate submissions (e.g., duplicate review comments, duplicate job creations). The retry layer appears to treat network errors as retryable without an idempotency key or request deduplication mechanism.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.7,
+        "recommendation": "Add idempotency keys to all mutable BigModel API calls. For read-only operations, retries are safe. For write operations, either (a) make the operation idempotent by including a request hash, or (b) classify write-path network errors as non-retryable and surface them to the user for manual retry. Document which API calls are safe to retry."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error classification may mis-classify unknown errors as retryable",
+        "body": "The new BigModel error dispatch maps known error codes/types to retryable/non-retryable classifications. If the API returns an unexpected error shape (e.g., a new error code after an API version bump, or a proxy/gateway wrapping the error differently), the classify function likely defaults to retryable. This means novel permanent failures (auth revocation, account suspension, quota exhaustion with a new error code) will be retried up to maxAttempts, wasting time and potentially rate-limiting the account further, while hiding the real error from the user.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.65,
+        "recommendation": "Default unknown error shapes to non-retryable (fail-closed). Only explicitly whitelisted error codes/types should be retried. Log the raw error shape at warn level when classification falls through to the default, so new error types are discoverable. Add a test for a completely unrecognized error shape."
+      }
+    ],
+    "next_steps": [
+      "Read scripts/lib/retry.mjs fully and trace every return/throw path to confirm no silent undefined returns",
+      "Read scripts/lib/tracked-jobs.mjs and verify state-file write atomicity — if missing, this is a data-loss risk",
+      "Audit scripts/lib/glm-client.mjs call sites for write vs read classification and idempotency",
+      "Verify bigmodel-errors.mjs default classification is fail-closed, not fail-open",
+      "Run the existing test suite (tests/retry.test.mjs, tests/bigmodel-errors.test.mjs) and confirm coverage of the exhausted-retry and unknown-error-edge cases"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 cumulative diff introduces a new retry subsystem (retry.mjs), BigModel error dispatch, and significant changes to glm-client.mjs, state.mjs, and tracked-jobs.mjs. Multiple high-severity concerns around retry idempotency, silent error swallowing, and race conditions in job state management were identified that could cause user-visible failures under stress or partial-outage conditions.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Retry wrapper may silently swallow errors and return undefined\",\"body\":\"In retry.mjs, the retryWithBackoff function wraps the caller's operation in a loop. If the final attempt fails and the error doesn't match the retryable predicate, or if the catch block has a control-flow path that falls through without re-throwing, the function returns undefined instead of propagating the error. Callers in glm-client.mjs that await retryWithBackoff(...) and then use the result without a null-check will operate on undefined, causing downstream TypeErrors or silent data corruption (e.g., spreading undefined into JSON payloads). Under a BigModel outage where all retries exhaust, this becomes the dominant path.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.75,\"recommendation\":\"Audit retryWithBackoff's return paths: ensure every exhausted-retry or non-retryable-error path either re-throws the error or wraps it in a thrown Result. Add an explicit guard: if the function reaches the bottom of the loop without returning a value, throw the last error. Add a unit test that verifies a non-retryable error on attempt 1 propagates as a thrown exception, not as undefined.\"},{\"severity\":\"high\",\"title\":\"Tracked-jobs state file writes are not atomic — crash mid-write corrupts job state\",\"body\":\"tracked-jobs.mjs manages persistent job state. If the process crashes (OOM, SIGKILL, power loss) during writeJobFile or the equivalent state-flush operation, the JSON file on disk will be truncated or partially written. On next load, JSON.parse will throw, and all tracked job history is lost. There is no evidence of write-to-temp-then-rename (atomic rename) or any crash-recovery mechanism (e.g., validating a backup copy).\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.8,\"recommendation\":\"Replace direct fs.writeFile with an atomic write pattern: write to a .tmp file in the same directory, fsync, then rename over the target. On load, if the primary file fails to parse, attempt to load from a .bak or the .tmp. Add a test that simulates a truncated state file and verifies recovery.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs retry integration may duplicate side-effectful API calls\",\"body\":\"glm-client.mjs wraps BigModel API calls with the new retry logic. If the HTTP request was sent and the server processed it, but the response was lost (network timeout, connection reset), the retry will re-issue the same request, causing duplicate submissions (e.g., duplicate review comments, duplicate job creations). The retry layer appears to treat network errors as retryable without an idempotency key or request deduplication mechanism.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.7,\"recommendation\":\"Add idempotency keys to all mutable BigModel API calls. For read-only operations, retries are safe. For write operations, either (a) make the operation idempotent by including a request hash, or (b) classify write-path network errors as non-retryable and surface them to the user for manual retry. Document which API calls are safe to retry.\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors.mjs error classification may mis-classify unknown errors as retryable\",\"body\":\"The new BigModel error dispatch maps known error codes/types to retryable/non-retryable classifications. If the API returns an unexpected error shape (e.g., a new error code after an API version bump, or a proxy/gateway wrapping the error differently), the classify function likely defaults to retryable. This means novel permanent failures (auth revocation, account suspension, quota exhaustion with a new error code) will be retried up to maxAttempts, wasting time and potentially rate-limiting the account further, while hiding the real error from the user.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.65,\"recommendation\":\"Default unknown error shapes to non-retryable (fail-closed). Only explicitly whitelisted error codes/types should be retried. Log the raw error shape at warn level when classification falls through to the default, so new error types are discoverable. Add a test for a completely unrecognized error shape.\"}],\"next_steps\":[\"Read scripts/lib/retry.mjs fully and trace every return/throw path to confirm no silent undefined returns\",\"Read scripts/lib/tracked-jobs.mjs and verify state-file write atomicity — if missing, this is a data-loss risk\",\"Audit scripts/lib/glm-client.mjs call sites for write vs read classification and idempotency\",\"Verify bigmodel-errors.mjs default classification is fail-closed, not fail-open\",\"Run the existing test suite (tests/retry.test.mjs, tests/bigmodel-errors.test.mjs) and confirm coverage of the exhausted-retry and unknown-error-edge cases\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T20:25:04.655Z"
+}

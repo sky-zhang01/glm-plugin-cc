@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 50
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 84849,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff deletes scripts/lib/process.mjs (67 lines) while modifying multiple consumers in the same changeset. Combined with a new 370-line retry/error-dispatch subsystem (retry.mjs + bigmodel-errors.mjs) that alters core client behavior, there is a concrete risk of runtime import failures and misclassified errors causing silent data loss or stuck jobs. This should not ship until the deleted module's migration is verified end-to-end.",
+    "findings": [
+      {
+        "severity": "critical",
+        "title": "scripts/lib/process.mjs deleted — potential broken imports at runtime",
+        "body": "The diff removes scripts/lib/process.mjs entirely (67 lines deleted). This was a library module under scripts/lib/, meaning it was almost certainly imported by other modules (glm-companion.mjs, render.mjs, etc.) that are modified in this same diff. If any remaining file still contains an import from './lib/process.mjs' or './process.mjs', it will throw ERR_MODULE_NOT_FOUND at load time — a fatal, user-visible crash that cannot be caught by the new retry logic because it occurs before any retry wrapper is active. This class of failure is especially dangerous because it only manifests when the affected code path is exercised in the deployed environment, not necessarily during partial testing.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.82,
+        "recommendation": "Grep the entire codebase for any remaining imports of 'process.mjs' from the lib directory. If references exist, migrate them to whatever replaced this module (likely the new retry.mjs or inline logic in glm-companion.mjs). Add a CI lint rule that flags imports of deleted modules."
+      },
+      {
+        "severity": "high",
+        "title": "New retry.mjs + bigmodel-errors.mjs error dispatch may misclassify non-transient errors as retryable",
+        "body": "The diff adds 203 lines of retry logic and 168 lines of BigModel error classification, but the critical question is whether the error classifier correctly distinguishes idempotent vs non-idempotent API calls before deciding to retry. If the retry layer replays a mutation that already succeeded on the server (e.g., job submission, state update) but whose response was lost to a network timeout, the result could be duplicate jobs or corrupted state. The presence of tests/retry.test.mjs (352 lines) is encouraging, but test files alone don't confirm that the retry layer checks idempotency keys or verifies prior state before re-executing operations.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.68,
+        "recommendation": "Verify that retry.mjs checks whether the operation is idempotent before retrying, or that glm-client.mjs marks mutations with idempotency keys. Add explicit test cases for the scenario where the first attempt succeeds server-side but the response is lost, then the retry executes a second time."
+      },
+      {
+        "severity": "medium",
+        "title": "Concurrent changes to state.mjs + tracked-jobs.mjs under new retry regime risk inconsistent job state",
+        "body": "state.mjs (32 lines changed) and tracked-jobs.mjs (78 lines changed) are both modified in the same diff that introduces retry.mjs. If a retry fires while the job tracker is mid-update, or if the state file is written partially before a crash and then retried, the job could end up in an unrecoverable stuck state — tracked as 'running' but actually dead. The tracked-jobs system appears to manage job lifecycle, and the retry system now controls when operations are re-attempted, but there's no evidence of a coordination mechanism between them (e.g., advisory locks, atomic state transitions, or lease-based cleanup).",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.55,
+        "recommendation": "Add a test that simulates a crash mid-state-write, then verifies that retry + tracked-jobs recovery converges to a consistent state rather than leaving an orphaned 'running' entry. Consider adding a staleness timeout so stuck jobs are automatically reclaimed."
+      }
+    ],
+    "next_steps": [
+      "Run `grep -r 'process\\.mjs' scripts/` to confirm no dangling imports remain after the deletion of scripts/lib/process.mjs.",
+      "Inspect retry.mjs for idempotency guards — specifically whether it differentiates between safe-to-retry reads and unsafe-to-retry writes before calling the retry backoff.",
+      "Run the full test suite under Node's --experimental-vm-modules flag (or equivalent strict ESM mode) to surface any import resolution failures that would only appear at load time.",
+      "Verify that tracked-jobs.mjs handles the case where retry.mjs re-executes an operation whose prior attempt partially updated state."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff deletes scripts/lib/process.mjs (67 lines) while modifying multiple consumers in the same changeset. Combined with a new 370-line retry/error-dispatch subsystem (retry.mjs + bigmodel-errors.mjs) that alters core client behavior, there is a concrete risk of runtime import failures and misclassified errors causing silent data loss or stuck jobs. This should not ship until the deleted module's migration is verified end-to-end.\",\n  \"findings\": [\n    {\n      \"severity\": \"critical\",\n      \"title\": \"scripts/lib/process.mjs deleted — potential broken imports at runtime\",\n      \"body\": \"The diff removes scripts/lib/process.mjs entirely (67 lines deleted). This was a library module under scripts/lib/, meaning it was almost certainly imported by other modules (glm-companion.mjs, render.mjs, etc.) that are modified in this same diff. If any remaining file still contains an import from './lib/process.mjs' or './process.mjs', it will throw ERR_MODULE_NOT_FOUND at load time — a fatal, user-visible crash that cannot be caught by the new retry logic because it occurs before any retry wrapper is active. This class of failure is especially dangerous because it only manifests when the affected code path is exercised in the deployed environment, not necessarily during partial testing.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.82,\n      \"recommendation\": \"Grep the entire codebase for any remaining imports of 'process.mjs' from the lib directory. If references exist, migrate them to whatever replaced this module (likely the new retry.mjs or inline logic in glm-companion.mjs). Add a CI lint rule that flags imports of deleted modules.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"New retry.mjs + bigmodel-errors.mjs error dispatch may misclassify non-transient errors as retryable\",\n      \"body\": \"The diff adds 203 lines of retry logic and 168 lines of BigModel error classification, but the critical question is whether the error classifier correctly distinguishes idempotent vs non-idempotent API calls before deciding to retry. If the retry layer replays a mutation that already succeeded on the server (e.g., job submission, state update) but whose response was lost to a network timeout, the result could be duplicate jobs or corrupted state. The presence of tests/retry.test.mjs (352 lines) is encouraging, but test files alone don't confirm that the retry layer checks idempotency keys or verifies prior state before re-executing operations.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Verify that retry.mjs checks whether the operation is idempotent before retrying, or that glm-client.mjs marks mutations with idempotency keys. Add explicit test cases for the scenario where the first attempt succeeds server-side but the response is lost, then the retry executes a second time.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Concurrent changes to state.mjs + tracked-jobs.mjs under new retry regime risk inconsistent job state\",\n      \"body\": \"state.mjs (32 lines changed) and tracked-jobs.mjs (78 lines changed) are both modified in the same diff that introduces retry.mjs. If a retry fires while the job tracker is mid-update, or if the state file is written partially before a crash and then retried, the job could end up in an unrecoverable stuck state — tracked as 'running' but actually dead. The tracked-jobs system appears to manage job lifecycle, and the retry system now controls when operations are re-attempted, but there's no evidence of a coordination mechanism between them (e.g., advisory locks, atomic state transitions, or lease-based cleanup).\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Add a test that simulates a crash mid-state-write, then verifies that retry + tracked-jobs recovery converges to a consistent state rather than leaving an orphaned 'running' entry. Consider adding a staleness timeout so stuck jobs are automatically reclaimed.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `grep -r 'process\\\\.mjs' scripts/` to confirm no dangling imports remain after the deletion of scripts/lib/process.mjs.\",\n    \"Inspect retry.mjs for idempotency guards — specifically whether it differentiates between safe-to-retry reads and unsafe-to-retry writes before calling the retry backoff.\",\n    \"Run the full test suite under Node's --experimental-vm-modules flag (or equivalent strict ESM mode) to surface any import resolution failures that would only appear at load time.\",\n    \"Verify that tracked-jobs.mjs handles the case where retry.mjs re-executes an operation whose prior attempt partially updated state.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T17:38:00.233Z"
+}

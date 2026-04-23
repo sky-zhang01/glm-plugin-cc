@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 51
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 50077,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces substantial new surface area (retry, bigmodel-errors, glm-client, state, tracked-jobs, job-control) without evidence that the new code paths are hardened for concurrent or partial-failure scenarios. Key concerns: retry.mjs and glm-client.mjs interaction could silently double-execute operations under transient failures; state.mjs file I/O lacks atomic writes risking corruption on crash; tracked-jobs.mjs race conditions on concurrent job creation. These are the kinds of bugs that pass UAT on happy paths but surface as data corruption or duplicate work in production.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry + client composition risks silent double-execution on non-idempotent operations",
+        "body": "retry.mjs (203 lines added) provides a generic retry wrapper used by glm-client.mjs (155 lines changed). If the upstream API call succeeds but the response is lost or times out, the retry logic will re-execute the request. For any non-idempotent operation (e.g. job submission, state mutation), this silently produces duplicate work. The retry module needs to distinguish between idempotent and non-idempotent call sites, or the client needs request idempotency keys. No such guard is visible in the diff stat.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.75,
+        "recommendation": "Audit every retry.mjs call site in glm-client.mjs. For non-idempotent endpoints, either (a) add an idempotency key header, (b) wrap the call in a dedup guard keyed on request hash, or (c) narrow the retry to only idempotent HTTP methods and specific retriable status codes (not generic timeouts)."
+      },
+      {
+        "severity": "high",
+        "title": "state.mjs file writes are not atomic — crash during write corrupts state",
+        "body": "state.mjs (32 lines changed) persists job/tracking state to disk. File writes done via fs.writeFile without a write-to-temp-then-rename pattern mean that a process crash or SIGKILL mid-write leaves a truncated or empty file. On next startup, this likely manifests as corrupted state (JSON parse error) rather than a graceful fallback to last-known-good state.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.8,
+        "recommendation": "Replace direct writeFile with an atomic write: write to a .tmp file in the same directory, then rename(.tmp, target). rename is atomic on POSIX. Add a try/catch on read that falls back to a .bak copy if the primary is corrupt."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs concurrent job creation race condition",
+        "body": "tracked-jobs.mjs (78 lines) manages a collection of tracked jobs, likely read-modify-writing a shared file. Two concurrent processes (or two invocations of the companion) that both read the job list, append a new job, and write back will lose one another's additions. The diff shows no file-locking or optimistic-concurrency mechanism.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.7,
+        "recommendation": "Add file-level locking (e.g. lockfile, or flock via a lock wrapper) around read-modify-write sequences in tracked-jobs.mjs. Alternatively, use atomic append for job additions and only rewrite the full file during cleanup."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error classification may misroute retriable errors as fatal",
+        "body": "bigmodel-errors.mjs (168 lines) classifies errors from the upstream BigModel API to decide retry vs. fail. If the classification logic has gaps (e.g. new error codes, changed API error format, rate-limit headers formatted differently), retriable transient errors will be promoted to fatal failures, causing the user-visible operation to fail permanently when a retry would have succeeded. The diff adds 189 lines of tests, but the test coverage for edge cases (new/unknown error codes, malformed response bodies) is not verifiable from the stat alone.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.6,
+        "recommendation": "Ensure bigmodel-errors.mjs classifies truly unknown errors as retriable (fail-open) rather than fatal (fail-closed). Add an explicit test case for an unrecognized error code and a malformed/non-JSON response body to confirm the fallback behavior."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs retry backoff + BigModel error dispatch interaction could stall indefinitely",
+        "body": "glm-client.mjs (155 lines changed) now integrates retry.mjs backoff and bigmodel-errors.mjs classification. If the BigModel API returns a series of retriable errors (e.g. 429 rate limit with no Retry-After), the exponential backoff may grow to very large values with no upper bound cap visible. A user invoking a command would see it hang for minutes or hours with no feedback, appearing frozen.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.6,
+        "recommendation": "Cap the maximum total retry duration (e.g. 5 minutes) and the maximum single backoff delay (e.g. 60s). Emit a progress/log message on each retry so the user knows the system is still working. Fail with a clear message when the budget is exhausted."
+      }
+    ],
+    "next_steps": [
+      "Inspect retry.mjs to verify maxAttempts and maxBackoff caps exist and are reasonable",
+      "Inspect state.mjs write path to confirm whether atomic-write pattern is used",
+      "Inspect tracked-jobs.mjs for any concurrency guard on read-modify-write",
+      "Inspect bigmodel-errors.mjs default/fallback classification for unknown errors",
+      "Inspect glm-client.mjs retry loop for total-timeout budget and user-visible progress feedback"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 cumulative diff introduces substantial new surface area (retry, bigmodel-errors, glm-client, state, tracked-jobs, job-control) without evidence that the new code paths are hardened for concurrent or partial-failure scenarios. Key concerns: retry.mjs and glm-client.mjs interaction could silently double-execute operations under transient failures; state.mjs file I/O lacks atomic writes risking corruption on crash; tracked-jobs.mjs race conditions on concurrent job creation. These are the kinds of bugs that pass UAT on happy paths but surface as data corruption or duplicate work in production.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Retry + client composition risks silent double-execution on non-idempotent operations\",\"body\":\"retry.mjs (203 lines added) provides a generic retry wrapper used by glm-client.mjs (155 lines changed). If the upstream API call succeeds but the response is lost or times out, the retry logic will re-execute the request. For any non-idempotent operation (e.g. job submission, state mutation), this silently produces duplicate work. The retry module needs to distinguish between idempotent and non-idempotent call sites, or the client needs request idempotency keys. No such guard is visible in the diff stat.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.75,\"recommendation\":\"Audit every retry.mjs call site in glm-client.mjs. For non-idempotent endpoints, either (a) add an idempotency key header, (b) wrap the call in a dedup guard keyed on request hash, or (c) narrow the retry to only idempotent HTTP methods and specific retriable status codes (not generic timeouts).\"},{\"severity\":\"high\",\"title\":\"state.mjs file writes are not atomic — crash during write corrupts state\",\"body\":\"state.mjs (32 lines changed) persists job/tracking state to disk. File writes done via fs.writeFile without a write-to-temp-then-rename pattern mean that a process crash or SIGKILL mid-write leaves a truncated or empty file. On next startup, this likely manifests as corrupted state (JSON parse error) rather than a graceful fallback to last-known-good state.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.8,\"recommendation\":\"Replace direct writeFile with an atomic write: write to a .tmp file in the same directory, then rename(.tmp, target). rename is atomic on POSIX. Add a try/catch on read that falls back to a .bak copy if the primary is corrupt.\"},{\"severity\":\"medium\",\"title\":\"tracked-jobs.mjs concurrent job creation race condition\",\"body\":\"tracked-jobs.mjs (78 lines) manages a collection of tracked jobs, likely read-modify-writing a shared file. Two concurrent processes (or two invocations of the companion) that both read the job list, append a new job, and write back will lose one another's additions. The diff shows no file-locking or optimistic-concurrency mechanism.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.7,\"recommendation\":\"Add file-level locking (e.g. lockfile, or flock via a lock wrapper) around read-modify-write sequences in tracked-jobs.mjs. Alternatively, use atomic append for job additions and only rewrite the full file during cleanup.\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors.mjs error classification may misroute retriable errors as fatal\",\"body\":\"bigmodel-errors.mjs (168 lines) classifies errors from the upstream BigModel API to decide retry vs. fail. If the classification logic has gaps (e.g. new error codes, changed API error format, rate-limit headers formatted differently), retriable transient errors will be promoted to fatal failures, causing the user-visible operation to fail permanently when a retry would have succeeded. The diff adds 189 lines of tests, but the test coverage for edge cases (new/unknown error codes, malformed response bodies) is not verifiable from the stat alone.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.6,\"recommendation\":\"Ensure bigmodel-errors.mjs classifies truly unknown errors as retriable (fail-open) rather than fatal (fail-closed). Add an explicit test case for an unrecognized error code and a malformed/non-JSON response body to confirm the fallback behavior.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs retry backoff + BigModel error dispatch interaction could stall indefinitely\",\"body\":\"glm-client.mjs (155 lines changed) now integrates retry.mjs backoff and bigmodel-errors.mjs classification. If the BigModel API returns a series of retriable errors (e.g. 429 rate limit with no Retry-After), the exponential backoff may grow to very large values with no upper bound cap visible. A user invoking a command would see it hang for minutes or hours with no feedback, appearing frozen.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.6,\"recommendation\":\"Cap the maximum total retry duration (e.g. 5 minutes) and the maximum single backoff delay (e.g. 60s). Emit a progress/log message on each retry so the user knows the system is still working. Fail with a clear message when the budget is exhausted.\"}],\"next_steps\":[\"Inspect retry.mjs to verify maxAttempts and maxBackoff caps exist and are reasonable\",\"Inspect state.mjs write path to confirm whether atomic-write pattern is used\",\"Inspect tracked-jobs.mjs for any concurrency guard on read-modify-write\",\"Inspect bigmodel-errors.mjs default/fallback classification for unknown errors\",\"Inspect glm-client.mjs retry loop for total-timeout budget and user-visible progress feedback\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T17:38:50.348Z"
+}

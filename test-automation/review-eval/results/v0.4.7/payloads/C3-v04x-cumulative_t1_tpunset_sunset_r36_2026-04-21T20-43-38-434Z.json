@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 36
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 95670,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "Cumulative v0.4.0→v0.4.6 diff adds 6600+ lines across 84 files, replacing core infrastructure (process.mjs deleted, retry.mjs/bigmodel-errors.mjs/tracked-jobs.mjs added) without visible integration coverage of the new retry→error-dispatch→job-tracking pipeline. The deleted process.mjs creates a latent import-resolution risk, and the coupled error-classification→retry system has no evidence of exhaustive status-code coverage. Cannot confirm ship-readiness from context alone.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "process.mjs deleted — latent import-resolution failure risk",
+        "body": "scripts/lib/process.mjs (67 lines) was removed in this cumulative diff. If any surviving file performs a dynamic import('*/process.mjs'), a string-concatenated require/import path, or is loaded via a manifest that still references the old path, the module will fail at runtime with MODULE_NOT_FOUND. The check-imports.mjs modification (5 lines changed) can only validate static imports. Dynamic import patterns, eval-based loading, or external consumers would escape detection. The impact is a hard crash at the point of first invocation of the affected code path — likely during job execution or retry scenarios where fallback behavior is most needed.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.72,
+        "recommendation": "Run `grep -r 'process\\.mjs\\|process\\.js\\|lib/process' scripts/ commands/ --include='*.mjs' --include='*.js' --include='*.json'` to confirm zero surviving references. Add a CI gate that `node -e \"import('./scripts/lib/process.mjs')\"` fails (proving the module is gone and nothing depends on it)."
+      },
+      {
+        "severity": "high",
+        "title": "retry.mjs ↔ bigmodel-errors.mjs coupling — misclassification cascades silently",
+        "body": "A new 203-line retry module (retry.mjs) depends entirely on a new 168-line error classifier (bigmodel-errors.mjs) to decide whether to retry, back off, or fail. If the classifier returns a wrong category for any HTTP status (e.g., misclassifying 408/429/502/503/504 as non-retryable, or 400/401/403 as retryable), the retry layer will either: (a) fail permanently on transient errors (user-visible job failures, no recovery), or (b) aggressively retry non-retryable errors (resource waste, potential API rate-limit escalation, account lockout). The 189-line test file for bigmodel-errors exists but cannot be verified for exhaustiveness from context. There is no visible integration test that sends a real (or mocked) HTTP response through both modules end-to-end.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.78,
+        "recommendation": "Add an integration test that exercises the full pipeline: HTTP response → classify → retry decision → final outcome. Verify exhaustive coverage of every HTTP status code the BigModel API can return (especially 400, 401, 403, 408, 429, 500, 502, 503, 504) and confirm each maps to the correct retry/fail/backoff behavior. Add a default/fallback classification for unknown status codes that logs a warning rather than silently retrying or failing."
+      },
+      {
+        "severity": "medium",
+        "title": "No integration tests for retry→state→job-tracking pipeline",
+        "body": "Three new/modified modules (retry.mjs +203, tracked-jobs.mjs +78, state.mjs +32 changed) form a stateful pipeline: a job is submitted, may fail and be retried, state is updated, and the job is tracked. Unit tests exist for each module individually, but no integration test file exercises the full flow. A partial failure scenario — where retry succeeds but state update fails, or state update succeeds but job tracking is lost — could leave the system in an inconsistent state (phantom jobs, lost results, or stuck retry loops) that no unit test would catch. UAT reports cover v0.4.4 and v0.4.5 scenarios but not the cumulative v0.4.0→v0.4.6 retry infrastructure.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.68,
+        "recommendation": "Add at least one integration test covering: (1) job submission → transient failure → retry → success → state update → job marked complete; (2) job submission → permanent failure → no retry → state reflects failure → job marked failed; (3) retry succeeds but state write fails → system remains consistent. Verify no path leaves tracked-jobs and state.mjs out of sync."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs grew 155 lines — silent failure surface likely expanded",
+        "body": "glm-client.mjs was substantially modified (+155 lines diffstat). This is the HTTP client that communicates with the BigModel API. With the addition of retry logic and error dispatch, there are new code paths where errors could be caught, classified, and silently handled without surfacing to the caller. If the retry exhausts its budget and the final error is swallowed or replaced with a generic message, the caller (and ultimately the user) sees a successful-looking result with missing or stale data. The result-propagation.test.mjs (69 lines) suggests awareness of this risk, but 69 lines is thin for covering all propagation scenarios through a 155-line client change.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.65,
+        "recommendation": "Audit every catch/error path in glm-client.mjs to confirm that exhausted retries always propagate a clear, non-swallowed error to the caller. Verify result-propagation.test.mjs covers: retry exhaustion, network timeout after retry, and partial response handling. Add a test that confirms the caller receives a distinct error when retries are exhausted vs. when no retries were attempted."
+      }
+    ],
+    "next_steps": [
+      "Run `grep -rn 'process\\.mjs\\|lib/process' scripts/ --include='*.mjs'` to confirm process.mjs has zero surviving references; block ship if any are found.",
+      "Request the full contents of bigmodel-errors.mjs and retry.mjs to audit the error classification table against the BigModel API documentation for exhaustiveness.",
+      "Add an end-to-end integration test that exercises submit→fail→retry→succeed and submit→fail→exhaust-retries through glm-client→retry→state→tracked-jobs.",
+      "Audit glm-client.mjs error propagation paths to confirm no silent swallowing on exhausted retries or partial responses.",
+      "Run the existing test suite (`npm test`) and confirm 100% pass before ship; any skipped or failing tests in this cumulative change are a hard block."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"Cumulative v0.4.0→v0.4.6 diff adds 6600+ lines across 84 files, replacing core infrastructure (process.mjs deleted, retry.mjs/bigmodel-errors.mjs/tracked-jobs.mjs added) without visible integration coverage of the new retry→error-dispatch→job-tracking pipeline. The deleted process.mjs creates a latent import-resolution risk, and the coupled error-classification→retry system has no evidence of exhaustive status-code coverage. Cannot confirm ship-readiness from context alone.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"process.mjs deleted — latent import-resolution failure risk\",\n      \"body\": \"scripts/lib/process.mjs (67 lines) was removed in this cumulative diff. If any surviving file performs a dynamic import('*/process.mjs'), a string-concatenated require/import path, or is loaded via a manifest that still references the old path, the module will fail at runtime with MODULE_NOT_FOUND. The check-imports.mjs modification (5 lines changed) can only validate static imports. Dynamic import patterns, eval-based loading, or external consumers would escape detection. The impact is a hard crash at the point of first invocation of the affected code path — likely during job execution or retry scenarios where fallback behavior is most needed.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Run `grep -r 'process\\\\.mjs\\\\|process\\\\.js\\\\|lib/process' scripts/ commands/ --include='*.mjs' --include='*.js' --include='*.json'` to confirm zero surviving references. Add a CI gate that `node -e \\\"import('./scripts/lib/process.mjs')\\\"` fails (proving the module is gone and nothing depends on it).\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"retry.mjs ↔ bigmodel-errors.mjs coupling — misclassification cascades silently\",\n      \"body\": \"A new 203-line retry module (retry.mjs) depends entirely on a new 168-line error classifier (bigmodel-errors.mjs) to decide whether to retry, back off, or fail. If the classifier returns a wrong category for any HTTP status (e.g., misclassifying 408/429/502/503/504 as non-retryable, or 400/401/403 as retryable), the retry layer will either: (a) fail permanently on transient errors (user-visible job failures, no recovery), or (b) aggressively retry non-retryable errors (resource waste, potential API rate-limit escalation, account lockout). The 189-line test file for bigmodel-errors exists but cannot be verified for exhaustiveness from context. There is no visible integration test that sends a real (or mocked) HTTP response through both modules end-to-end.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Add an integration test that exercises the full pipeline: HTTP response → classify → retry decision → final outcome. Verify exhaustive coverage of every HTTP status code the BigModel API can return (especially 400, 401, 403, 408, 429, 500, 502, 503, 504) and confirm each maps to the correct retry/fail/backoff behavior. Add a default/fallback classification for unknown status codes that logs a warning rather than silently retrying or failing.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"No integration tests for retry→state→job-tracking pipeline\",\n      \"body\": \"Three new/modified modules (retry.mjs +203, tracked-jobs.mjs +78, state.mjs +32 changed) form a stateful pipeline: a job is submitted, may fail and be retried, state is updated, and the job is tracked. Unit tests exist for each module individually, but no integration test file exercises the full flow. A partial failure scenario — where retry succeeds but state update fails, or state update succeeds but job tracking is lost — could leave the system in an inconsistent state (phantom jobs, lost results, or stuck retry loops) that no unit test would catch. UAT reports cover v0.4.4 and v0.4.5 scenarios but not the cumulative v0.4.0→v0.4.6 retry infrastructure.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Add at least one integration test covering: (1) job submission → transient failure → retry → success → state update → job marked complete; (2) job submission → permanent failure → no retry → state reflects failure → job marked failed; (3) retry succeeds but state write fails → system remains consistent. Verify no path leaves tracked-jobs and state.mjs out of sync.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client.mjs grew 155 lines — silent failure surface likely expanded\",\n      \"body\": \"glm-client.mjs was substantially modified (+155 lines diffstat). This is the HTTP client that communicates with the BigModel API. With the addition of retry logic and error dispatch, there are new code paths where errors could be caught, classified, and silently handled without surfacing to the caller. If the retry exhausts its budget and the final error is swallowed or replaced with a generic message, the caller (and ultimately the user) sees a successful-looking result with missing or stale data. The result-propagation.test.mjs (69 lines) suggests awareness of this risk, but 69 lines is thin for covering all propagation scenarios through a 155-line client change.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Audit every catch/error path in glm-client.mjs to confirm that exhausted retries always propagate a clear, non-swallowed error to the caller. Verify result-propagation.test.mjs covers: retry exhaustion, network timeout after retry, and partial response handling. Add a test that confirms the caller receives a distinct error when retries are exhausted vs. when no retries were attempted.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `grep -rn 'process\\\\.mjs\\\\|lib/process' scripts/ --include='*.mjs'` to confirm process.mjs has zero surviving references; block ship if any are found.\",\n    \"Request the full contents of bigmodel-errors.mjs and retry.mjs to audit the error classification table against the BigModel API documentation for exhaustiveness.\",\n    \"Add an end-to-end integration test that exercises submit→fail→retry→succeed and submit→fail→exhaust-retries through glm-client→retry→state→tracked-jobs.\",\n    \"Audit glm-client.mjs error propagation paths to confirm no silent swallowing on exhausted retries or partial responses.\",\n    \"Run the existing test suite (`npm test`) and confirm 100% pass before ship; any skipped or failing tests in this cumulative change are a hard block.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T20:43:38.464Z"
+}

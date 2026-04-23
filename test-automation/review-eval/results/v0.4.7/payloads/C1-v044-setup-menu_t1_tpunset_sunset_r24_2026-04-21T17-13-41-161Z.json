@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 24
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 48121,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit bundles an npm scope rename with a functional fix in a single patch-level commit (v0.4.7). Scope renames are effectively uninstall/reinstall events for consumers — existing installations, lockfiles, and any hardcoded references will break silently. The setup command changes (~19 lines) add interactive branching to an already-configured state, but without seeing guards for non-interactive/tty contexts, scripted usage may hang or fail silently.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change shipped in a patch version",
+        "body": "package.json shows 4 changed lines consistent with an npm scope rename. Combined with marketplace.json (4 lines) and plugin.json (2 lines) changes, this updates the package identity. Anyone with the old-scoped package installed will not receive this update via normal npm update paths — npm treats different scopes as entirely different packages. Existing lockfiles pinning the old scope will not resolve to the new one. There is no indication of an npm alias, deprecation notice on the old package, or migration guide in the diff. This is a breaking change disguised as a fix.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.82,
+        "recommendation": "Either (a) split the scope rename into a separate major-version bump with a deprecation path on the old package, or (b) add a postinstall script or documentation instructing users to uninstall the old-scoped package and install the new one. Publish a deprecation notice on the old scope."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive menu in setup command may hang in non-TTY contexts",
+        "body": "commands/setup.md has 19 lines changed, adding an interactive menu when already configured. Claude custom commands invoked via API, scripts, or non-interactive sessions may not support interactive prompting. If the command unconditionally waits for user input before proceeding, automated setup flows will hang indefinitely with no timeout or fallback. The diff stat does not suggest guard logic for non-interactive mode.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.6,
+        "recommendation": "Verify the setup command has a non-interactive/default path. If the menu requires user choice, provide a --yes or --default flag, or auto-select a sensible default after a timeout. Document the non-interactive invocation pattern."
+      },
+      {
+        "severity": "medium",
+        "title": "marketplace.json and plugin.json may reference stale scope after rename",
+        "body": "marketplace.json (4 lines) and plugin.json (2 lines) are changed alongside the package.json scope rename. If these files contain the old scope name in any field not updated, plugin discovery/installation will fail or point to a non-existent package. Partial updates across config files are a common source of silent breakage in plugin systems.",
+        "file": ".claude-plugin/marketplace.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.55,
+        "recommendation": "Audit all fields in marketplace.json and plugin.json for any remaining references to the old scope. Verify the plugin can be discovered and installed fresh using only the new scope name."
+      }
+    ],
+    "next_steps": [
+      "Inspect the full diff of package.json to confirm the old and new scope names and verify no internal references are missed.",
+      "Test that a fresh install of the new-scoped package works end-to-end and that the old-scoped package is properly deprecated or documented as moved.",
+      "Test the setup command in a non-interactive context to verify it does not hang waiting for menu input.",
+      "Consider splitting this into two commits: one for the functional fix (interactive menu), one for the scope rename with proper migration tooling."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"This commit bundles an npm scope rename with a functional fix in a single patch-level commit (v0.4.7). Scope renames are effectively uninstall/reinstall events for consumers — existing installations, lockfiles, and any hardcoded references will break silently. The setup command changes (~19 lines) add interactive branching to an already-configured state, but without seeing guards for non-interactive/tty contexts, scripted usage may hang or fail silently.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename is a breaking change shipped in a patch version\",\n      \"body\": \"package.json shows 4 changed lines consistent with an npm scope rename. Combined with marketplace.json (4 lines) and plugin.json (2 lines) changes, this updates the package identity. Anyone with the old-scoped package installed will not receive this update via normal npm update paths — npm treats different scopes as entirely different packages. Existing lockfiles pinning the old scope will not resolve to the new one. There is no indication of an npm alias, deprecation notice on the old package, or migration guide in the diff. This is a breaking change disguised as a fix.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.82,\n      \"recommendation\": \"Either (a) split the scope rename into a separate major-version bump with a deprecation path on the old package, or (b) add a postinstall script or documentation instructing users to uninstall the old-scoped package and install the new one. Publish a deprecation notice on the old scope.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Interactive menu in setup command may hang in non-TTY contexts\",\n      \"body\": \"commands/setup.md has 19 lines changed, adding an interactive menu when already configured. Claude custom commands invoked via API, scripts, or non-interactive sessions may not support interactive prompting. If the command unconditionally waits for user input before proceeding, automated setup flows will hang indefinitely with no timeout or fallback. The diff stat does not suggest guard logic for non-interactive mode.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Verify the setup command has a non-interactive/default path. If the menu requires user choice, provide a --yes or --default flag, or auto-select a sensible default after a timeout. Document the non-interactive invocation pattern.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"marketplace.json and plugin.json may reference stale scope after rename\",\n      \"body\": \"marketplace.json (4 lines) and plugin.json (2 lines) are changed alongside the package.json scope rename. If these files contain the old scope name in any field not updated, plugin discovery/installation will fail or point to a non-existent package. Partial updates across config files are a common source of silent breakage in plugin systems.\",\n      \"file\": \".claude-plugin/marketplace.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Audit all fields in marketplace.json and plugin.json for any remaining references to the old scope. Verify the plugin can be discovered and installed fresh using only the new scope name.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect the full diff of package.json to confirm the old and new scope names and verify no internal references are missed.\",\n    \"Test that a fresh install of the new-scoped package works end-to-end and that the old-scoped package is properly deprecated or documented as moved.\",\n    \"Test the setup command in a non-interactive context to verify it does not hang waiting for menu input.\",\n    \"Consider splitting this into two commits: one for the functional fix (interactive menu), one for the scope rename with proper migration tooling.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T17:13:41.190Z"
+}

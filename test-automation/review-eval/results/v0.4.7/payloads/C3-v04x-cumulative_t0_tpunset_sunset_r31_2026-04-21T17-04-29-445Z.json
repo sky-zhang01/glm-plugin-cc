@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 31
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 50118,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.7 cumulative diff introduces substantial new surface area — retry logic, BigModel error dispatch, tracked jobs, and refactored GLM client — but several of these modules have concerning failure-mode gaps. The retry library silently swallows retry-state on process interruption, BigModel error classification can misclassify unknown errors into non-retryable buckets, and the tracked-jobs state file has no atomic-write protection risking corruption on crash. These are the kinds of issues that hide during happy-path testing and surface under real production stress.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs does not persist retry state — interrupted retries silently restart from attempt 0",
+        "body": "The retry module tracks attempt counts in-memory only. If the process is interrupted (SIGTERM, OOM kill, system sleep) during a multi-attempt retry loop, the next invocation starts fresh at attempt 0. For retry strategies with long backoff delays (exponential backoff), this means the effective retry budget doubles on every interruption. Combined with the BigModel error dispatch that maps certain errors to aggressive retry strategies, a flaky endpoint + process restarts can produce an unbounded number of API calls with no audit trail. The caller in glm-client.mjs that invokes retryWithBackoff has no mechanism to detect that a fresh-restart happened versus a first attempt.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.75,
+        "recommendation": "Either persist retry attempt state to disk (alongside the existing state.mjs infrastructure) with a TTL/lease, or add a max-cumulative-attempts guard that spans process invocations using the tracked-jobs state file. At minimum, log a warning when a retry loop starts at attempt 0 if a previous incomplete retry for the same operation/key is detectable."
+      },
+      {
+        "severity": "high",
+        "title": "tracked-jobs.mjs state file written non-atomically — crash during write corrupts job tracking",
+        "body": "The tracked-jobs module manages job state in a file (likely JSON). If the process crashes or is killed during a writeJson call (using fs.mjs helpers), the state file can be left in a partially-written state — truncated or containing invalid JSON. On next read, JSON.parse will throw, and depending on how the error is handled upstream, this could either silently lose all tracked job state or crash the entire companion invocation. This is a classic non-atomic write hazard. The fs.mjs module was modified in this diff but there is no evidence of atomic write (write-to-temp-then-rename) patterns being adopted.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.8,
+        "recommendation": "Adopt atomic file writes: write to a temporary file in the same directory, then rename (fs.rename) over the target. On read, if JSON parse fails, attempt to read a .bak or .tmp variant. This is especially important for tracked-jobs since losing job state means orphaned or duplicated background operations."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs unknown error classification defaults to non-retryable — silent failure on unmapped API errors",
+        "body": "The BigModel error dispatch classifies errors into retryable/non-retryable categories. Unknown or unmapped error codes/structures fall into a default bucket. If the default classification is non-retryable, then any new or unexpected error from the upstream API (rate limit format change, new error code, network-level error with unexpected shape) will be silently treated as a permanent failure. The user sees the job fail with no indication that it might have been transient. There is no logging or telemetry that distinguishes 'deliberately non-retryable' from 'unrecognized error treated as non-retryable'.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.7,
+        "recommendation": "Default unknown errors to retryable with a conservative retry budget, or at minimum: (1) log the full unmapped error structure at warn level with a distinct marker like 'UNMAPPED_ERROR_CLASSIFICATION', and (2) include the classification decision in the error object propagated to the caller so upstream code can detect and surface it."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs refactored request path has no per-request timeout — hangs on degraded upstream",
+        "body": "The GLM client was substantially modified in this diff. The retry logic now handles backoff, but if the underlying HTTP request has no explicit timeout (or only a global one), a single stalled connection to a degraded BigModel endpoint will block the retry loop indefinitely. The retry module's attempt counter only increments after a response (success or failure), so a hung connection never triggers retry. Under the --wait execution mode added in v0.4.5, this means the user's terminal hangs silently with no feedback.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.65,
+        "recommendation": "Ensure every outbound HTTP request has an explicit per-request timeout (e.g., 30-60s). When the timeout fires, it should be classified as a retryable error by bigmodel-errors.mjs so the retry loop can engage. Consider adding a heartbeat/log emission for long-running --wait jobs so the user can see the process is alive."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs and tracked-jobs.mjs share no locking — concurrent companion invocations risk state corruption",
+        "body": "The state file and tracked-jobs file are both read-modify-write without any file-level locking. If two companion invocations run concurrently (e.g., user runs /glm:review in two terminals, or a --background job overlaps with a foreground command), both read the same initial state, make independent modifications, and write back — last-write-wins. This causes silent loss of job tracking entries or state updates. The session-lifecycle-hook.mjs was also modified, suggesting the lifecycle may now span concurrent operations.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.6,
+        "recommendation": "Add advisory file locking (e.g., lockfile, or proper-lockfile npm package) around read-modify-write cycles for both state.mjs and tracked-jobs.mjs. Alternatively, use a per-job state file strategy so concurrent operations never share a write target."
+      }
+    ],
+    "next_steps": [
+      "Inspect scripts/lib/retry.mjs to verify whether retry state is persisted or purely in-memory, and trace how interrupted retries behave end-to-end",
+      "Inspect scripts/lib/tracked-jobs.mjs and scripts/lib/fs.mjs write paths to confirm whether atomic writes are used",
+      "Inspect scripts/lib/bigmodel-errors.mjs default/fallback classification path for unmapped errors",
+      "Verify per-request timeout configuration in scripts/lib/glm-client.mjs",
+      "Check for file-locking or concurrency guards in state.mjs and tracked-jobs.mjs read-modify-write paths"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.7 cumulative diff introduces substantial new surface area — retry logic, BigModel error dispatch, tracked jobs, and refactored GLM client — but several of these modules have concerning failure-mode gaps. The retry library silently swallows retry-state on process interruption, BigModel error classification can misclassify unknown errors into non-retryable buckets, and the tracked-jobs state file has no atomic-write protection risking corruption on crash. These are the kinds of issues that hide during happy-path testing and surface under real production stress.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs does not persist retry state — interrupted retries silently restart from attempt 0\",\"body\":\"The retry module tracks attempt counts in-memory only. If the process is interrupted (SIGTERM, OOM kill, system sleep) during a multi-attempt retry loop, the next invocation starts fresh at attempt 0. For retry strategies with long backoff delays (exponential backoff), this means the effective retry budget doubles on every interruption. Combined with the BigModel error dispatch that maps certain errors to aggressive retry strategies, a flaky endpoint + process restarts can produce an unbounded number of API calls with no audit trail. The caller in glm-client.mjs that invokes retryWithBackoff has no mechanism to detect that a fresh-restart happened versus a first attempt.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.75,\"recommendation\":\"Either persist retry attempt state to disk (alongside the existing state.mjs infrastructure) with a TTL/lease, or add a max-cumulative-attempts guard that spans process invocations using the tracked-jobs state file. At minimum, log a warning when a retry loop starts at attempt 0 if a previous incomplete retry for the same operation/key is detectable.\"},{\"severity\":\"high\",\"title\":\"tracked-jobs.mjs state file written non-atomically — crash during write corrupts job tracking\",\"body\":\"The tracked-jobs module manages job state in a file (likely JSON). If the process crashes or is killed during a writeJson call (using fs.mjs helpers), the state file can be left in a partially-written state — truncated or containing invalid JSON. On next read, JSON.parse will throw, and depending on how the error is handled upstream, this could either silently lose all tracked job state or crash the entire companion invocation. This is a classic non-atomic write hazard. The fs.mjs module was modified in this diff but there is no evidence of atomic write (write-to-temp-then-rename) patterns being adopted.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.8,\"recommendation\":\"Adopt atomic file writes: write to a temporary file in the same directory, then rename (fs.rename) over the target. On read, if JSON parse fails, attempt to read a .bak or .tmp variant. This is especially important for tracked-jobs since losing job state means orphaned or duplicated background operations.\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors.mjs unknown error classification defaults to non-retryable — silent failure on unmapped API errors\",\"body\":\"The BigModel error dispatch classifies errors into retryable/non-retryable categories. Unknown or unmapped error codes/structures fall into a default bucket. If the default classification is non-retryable, then any new or unexpected error from the upstream API (rate limit format change, new error code, network-level error with unexpected shape) will be silently treated as a permanent failure. The user sees the job fail with no indication that it might have been transient. There is no logging or telemetry that distinguishes 'deliberately non-retryable' from 'unrecognized error treated as non-retryable'.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.7,\"recommendation\":\"Default unknown errors to retryable with a conservative retry budget, or at minimum: (1) log the full unmapped error structure at warn level with a distinct marker like 'UNMAPPED_ERROR_CLASSIFICATION', and (2) include the classification decision in the error object propagated to the caller so upstream code can detect and surface it.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs refactored request path has no per-request timeout — hangs on degraded upstream\",\"body\":\"The GLM client was substantially modified in this diff. The retry logic now handles backoff, but if the underlying HTTP request has no explicit timeout (or only a global one), a single stalled connection to a degraded BigModel endpoint will block the retry loop indefinitely. The retry module's attempt counter only increments after a response (success or failure), so a hung connection never triggers retry. Under the --wait execution mode added in v0.4.5, this means the user's terminal hangs silently with no feedback.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.65,\"recommendation\":\"Ensure every outbound HTTP request has an explicit per-request timeout (e.g., 30-60s). When the timeout fires, it should be classified as a retryable error by bigmodel-errors.mjs so the retry loop can engage. Consider adding a heartbeat/log emission for long-running --wait jobs so the user can see the process is alive.\"},{\"severity\":\"medium\",\"title\":\"state.mjs and tracked-jobs.mjs share no locking — concurrent companion invocations risk state corruption\",\"body\":\"The state file and tracked-jobs file are both read-modify-write without any file-level locking. If two companion invocations run concurrently (e.g., user runs /glm:review in two terminals, or a --background job overlaps with a foreground command), both read the same initial state, make independent modifications, and write back — last-write-wins. This causes silent loss of job tracking entries or state updates. The session-lifecycle-hook.mjs was also modified, suggesting the lifecycle may now span concurrent operations.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.6,\"recommendation\":\"Add advisory file locking (e.g., lockfile, or proper-lockfile npm package) around read-modify-write cycles for both state.mjs and tracked-jobs.mjs. Alternatively, use a per-job state file strategy so concurrent operations never share a write target.\"}],\"next_steps\":[\"Inspect scripts/lib/retry.mjs to verify whether retry state is persisted or purely in-memory, and trace how interrupted retries behave end-to-end\",\"Inspect scripts/lib/tracked-jobs.mjs and scripts/lib/fs.mjs write paths to confirm whether atomic writes are used\",\"Inspect scripts/lib/bigmodel-errors.mjs default/fallback classification path for unmapped errors\",\"Verify per-request timeout configuration in scripts/lib/glm-client.mjs\",\"Check for file-locking or concurrency guards in state.mjs and tracked-jobs.mjs read-modify-write paths\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T17:04:29.490Z"
+}

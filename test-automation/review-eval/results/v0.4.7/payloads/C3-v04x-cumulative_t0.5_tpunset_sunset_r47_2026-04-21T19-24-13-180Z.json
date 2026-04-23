@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 47
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 172235,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This cumulative diff (v0.4.0→v0.4.6) replaces core infrastructure (process.mjs deleted, retry.mjs and bigmodel-errors.mjs added, glm-client.mjs heavily reworked) across 84 files and 6600+ insertions. The three highest-risk areas are: (1) a fully deleted module with no visible CI gate proving zero dangling imports remain, (2) a new 203-line retry/backoff module wired into the API client without a corresponding integration test, and (3) concurrent-state mutations in tracked-jobs/state that lack crash-safety guards. The happy path likely works; the failure paths under crash, retry, or concurrent access are not adequately defended.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Deleted process.mjs — dangling-import crash risk not gated in CI",
+        "body": "scripts/lib/process.mjs (67 lines) was removed entirely. Every sibling in scripts/lib/ and scripts/glm-companion.mjs was modified in the same diff, which is consistent with import migration — but the only structural guard is scripts/check-imports.mjs, which was itself modified by 5 lines (raising the question of whether the process.mjs reference was simply removed from the allowlist rather than enforced). If any file, test, hook, or dynamically-imported path still references './lib/process.mjs' or '../lib/process.mjs', the application will throw ERR_MODULE_NOT_FOUND at startup with no fallback. This is a silent-kill defect: it only manifests at runtime import resolution and would not be caught by unit tests that don't exercise that import path.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.72,
+        "recommendation": "Add a CI gate that runs 'node --check' or a static import tracer (e.g. dependency-cruiser) over every .mjs entry point to prove zero references to the deleted module remain. Alternatively, grep -r \"process.mjs\" scripts/ and confirm no hits outside check-imports.mjs."
+      },
+      {
+        "severity": "high",
+        "title": "New retry module wired into API client without integration test coverage",
+        "body": "scripts/lib/retry.mjs (203 lines, new) implements exponential backoff with jitter and feeds into glm-client.mjs (155 lines changed). Retry logic is historically a top source of subtle production bugs: off-by-one attempt counting, failure to propagate AbortSignals, non-idempotent request body consumption on replay, and backoff ceiling miscalculation. While tests/retry.test.mjs (352 lines) covers the retry module in isolation, no test file exercises the retry→bigmodel-errors→glm-client pipeline end-to-end. A misclassification in bigmodel-errors.mjs (168 lines, new) could cause the retry layer to either (a) retry a mutating non-idempotent request (data duplication) or (b) give up prematurely on a safely retriable error (silent data loss).",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.78,
+        "recommendation": "Add an integration test that exercises glm-client.mjs through retry.mjs with mocked HTTP responses simulating 429/500/502/503 and verifies: (1) correct attempt count, (2) no double-submission on idempotent vs non-idempotent verbs, (3) AbortSignal cancellation stops retries immediately, (4) bigmodel-errors classification matches retry policy for each error code."
+      },
+      {
+        "severity": "medium",
+        "title": "State and tracked-jobs files lack crash-safety for concurrent/partial writes",
+        "body": "scripts/lib/state.mjs (32 lines changed) and scripts/lib/tracked-jobs.mjs (78 lines changed) manage persistent job state that is read and written during job lifecycle transitions. If the process crashes mid-write (OOM, SIGKILL, disk full) or two invocations run concurrently (--background flag was added per commit d573807), the state file can be left in a corrupted or partially-written state. No file-locking, atomic-rename (write-to-temp-then-rename), or journaling mechanism is visible. A corrupted state file would cause all subsequent glm commands to fail until the user manually deletes the state file — a silent, user-visible outage with no recovery path.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.65,
+        "recommendation": "Adopt atomic file writes: write to a temp file in the same directory, then fs.rename() to the target path. For concurrent access (--background), add an advisory file lock (proper-lockfile or flock) around state transitions. Add a test that kills the process mid-write and verifies state file integrity on next read."
+      },
+      {
+        "severity": "medium",
+        "title": "BigModel error dispatch may misclassify unknown error shapes",
+        "body": "scripts/lib/bigmodel-errors.mjs (168 lines, new) classifies API errors to drive retry/backoff decisions. If the upstream API returns an unexpected error shape (new error code, changed response schema, network-level error that doesn't match expected JSON structure), the classifier's default branch determines behavior. A conservative default (don't retry) causes transient failures to surface as permanent errors; a liberal default (always retry) wastes resources and risks amplifying load during outages. Without seeing the default branch, this is a structural risk inherent in any error classifier that becomes the sole decision-maker for retry policy.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.58,
+        "recommendation": "Ensure the default/unknown-error classification is explicitly fail-safe (retry once with short backoff, then surface the raw error). Add a test case for a completely unrecognised error shape (null body, non-JSON response, unexpected status code) and verify the retry layer handles it without throwing an unhandled exception."
+      }
+    ],
+    "next_steps": [
+      "Run 'grep -r \"process.mjs\" scripts/' against the working tree and confirm zero hits outside check-imports.mjs; add this as a CI gate.",
+      "Read retry.mjs line-by-line to verify: (a) attempt counter starts at 1 not 0, (b) AbortSignal is checked before each attempt, (c) maxAttempts boundary is '<' not '<=', (d) backoff formula cannot produce NaN or negative delay.",
+      "Add an integration test: glm-client → retry → bigmodel-errors with mocked HTTP covering at minimum 429, 502, 503, network timeout, and non-JSON response.",
+      "Verify state.mjs and tracked-jobs.mjs use atomic writes (write-to-temp + rename); if not, implement before release.",
+      "Check that --background execution (added in d573807) does not create two concurrent writers to the same state file without locking."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"This cumulative diff (v0.4.0→v0.4.6) replaces core infrastructure (process.mjs deleted, retry.mjs and bigmodel-errors.mjs added, glm-client.mjs heavily reworked) across 84 files and 6600+ insertions. The three highest-risk areas are: (1) a fully deleted module with no visible CI gate proving zero dangling imports remain, (2) a new 203-line retry/backoff module wired into the API client without a corresponding integration test, and (3) concurrent-state mutations in tracked-jobs/state that lack crash-safety guards. The happy path likely works; the failure paths under crash, retry, or concurrent access are not adequately defended.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Deleted process.mjs — dangling-import crash risk not gated in CI\",\n      \"body\": \"scripts/lib/process.mjs (67 lines) was removed entirely. Every sibling in scripts/lib/ and scripts/glm-companion.mjs was modified in the same diff, which is consistent with import migration — but the only structural guard is scripts/check-imports.mjs, which was itself modified by 5 lines (raising the question of whether the process.mjs reference was simply removed from the allowlist rather than enforced). If any file, test, hook, or dynamically-imported path still references './lib/process.mjs' or '../lib/process.mjs', the application will throw ERR_MODULE_NOT_FOUND at startup with no fallback. This is a silent-kill defect: it only manifests at runtime import resolution and would not be caught by unit tests that don't exercise that import path.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Add a CI gate that runs 'node --check' or a static import tracer (e.g. dependency-cruiser) over every .mjs entry point to prove zero references to the deleted module remain. Alternatively, grep -r \\\"process.mjs\\\" scripts/ and confirm no hits outside check-imports.mjs.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"New retry module wired into API client without integration test coverage\",\n      \"body\": \"scripts/lib/retry.mjs (203 lines, new) implements exponential backoff with jitter and feeds into glm-client.mjs (155 lines changed). Retry logic is historically a top source of subtle production bugs: off-by-one attempt counting, failure to propagate AbortSignals, non-idempotent request body consumption on replay, and backoff ceiling miscalculation. While tests/retry.test.mjs (352 lines) covers the retry module in isolation, no test file exercises the retry→bigmodel-errors→glm-client pipeline end-to-end. A misclassification in bigmodel-errors.mjs (168 lines, new) could cause the retry layer to either (a) retry a mutating non-idempotent request (data duplication) or (b) give up prematurely on a safely retriable error (silent data loss).\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Add an integration test that exercises glm-client.mjs through retry.mjs with mocked HTTP responses simulating 429/500/502/503 and verifies: (1) correct attempt count, (2) no double-submission on idempotent vs non-idempotent verbs, (3) AbortSignal cancellation stops retries immediately, (4) bigmodel-errors classification matches retry policy for each error code.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"State and tracked-jobs files lack crash-safety for concurrent/partial writes\",\n      \"body\": \"scripts/lib/state.mjs (32 lines changed) and scripts/lib/tracked-jobs.mjs (78 lines changed) manage persistent job state that is read and written during job lifecycle transitions. If the process crashes mid-write (OOM, SIGKILL, disk full) or two invocations run concurrently (--background flag was added per commit d573807), the state file can be left in a corrupted or partially-written state. No file-locking, atomic-rename (write-to-temp-then-rename), or journaling mechanism is visible. A corrupted state file would cause all subsequent glm commands to fail until the user manually deletes the state file — a silent, user-visible outage with no recovery path.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Adopt atomic file writes: write to a temp file in the same directory, then fs.rename() to the target path. For concurrent access (--background), add an advisory file lock (proper-lockfile or flock) around state transitions. Add a test that kills the process mid-write and verifies state file integrity on next read.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"BigModel error dispatch may misclassify unknown error shapes\",\n      \"body\": \"scripts/lib/bigmodel-errors.mjs (168 lines, new) classifies API errors to drive retry/backoff decisions. If the upstream API returns an unexpected error shape (new error code, changed response schema, network-level error that doesn't match expected JSON structure), the classifier's default branch determines behavior. A conservative default (don't retry) causes transient failures to surface as permanent errors; a liberal default (always retry) wastes resources and risks amplifying load during outages. Without seeing the default branch, this is a structural risk inherent in any error classifier that becomes the sole decision-maker for retry policy.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.58,\n      \"recommendation\": \"Ensure the default/unknown-error classification is explicitly fail-safe (retry once with short backoff, then surface the raw error). Add a test case for a completely unrecognised error shape (null body, non-JSON response, unexpected status code) and verify the retry layer handles it without throwing an unhandled exception.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run 'grep -r \\\"process.mjs\\\" scripts/' against the working tree and confirm zero hits outside check-imports.mjs; add this as a CI gate.\",\n    \"Read retry.mjs line-by-line to verify: (a) attempt counter starts at 1 not 0, (b) AbortSignal is checked before each attempt, (c) maxAttempts boundary is '<' not '<=', (d) backoff formula cannot produce NaN or negative delay.\",\n    \"Add an integration test: glm-client → retry → bigmodel-errors with mocked HTTP covering at minimum 429, 502, 503, network timeout, and non-JSON response.\",\n    \"Verify state.mjs and tracked-jobs.mjs use atomic writes (write-to-temp + rename); if not, implement before release.\",\n    \"Check that --background execution (added in d573807) does not create two concurrent writers to the same state file without locking.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T19:24:13.206Z"
+}

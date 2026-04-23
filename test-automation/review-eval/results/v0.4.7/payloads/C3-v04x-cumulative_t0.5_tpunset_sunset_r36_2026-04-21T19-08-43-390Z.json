@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 36
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 80567,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The cumulative v0.4.0→v0.4.6 diff introduces substantial new runtime paths—retry logic (203 lines), error dispatch (168 lines), client rework (155 lines), and job-control changes—while simultaneously deleting scripts/lib/process.mjs entirely. Without verifying that no remaining import graph still references the deleted module, this is a latent runtime crash. The retry + client combination also raises idempotency and thundering-herd concerns that the test suite may not cover under concurrency.",
+    "findings": [
+      {
+        "severity": "critical",
+        "title": "Deleted process.mjs may leave dangling imports causing runtime ERR_MODULE_NOT_FOUND",
+        "body": "scripts/lib/process.mjs is fully deleted (67 lines removed, 0 added). If any surviving module—glm-companion.mjs, glm-client.mjs, state.mjs, render.mjs, tracked-jobs.mjs, job-control.mjs, or any test file—still contains `import … from './lib/process.mjs'` or `./process.mjs`, the import will fail at load time with an uncatchable ERR_MODULE_NOT_FOUND. ESM static imports are resolved before any user code runs, so this crashes the entire tool on every invocation, not just the affected code path. The diff does not provide enough evidence that all call sites were migrated. This is the single highest-confidence ship blocker.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.78,
+        "recommendation": "Run `grep -r \"process\\.mjs\" scripts/ tests/ --include='*.mjs'` against the working tree. If any hit exists, the module must either be restored or the import redirected before shipping. Add a CI gate that checks for imports of deleted modules."
+      },
+      {
+        "severity": "high",
+        "title": "Retry logic applied to client without evidence of idempotency discrimination",
+        "body": "A new 203-line retry module (retry.mjs) is introduced alongside 155 lines of changes to glm-client.mjs. If retry is applied uniformly to all HTTP methods—including POST or other non-idempotent mutation requests—then transient failures (network blips, timeouts) will cause duplicate submissions to the upstream API. The diff stat gives no visibility into whether the client distinguishes idempotent vs non-idempotent requests when deciding to retry. For an LLM orchestration tool, a retried job-submission could create duplicate long-running tasks that waste quota, produce duplicate outputs, or violate user expectations of single-submission semantics.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.65,
+        "recommendation": "Verify that glm-client.mjs only applies retry to idempotent operations (GET, HEAD, OPTIONS) or to POSTs that carry an idempotency key. Add an explicit test case: submit a mutation request, simulate a 503 with retry, assert only one side-effect is created."
+      },
+      {
+        "severity": "high",
+        "title": "New error dispatch module may misclassify auth errors as retryable",
+        "body": "scripts/lib/bigmodel-errors.mjs (168 new lines) handles error classification and dispatch for auto retry/backoff. If 401 Unauthorized or 403 Forbidden responses are classified as transient/retryable, the retry loop will re-send invalid credentials up to max-attempts times, potentially triggering account lockout or IP rate-limiting on the upstream provider. This is especially dangerous because the commit message explicitly mentions 'BigModel error dispatch + auto retry/backoff,' suggesting the classification drives automated retry decisions without human intervention.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.6,
+        "recommendation": "Audit the error classifier to confirm 401/403/407 responses are classified as non-retryable (permanent auth failure). Add a unit test that asserts zero retry attempts when a 401 is returned. Consider also marking 429 without Retry-After as non-retryable or using a very long backoff floor."
+      },
+      {
+        "severity": "medium",
+        "title": "Tracked-jobs and job-control changes may lose job state under concurrent operations",
+        "body": "scripts/lib/tracked-jobs.mjs has 78 lines changed and scripts/lib/job-control.mjs has 20 lines changed, while scripts/lib/state.mjs has 32 lines changed. These three modules collectively manage job lifecycle state. If job tracking writes are not atomic (e.g., read-modify-write on a JSON file without file locking), concurrent invocations of the tool could lose job entries, corrupt the state file, or create phantom entries. The diff adds retry logic that increases the likelihood of overlapping operations, making this a plausible failure scenario under real workloads.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.5,
+        "recommendation": "Verify that state.mjs and tracked-jobs.mjs use atomic file writes (write-to-temp + rename) and that concurrent writes are serialized or guarded by a lockfile. Add a concurrency stress test: launch N parallel jobs, wait for completion, assert exactly N tracked entries exist with no corruption."
+      }
+    ],
+    "next_steps": [
+      "Run `grep -r 'process\\.mjs' scripts/ tests/` to confirm no dangling imports from the deleted module—this is the fastest ship/no-ship check.",
+      "Inspect retry.mjs for jitter in exponential backoff; without jitter, N clients retrying simultaneously will thundering-herd the upstream API.",
+      "Verify bigmodel-errors.mjs classifies 401/403 as non-retryable and add a regression test.",
+      "Check that glm-client.mjs does not retry POST/mutation requests without an idempotency mechanism.",
+      "Confirm state.mjs uses atomic writes (write-to-temp + fs.rename) for concurrent safety."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The cumulative v0.4.0→v0.4.6 diff introduces substantial new runtime paths—retry logic (203 lines), error dispatch (168 lines), client rework (155 lines), and job-control changes—while simultaneously deleting scripts/lib/process.mjs entirely. Without verifying that no remaining import graph still references the deleted module, this is a latent runtime crash. The retry + client combination also raises idempotency and thundering-herd concerns that the test suite may not cover under concurrency.\",\n  \"findings\": [\n    {\n      \"severity\": \"critical\",\n      \"title\": \"Deleted process.mjs may leave dangling imports causing runtime ERR_MODULE_NOT_FOUND\",\n      \"body\": \"scripts/lib/process.mjs is fully deleted (67 lines removed, 0 added). If any surviving module—glm-companion.mjs, glm-client.mjs, state.mjs, render.mjs, tracked-jobs.mjs, job-control.mjs, or any test file—still contains `import … from './lib/process.mjs'` or `./process.mjs`, the import will fail at load time with an uncatchable ERR_MODULE_NOT_FOUND. ESM static imports are resolved before any user code runs, so this crashes the entire tool on every invocation, not just the affected code path. The diff does not provide enough evidence that all call sites were migrated. This is the single highest-confidence ship blocker.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Run `grep -r \\\"process\\\\.mjs\\\" scripts/ tests/ --include='*.mjs'` against the working tree. If any hit exists, the module must either be restored or the import redirected before shipping. Add a CI gate that checks for imports of deleted modules.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"Retry logic applied to client without evidence of idempotency discrimination\",\n      \"body\": \"A new 203-line retry module (retry.mjs) is introduced alongside 155 lines of changes to glm-client.mjs. If retry is applied uniformly to all HTTP methods—including POST or other non-idempotent mutation requests—then transient failures (network blips, timeouts) will cause duplicate submissions to the upstream API. The diff stat gives no visibility into whether the client distinguishes idempotent vs non-idempotent requests when deciding to retry. For an LLM orchestration tool, a retried job-submission could create duplicate long-running tasks that waste quota, produce duplicate outputs, or violate user expectations of single-submission semantics.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Verify that glm-client.mjs only applies retry to idempotent operations (GET, HEAD, OPTIONS) or to POSTs that carry an idempotency key. Add an explicit test case: submit a mutation request, simulate a 503 with retry, assert only one side-effect is created.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"New error dispatch module may misclassify auth errors as retryable\",\n      \"body\": \"scripts/lib/bigmodel-errors.mjs (168 new lines) handles error classification and dispatch for auto retry/backoff. If 401 Unauthorized or 403 Forbidden responses are classified as transient/retryable, the retry loop will re-send invalid credentials up to max-attempts times, potentially triggering account lockout or IP rate-limiting on the upstream provider. This is especially dangerous because the commit message explicitly mentions 'BigModel error dispatch + auto retry/backoff,' suggesting the classification drives automated retry decisions without human intervention.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Audit the error classifier to confirm 401/403/407 responses are classified as non-retryable (permanent auth failure). Add a unit test that asserts zero retry attempts when a 401 is returned. Consider also marking 429 without Retry-After as non-retryable or using a very long backoff floor.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Tracked-jobs and job-control changes may lose job state under concurrent operations\",\n      \"body\": \"scripts/lib/tracked-jobs.mjs has 78 lines changed and scripts/lib/job-control.mjs has 20 lines changed, while scripts/lib/state.mjs has 32 lines changed. These three modules collectively manage job lifecycle state. If job tracking writes are not atomic (e.g., read-modify-write on a JSON file without file locking), concurrent invocations of the tool could lose job entries, corrupt the state file, or create phantom entries. The diff adds retry logic that increases the likelihood of overlapping operations, making this a plausible failure scenario under real workloads.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.5,\n      \"recommendation\": \"Verify that state.mjs and tracked-jobs.mjs use atomic file writes (write-to-temp + rename) and that concurrent writes are serialized or guarded by a lockfile. Add a concurrency stress test: launch N parallel jobs, wait for completion, assert exactly N tracked entries exist with no corruption.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `grep -r 'process\\\\.mjs' scripts/ tests/` to confirm no dangling imports from the deleted module—this is the fastest ship/no-ship check.\",\n    \"Inspect retry.mjs for jitter in exponential backoff; without jitter, N clients retrying simultaneously will thundering-herd the upstream API.\",\n    \"Verify bigmodel-errors.mjs classifies 401/403 as non-retryable and add a regression test.\",\n    \"Check that glm-client.mjs does not retry POST/mutation requests without an idempotency mechanism.\",\n    \"Confirm state.mjs uses atomic writes (write-to-temp + fs.rename) for concurrent safety.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T19:08:43.416Z"
+}

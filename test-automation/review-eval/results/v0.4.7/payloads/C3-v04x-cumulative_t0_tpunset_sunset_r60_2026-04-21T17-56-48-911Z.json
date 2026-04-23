@@ -1,0 +1,70 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 60
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 173478,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff adds 6600+ lines including a new retry/backoff subsystem (retry.mjs) and BigModel error classifier (bigmodel-errors.mjs), but ships without UAT evidence for v0.4.6 — the exact release that introduced these critical-path modules. A library module (process.mjs) was deleted without visible confirmation that all import sites were migrated. The retry/error-classification coupling is the most impactful behavioral change in the entire diff and has only unit-test evidence, no end-to-end UAT under failure conditions. Block until v0.4.6 UAT is produced and import safety after process.mjs removal is confirmed.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Missing UAT validation for v0.4.6 retry/backoff feature",
+        "body": "UAT reports exist for v0.4.4 and v0.4.5 but not for v0.4.6 (HEAD, tagged). The v0.4.6 release added BigModel error dispatch (bigmodel-errors.mjs, 168 lines) and auto retry/backoff (retry.mjs, 203 lines) — the most impactful runtime behavior change in the entire cumulative diff. These modules control whether API calls succeed, retry, or silently fail. Unit tests exist (retry.test.mjs: 352 lines, bigmodel-errors.test.mjs: 189 lines) but cover isolated logic, not the integrated glm-client → error-classify → retry flow under real failure conditions (timeouts, rate limits, unexpected error codes). Shipping v0.4.7 cumulative without this evidence means the highest-risk behavioral change is unvalidated end-to-end.",
+        "file": "test-automation/uat-reports/v0.4.5/report.md",
+        "line_start": 1,
+        "line_end": 125,
+        "confidence": 0.82,
+        "recommendation": "Produce a v0.4.6 UAT report covering: (1) successful retry on transient 5xx errors, (2) backoff timing under repeated failures, (3) correct terminal failure after max retries with user-visible error, (4) error classification for all documented BigModel error codes, (5) behavior on unrecognized/unexpected error codes. Do not ship v0.4.7 cumulative without this evidence."
+      },
+      {
+        "severity": "medium",
+        "title": "Deleted process.mjs — unverified complete import migration",
+        "body": "scripts/lib/process.mjs (67 lines) was removed as part of 'Bundle F — ReferenceError + full thread/resume scaffolding purge'. If any remaining runtime path imports from this module, it will throw MODULE_NOT_FOUND. Multiple core modules were modified in the same period (glm-companion.mjs: 139 lines changed, render.mjs: 79 lines changed, state.mjs: 32 lines changed), but the diff stat alone cannot confirm every import site was updated. The commit message referencing 'ReferenceError' in the deletion commit suggests the removal itself was a reactive fix, increasing the risk the migration was not systematic.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.62,
+        "recommendation": "Run `grep -rn 'process\\.mjs\\|from.*process' scripts/` against the current tree to confirm no live import references remain. Add a CI gate that validates all static import targets resolve at lint time. If any reference is found, this is a runtime crash."
+      },
+      {
+        "severity": "medium",
+        "title": "Retry/error-classification coupling creates silent misclassification surface",
+        "body": "All BigModel API call retry behavior now depends on correct classification by bigmodel-errors.mjs. If an error type is unrecognized or misclassified, the consequences are asymmetric: (1) a non-retryable error retried wastes API quota and adds latency; (2) a retryable error failing immediately causes user-visible failures that should have self-healed. The 168-line error classifier has unit tests, but external API error taxonomies change without notice. There is no visible structured logging at the retry decision point that would surface a misclassification in production — retries either happen silently or don't, with no diagnostic trail. An unrecognized error code that falls through to a default retry path could mask a permanent failure as transient.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.58,
+        "recommendation": "Add structured logging at the retry decision point emitting: original error code/status, classified retryability, attempt number, and backoff delay. Implement a fail-safe default for unrecognized errors: log at warn level and default to NO retry (so permanent failures surface immediately rather than silently burning retry budget). Add a CI test asserting every documented BigModel error code has an explicit classification entry."
+      }
+    ],
+    "next_steps": [
+      "Grep the current tree for any remaining imports of scripts/lib/process.mjs — if found, block on the resulting runtime crash bug",
+      "Produce v0.4.6 UAT report exercising retry/backoff end-to-end with simulated API failures before cutting v0.4.7",
+      "Verify bigmodel-errors.mjs handles unknown/unexpected error codes with a safe no-retry default and warn-level logging",
+      "Add a CI smoke test validating the full glm-client → error-classify → retry pipeline resolves without unhandled exceptions on all paths",
+      "Consider adding an integration-level test in tests/result-propagation.test.mjs that exercises the retry + error-classify coupling with mock network failures"
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff adds 6600+ lines including a new retry/backoff subsystem (retry.mjs) and BigModel error classifier (bigmodel-errors.mjs), but ships without UAT evidence for v0.4.6 — the exact release that introduced these critical-path modules. A library module (process.mjs) was deleted without visible confirmation that all import sites were migrated. The retry/error-classification coupling is the most impactful behavioral change in the entire diff and has only unit-test evidence, no end-to-end UAT under failure conditions. Block until v0.4.6 UAT is produced and import safety after process.mjs removal is confirmed.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Missing UAT validation for v0.4.6 retry/backoff feature\",\n      \"body\": \"UAT reports exist for v0.4.4 and v0.4.5 but not for v0.4.6 (HEAD, tagged). The v0.4.6 release added BigModel error dispatch (bigmodel-errors.mjs, 168 lines) and auto retry/backoff (retry.mjs, 203 lines) — the most impactful runtime behavior change in the entire cumulative diff. These modules control whether API calls succeed, retry, or silently fail. Unit tests exist (retry.test.mjs: 352 lines, bigmodel-errors.test.mjs: 189 lines) but cover isolated logic, not the integrated glm-client → error-classify → retry flow under real failure conditions (timeouts, rate limits, unexpected error codes). Shipping v0.4.7 cumulative without this evidence means the highest-risk behavioral change is unvalidated end-to-end.\",\n      \"file\": \"test-automation/uat-reports/v0.4.5/report.md\",\n      \"line_start\": 1,\n      \"line_end\": 125,\n      \"confidence\": 0.82,\n      \"recommendation\": \"Produce a v0.4.6 UAT report covering: (1) successful retry on transient 5xx errors, (2) backoff timing under repeated failures, (3) correct terminal failure after max retries with user-visible error, (4) error classification for all documented BigModel error codes, (5) behavior on unrecognized/unexpected error codes. Do not ship v0.4.7 cumulative without this evidence.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Deleted process.mjs — unverified complete import migration\",\n      \"body\": \"scripts/lib/process.mjs (67 lines) was removed as part of 'Bundle F — ReferenceError + full thread/resume scaffolding purge'. If any remaining runtime path imports from this module, it will throw MODULE_NOT_FOUND. Multiple core modules were modified in the same period (glm-companion.mjs: 139 lines changed, render.mjs: 79 lines changed, state.mjs: 32 lines changed), but the diff stat alone cannot confirm every import site was updated. The commit message referencing 'ReferenceError' in the deletion commit suggests the removal itself was a reactive fix, increasing the risk the migration was not systematic.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.62,\n      \"recommendation\": \"Run `grep -rn 'process\\\\.mjs\\\\|from.*process' scripts/` against the current tree to confirm no live import references remain. Add a CI gate that validates all static import targets resolve at lint time. If any reference is found, this is a runtime crash.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Retry/error-classification coupling creates silent misclassification surface\",\n      \"body\": \"All BigModel API call retry behavior now depends on correct classification by bigmodel-errors.mjs. If an error type is unrecognized or misclassified, the consequences are asymmetric: (1) a non-retryable error retried wastes API quota and adds latency; (2) a retryable error failing immediately causes user-visible failures that should have self-healed. The 168-line error classifier has unit tests, but external API error taxonomies change without notice. There is no visible structured logging at the retry decision point that would surface a misclassification in production — retries either happen silently or don't, with no diagnostic trail. An unrecognized error code that falls through to a default retry path could mask a permanent failure as transient.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.58,\n      \"recommendation\": \"Add structured logging at the retry decision point emitting: original error code/status, classified retryability, attempt number, and backoff delay. Implement a fail-safe default for unrecognized errors: log at warn level and default to NO retry (so permanent failures surface immediately rather than silently burning retry budget). Add a CI test asserting every documented BigModel error code has an explicit classification entry.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Grep the current tree for any remaining imports of scripts/lib/process.mjs — if found, block on the resulting runtime crash bug\",\n    \"Produce v0.4.6 UAT report exercising retry/backoff end-to-end with simulated API failures before cutting v0.4.7\",\n    \"Verify bigmodel-errors.mjs handles unknown/unexpected error codes with a safe no-retry default and warn-level logging\",\n    \"Add a CI smoke test validating the full glm-client → error-classify → retry pipeline resolves without unhandled exceptions on all paths\",\n    \"Consider adding an integration-level test in tests/result-propagation.test.mjs that exercises the retry + error-classify coupling with mock network failures\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T17:56:48.934Z"
+}

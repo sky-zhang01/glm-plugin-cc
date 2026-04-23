@@ -1,0 +1,70 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 6
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 93163,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces critical infrastructure (retry, error dispatch, job lifecycle) without test coverage for the API client and job-management modules, and removes process.mjs entirely—a silent import-breakage risk. The scope (84 files, +6600/−480 lines) amplifies integration risk. Three material gaps warrant blocking resolution before a v0.4.7 sweep can be trusted.",
+    "findings": [
+      {
+        "severity": "critical",
+        "title": "scripts/lib/process.mjs deleted — latent import-breakage risk",
+        "body": "The entire file scripts/lib/process.mjs (67 lines) was removed. If any runtime or test path still statically or dynamically imports from this module, the result is an immediate MODULE_NOT_FOUND crash. The check-imports.mjs script was modified (5 lines changed) but only covers static imports and cannot detect dynamic import() calls or string-concatenated require paths. Given the breadth of this cumulative diff, an orphaned import in a less-traversed code path (e.g., error recovery, background execution mode added in v0.4.5) could remain undetected until production stress.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.82,
+        "recommendation": "Run a full-codebase grep for 'process\\.mjs' and 'lib/process' across all .mjs/.js/.md files. Add a CI gate that fails if any resolved import targets a nonexistent file. Confirm that check-imports.mjs covers dynamic import() patterns or add a separate AST-based dead-import scan."
+      },
+      {
+        "severity": "high",
+        "title": "glm-client.mjs — 155 lines changed with zero dedicated test coverage",
+        "body": "scripts/lib/glm-client.mjs is the core API client and was substantially modified (155 lines changed). No corresponding test file (e.g., tests/glm-client.test.mjs) exists in the test suite. The client now depends on the new bigmodel-errors.mjs error dispatcher and retry.mjs backoff logic—both fresh code. A misclassified error or a retry on a non-idempotent mutation could silently duplicate operations or swallow failures. The absence of tests means the only validation is manual UAT, which cannot exercise edge cases like partial network failures or API rate-limit responses.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.78,
+        "recommendation": "Add tests/glm-client.test.mjs covering: (1) retry on transient errors with idempotency verification, (2) error classification via bigmodel-errors.mjs for all known API error codes, (3) non-retry on permanent errors, (4) timeout and network-failure behavior. At minimum, add contract tests that mock the HTTP layer."
+      },
+      {
+        "severity": "high",
+        "title": "Job lifecycle modules (job-control.mjs, tracked-jobs.mjs) lack test coverage",
+        "body": "scripts/lib/job-control.mjs (20 lines changed) and scripts/lib/tracked-jobs.mjs (78 lines changed) manage job state transitions, yet neither has a dedicated test file. The v0.4.5 release added --wait/--background execution modes that depend on correct job tracking. A race condition between job creation and status polling, or a stale-state read after a failed transition, could cause the companion to report incorrect job status or hang indefinitely on --wait. These are exactly the failure modes that are expensive to detect in production and hard to reproduce.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.75,
+        "recommendation": "Add tests/tracked-jobs.test.mjs and tests/job-control.test.mjs covering: (1) concurrent job creation, (2) state transitions under failure, (3) stale-state reads, (4) --wait polling timeout behavior. Verify that job IDs are unique under concurrent creation and that failed jobs cannot enter a terminal-then-resumed state."
+      }
+    ],
+    "next_steps": [
+      "Grep the entire codebase for any remaining reference to 'lib/process' or 'process.mjs' and confirm zero hits.",
+      "Create tests/glm-client.test.mjs with mocked HTTP layer covering retry, error dispatch, and timeout paths.",
+      "Create tests/tracked-jobs.test.mjs and tests/job-control.test.mjs covering concurrent job lifecycle and --wait/--background execution modes.",
+      "Run the full test suite after adding these tests and confirm all existing tests still pass (no regressions from process.mjs removal).",
+      "Consider adding a CI gate that fails the build if any module in scripts/lib/ lacks a corresponding test file."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff introduces critical infrastructure (retry, error dispatch, job lifecycle) without test coverage for the API client and job-management modules, and removes process.mjs entirely—a silent import-breakage risk. The scope (84 files, +6600/−480 lines) amplifies integration risk. Three material gaps warrant blocking resolution before a v0.4.7 sweep can be trusted.\",\n  \"findings\": [\n    {\n      \"severity\": \"critical\",\n      \"title\": \"scripts/lib/process.mjs deleted — latent import-breakage risk\",\n      \"body\": \"The entire file scripts/lib/process.mjs (67 lines) was removed. If any runtime or test path still statically or dynamically imports from this module, the result is an immediate MODULE_NOT_FOUND crash. The check-imports.mjs script was modified (5 lines changed) but only covers static imports and cannot detect dynamic import() calls or string-concatenated require paths. Given the breadth of this cumulative diff, an orphaned import in a less-traversed code path (e.g., error recovery, background execution mode added in v0.4.5) could remain undetected until production stress.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.82,\n      \"recommendation\": \"Run a full-codebase grep for 'process\\\\.mjs' and 'lib/process' across all .mjs/.js/.md files. Add a CI gate that fails if any resolved import targets a nonexistent file. Confirm that check-imports.mjs covers dynamic import() patterns or add a separate AST-based dead-import scan.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"glm-client.mjs — 155 lines changed with zero dedicated test coverage\",\n      \"body\": \"scripts/lib/glm-client.mjs is the core API client and was substantially modified (155 lines changed). No corresponding test file (e.g., tests/glm-client.test.mjs) exists in the test suite. The client now depends on the new bigmodel-errors.mjs error dispatcher and retry.mjs backoff logic—both fresh code. A misclassified error or a retry on a non-idempotent mutation could silently duplicate operations or swallow failures. The absence of tests means the only validation is manual UAT, which cannot exercise edge cases like partial network failures or API rate-limit responses.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Add tests/glm-client.test.mjs covering: (1) retry on transient errors with idempotency verification, (2) error classification via bigmodel-errors.mjs for all known API error codes, (3) non-retry on permanent errors, (4) timeout and network-failure behavior. At minimum, add contract tests that mock the HTTP layer.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"Job lifecycle modules (job-control.mjs, tracked-jobs.mjs) lack test coverage\",\n      \"body\": \"scripts/lib/job-control.mjs (20 lines changed) and scripts/lib/tracked-jobs.mjs (78 lines changed) manage job state transitions, yet neither has a dedicated test file. The v0.4.5 release added --wait/--background execution modes that depend on correct job tracking. A race condition between job creation and status polling, or a stale-state read after a failed transition, could cause the companion to report incorrect job status or hang indefinitely on --wait. These are exactly the failure modes that are expensive to detect in production and hard to reproduce.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Add tests/tracked-jobs.test.mjs and tests/job-control.test.mjs covering: (1) concurrent job creation, (2) state transitions under failure, (3) stale-state reads, (4) --wait polling timeout behavior. Verify that job IDs are unique under concurrent creation and that failed jobs cannot enter a terminal-then-resumed state.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Grep the entire codebase for any remaining reference to 'lib/process' or 'process.mjs' and confirm zero hits.\",\n    \"Create tests/glm-client.test.mjs with mocked HTTP layer covering retry, error dispatch, and timeout paths.\",\n    \"Create tests/tracked-jobs.test.mjs and tests/job-control.test.mjs covering concurrent job lifecycle and --wait/--background execution modes.\",\n    \"Run the full test suite after adding these tests and confirm all existing tests still pass (no regressions from process.mjs removal).\",\n    \"Consider adding a CI gate that fails the build if any module in scripts/lib/ lacks a corresponding test file.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T20:00:52.298Z"
+}

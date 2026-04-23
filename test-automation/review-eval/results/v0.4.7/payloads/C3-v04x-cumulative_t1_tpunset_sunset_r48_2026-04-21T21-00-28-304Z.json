@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 48
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 68641,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative delta deletes an entire module (process.mjs), introduces new retry/error-dispatch machinery, and heavily rewrites the API client—all without the ability to fully trace import graphs or verify idempotency contracts from the provided context. The deletion of process.mjs and the introduction of retry logic against potentially non-idempotent API operations are the strongest ship-blockers.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "process.mjs fully deleted — dangling import risk",
+        "body": "scripts/lib/process.mjs (67 lines) is completely removed. While scripts/check-imports.mjs was modified (5 lines changed), static import checks cannot catch dynamic `import()` expressions, string-concatenated requires, or transitive dependencies that were never exercised in tests. Any surviving reference to this module will produce a runtime ReferenceError, likely in a path not covered by existing UAT scenarios (which stop at v0.4.5). The deleted module existed through v0.4.5 and was presumably used; full evacuation must be verified.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.65,
+        "recommendation": "Run `grep -r 'process\\.mjs\\|from.*process' scripts/ commands/` (including dynamic import patterns) against the full tree. If any reference survives, either restore the module with a deprecation shim or complete the migration. Add a CI gate that greps for the deleted filename to prevent regression."
+      },
+      {
+        "severity": "high",
+        "title": "New retry.mjs (203 lines) combined with glm-client.mjs rewrite risks non-idempotent double-submission",
+        "body": "A brand-new retry module (scripts/lib/retry.mjs, 203 lines) lands alongside heavy edits to scripts/lib/glm-client.mjs (155 lines changed). The commit message explicitly mentions 'auto retry/backoff.' If any retried API call is a write operation (job submission, status update, state mutation), a retry after a network timeout—but where the server actually processed the request—will produce duplicate side effects. Without seeing the retry implementation, there is no evidence of idempotency keys, request deduplication, or conditional retry (retry only on safe-to-retry error classes). The bigmodel-errors.mjs dispatch (168 new lines) may classify errors for retry eligibility, but this cannot be verified from context.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.7,
+        "recommendation": "Audit retry.mjs to confirm: (1) only GET/HEAD or explicitly idempotent operations are retried automatically, (2) write-path retries require an idempotency key or are opted-out, (3) retry exhaustion propagates a distinguishable error (not a silent swallow). Add a test case in retry.test.mjs that verifies a mutation endpoint is NOT retried on timeout."
+      },
+      {
+        "severity": "medium",
+        "title": "State management changes concurrent with retry logic — stale-state and race-condition surface",
+        "body": "scripts/lib/state.mjs (32 lines changed), scripts/lib/tracked-jobs.mjs (78 lines changed), and scripts/lib/job-control.mjs (20 lines changed) are all modified in the same span that introduces retry.mjs. If a job-state update partially succeeds (e.g., written to disk but not to the tracking index) and the operation is then retried, the retried invocation may read stale state and produce an incorrect second mutation. The absence of any locking or version-stamping visible in the diff stat raises concern, especially for concurrent CLI invocations against the same project.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.5,
+        "recommendation": "Verify that state.mjs writes are atomic (e.g., write-to-temp-then-rename) and that tracked-jobs.mjs operations are idempotent under retry. Add a concurrency test: two parallel invocations of the same job-creation path should not produce duplicate entries or corrupt the state file."
+      }
+    ],
+    "next_steps": [
+      "Inspect the actual content of scripts/lib/retry.mjs and scripts/lib/glm-client.mjs to confirm which API operations are retried and whether idempotency is guaranteed.",
+      "Run `git grep -n 'process\\.mjs' scripts/` on the HEAD commit to prove zero surviving references to the deleted module.",
+      "Check retry.test.mjs (352 lines) for coverage of retry-exhaustion side effects and mutation-endpoint exclusion.",
+      "Verify that state.mjs uses atomic writes (write-to-temp + rename) before shipping retry logic that may re-execute state-mutating code paths."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative delta deletes an entire module (process.mjs), introduces new retry/error-dispatch machinery, and heavily rewrites the API client—all without the ability to fully trace import graphs or verify idempotency contracts from the provided context. The deletion of process.mjs and the introduction of retry logic against potentially non-idempotent API operations are the strongest ship-blockers.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"process.mjs fully deleted — dangling import risk\",\n      \"body\": \"scripts/lib/process.mjs (67 lines) is completely removed. While scripts/check-imports.mjs was modified (5 lines changed), static import checks cannot catch dynamic `import()` expressions, string-concatenated requires, or transitive dependencies that were never exercised in tests. Any surviving reference to this module will produce a runtime ReferenceError, likely in a path not covered by existing UAT scenarios (which stop at v0.4.5). The deleted module existed through v0.4.5 and was presumably used; full evacuation must be verified.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Run `grep -r 'process\\\\.mjs\\\\|from.*process' scripts/ commands/` (including dynamic import patterns) against the full tree. If any reference survives, either restore the module with a deprecation shim or complete the migration. Add a CI gate that greps for the deleted filename to prevent regression.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"New retry.mjs (203 lines) combined with glm-client.mjs rewrite risks non-idempotent double-submission\",\n      \"body\": \"A brand-new retry module (scripts/lib/retry.mjs, 203 lines) lands alongside heavy edits to scripts/lib/glm-client.mjs (155 lines changed). The commit message explicitly mentions 'auto retry/backoff.' If any retried API call is a write operation (job submission, status update, state mutation), a retry after a network timeout—but where the server actually processed the request—will produce duplicate side effects. Without seeing the retry implementation, there is no evidence of idempotency keys, request deduplication, or conditional retry (retry only on safe-to-retry error classes). The bigmodel-errors.mjs dispatch (168 new lines) may classify errors for retry eligibility, but this cannot be verified from context.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Audit retry.mjs to confirm: (1) only GET/HEAD or explicitly idempotent operations are retried automatically, (2) write-path retries require an idempotency key or are opted-out, (3) retry exhaustion propagates a distinguishable error (not a silent swallow). Add a test case in retry.test.mjs that verifies a mutation endpoint is NOT retried on timeout.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"State management changes concurrent with retry logic — stale-state and race-condition surface\",\n      \"body\": \"scripts/lib/state.mjs (32 lines changed), scripts/lib/tracked-jobs.mjs (78 lines changed), and scripts/lib/job-control.mjs (20 lines changed) are all modified in the same span that introduces retry.mjs. If a job-state update partially succeeds (e.g., written to disk but not to the tracking index) and the operation is then retried, the retried invocation may read stale state and produce an incorrect second mutation. The absence of any locking or version-stamping visible in the diff stat raises concern, especially for concurrent CLI invocations against the same project.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.5,\n      \"recommendation\": \"Verify that state.mjs writes are atomic (e.g., write-to-temp-then-rename) and that tracked-jobs.mjs operations are idempotent under retry. Add a concurrency test: two parallel invocations of the same job-creation path should not produce duplicate entries or corrupt the state file.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect the actual content of scripts/lib/retry.mjs and scripts/lib/glm-client.mjs to confirm which API operations are retried and whether idempotency is guaranteed.\",\n    \"Run `git grep -n 'process\\\\.mjs' scripts/` on the HEAD commit to prove zero surviving references to the deleted module.\",\n    \"Check retry.test.mjs (352 lines) for coverage of retry-exhaustion side effects and mutation-endpoint exclusion.\",\n    \"Verify that state.mjs uses atomic writes (write-to-temp + rename) before shipping retry logic that may re-execute state-mutating code paths.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T21:00:28.330Z"
+}

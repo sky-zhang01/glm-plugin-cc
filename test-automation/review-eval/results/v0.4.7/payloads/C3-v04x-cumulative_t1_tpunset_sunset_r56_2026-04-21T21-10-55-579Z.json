@@ -1,0 +1,70 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 56
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 139986,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces a new retry/backoff subsystem (retry.mjs, 203 lines) coupled with a new BigModel error classifier (bigmodel-errors.mjs, 168 lines) that together gate every API call through glm-client.mjs. This is the highest-risk surface: a misclassification in error dispatch will cause silent retries on non-idempotent or auth-failing requests, or conversely suppress retries on transient failures. The deletion of process.mjs (67 lines) adds orphaned-import risk. Given the 84-file, 6600+ line scope, a focused audit of the retry+error-classification contract is warranted before a v0.4.7 ship.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry/error-classification coupling creates silent-failure and duplication risk",
+        "body": "v0.4.6 adds retry.mjs (203 new lines) and bigmodel-errors.mjs (168 new lines) that together determine which BigModel API errors are retried, with what backoff, and how many times. The glm-client.mjs (155 lines changed) consumes both. If bigmodel-errors.mjs classifies a 401/403/auth boundary error as retryable, the retry loop will hammer the API with invalid credentials—potentially triggering account lockout or rate-limit escalation. If it classifies a transient 5xx or network timeout as non-retryable, user-visible jobs will fail silently without recovery. The risk is amplified because retry.mjs is brand-new infrastructure with no production seasoning, and the error dispatch is the sole arbiter of retry eligibility. Tests exist (retry.test.mjs at 352 lines, bigmodel-errors.test.mjs at 189 lines) but the critical integration path—error-classified-as-retryable → retry-executed-against-glm-client → idempotency-of-underlying-operation—cannot be verified from the diff summary alone.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.7,
+        "recommendation": "1) Audit bigmodel-errors.mjs to confirm 4xx errors (especially 401, 403, 409 Conflict) are never classified as retryable. 2) Verify that every glm-client.mjs call site that passes through retry.mjs is idempotent (read-only or safe-to-repeat). 3) Add an integration test that feeds each error class through the full retry→client path and asserts correct behavior. 4) Add a maximum-retry-duration wall-clock cap to prevent unbounded retry loops on misclassified errors."
+      },
+      {
+        "severity": "medium",
+        "title": "Deletion of process.mjs leaves potential for runtime MODULE_NOT_FOUND",
+        "body": "scripts/lib/process.mjs (67 lines) was deleted in commit 225401a ('Bundle F — ReferenceError + full thread/resume scaffolding purge'). The commit message itself references a ReferenceError, indicating this area was already fragile. While the purge likely updated direct consumers within the visible diff, any dynamic import(), string-based require(), plugin extension, or configuration file referencing this module will produce a runtime MODULE_NOT_FOUND crash that is not caught at CI time. The 84-file scope increases the probability of a missed import site.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.5,
+        "recommendation": "Run a full-text search across the entire repository (including non-.mjs files, JSON configs, markdown command files, and any plugin manifests) for the string 'process.mjs' or 'lib/process'. Add a CI gate in check-imports.mjs that validates every import target resolves to an existing file."
+      },
+      {
+        "severity": "medium",
+        "title": "Job-state mutations in tracked-jobs.mjs may lack concurrency safety",
+        "body": "scripts/lib/tracked-jobs.mjs (78 lines changed) and scripts/lib/state.mjs (32 lines changed) manage job lifecycle state. The v0.4.5 changes added --wait/--background execution modes (commit d573807), which implies concurrent processes can now observe and mutate the same job state. If two background jobs complete simultaneously and both write to the state file, the last-writer-wins semantics of filesystem writes can silently drop a job completion. There is no evidence in the diff summary of file-locking, atomic writes, or append-only semantics in the state layer.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.55,
+        "recommendation": "Verify that state.mjs uses atomic write patterns (write-to-temp-then-rename) and that tracked-jobs.mjs serializes state mutations. Add a test that launches two concurrent job completions against the same state file and asserts both completions are recorded."
+      }
+    ],
+    "next_steps": [
+      "Read scripts/lib/bigmodel-errors.mjs in full and verify every error code mapping: flag any 4xx classified as retryable as a ship-blocker.",
+      "Read scripts/lib/retry.mjs and confirm there is a hard wall-clock timeout and a maximum-attempt cap that cannot be exceeded even if the error classifier keeps returning retryable.",
+      "Grep the entire repo for 'process.mjs' and 'lib/process' to confirm no orphaned references remain after the deletion.",
+      "Read scripts/lib/state.mjs write path and confirm atomic-replace semantics (write-to-temp + rename) are used for all state mutations.",
+      "Run the existing test suite (tests/retry.test.mjs, tests/bigmodel-errors.test.mjs) and confirm coverage of the error-classification→retry-decision integration path, not just unit-level behavior."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff introduces a new retry/backoff subsystem (retry.mjs, 203 lines) coupled with a new BigModel error classifier (bigmodel-errors.mjs, 168 lines) that together gate every API call through glm-client.mjs. This is the highest-risk surface: a misclassification in error dispatch will cause silent retries on non-idempotent or auth-failing requests, or conversely suppress retries on transient failures. The deletion of process.mjs (67 lines) adds orphaned-import risk. Given the 84-file, 6600+ line scope, a focused audit of the retry+error-classification contract is warranted before a v0.4.7 ship.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Retry/error-classification coupling creates silent-failure and duplication risk\",\n      \"body\": \"v0.4.6 adds retry.mjs (203 new lines) and bigmodel-errors.mjs (168 new lines) that together determine which BigModel API errors are retried, with what backoff, and how many times. The glm-client.mjs (155 lines changed) consumes both. If bigmodel-errors.mjs classifies a 401/403/auth boundary error as retryable, the retry loop will hammer the API with invalid credentials—potentially triggering account lockout or rate-limit escalation. If it classifies a transient 5xx or network timeout as non-retryable, user-visible jobs will fail silently without recovery. The risk is amplified because retry.mjs is brand-new infrastructure with no production seasoning, and the error dispatch is the sole arbiter of retry eligibility. Tests exist (retry.test.mjs at 352 lines, bigmodel-errors.test.mjs at 189 lines) but the critical integration path—error-classified-as-retryable → retry-executed-against-glm-client → idempotency-of-underlying-operation—cannot be verified from the diff summary alone.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.7,\n      \"recommendation\": \"1) Audit bigmodel-errors.mjs to confirm 4xx errors (especially 401, 403, 409 Conflict) are never classified as retryable. 2) Verify that every glm-client.mjs call site that passes through retry.mjs is idempotent (read-only or safe-to-repeat). 3) Add an integration test that feeds each error class through the full retry→client path and asserts correct behavior. 4) Add a maximum-retry-duration wall-clock cap to prevent unbounded retry loops on misclassified errors.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Deletion of process.mjs leaves potential for runtime MODULE_NOT_FOUND\",\n      \"body\": \"scripts/lib/process.mjs (67 lines) was deleted in commit 225401a ('Bundle F — ReferenceError + full thread/resume scaffolding purge'). The commit message itself references a ReferenceError, indicating this area was already fragile. While the purge likely updated direct consumers within the visible diff, any dynamic import(), string-based require(), plugin extension, or configuration file referencing this module will produce a runtime MODULE_NOT_FOUND crash that is not caught at CI time. The 84-file scope increases the probability of a missed import site.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.5,\n      \"recommendation\": \"Run a full-text search across the entire repository (including non-.mjs files, JSON configs, markdown command files, and any plugin manifests) for the string 'process.mjs' or 'lib/process'. Add a CI gate in check-imports.mjs that validates every import target resolves to an existing file.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Job-state mutations in tracked-jobs.mjs may lack concurrency safety\",\n      \"body\": \"scripts/lib/tracked-jobs.mjs (78 lines changed) and scripts/lib/state.mjs (32 lines changed) manage job lifecycle state. The v0.4.5 changes added --wait/--background execution modes (commit d573807), which implies concurrent processes can now observe and mutate the same job state. If two background jobs complete simultaneously and both write to the state file, the last-writer-wins semantics of filesystem writes can silently drop a job completion. There is no evidence in the diff summary of file-locking, atomic writes, or append-only semantics in the state layer.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Verify that state.mjs uses atomic write patterns (write-to-temp-then-rename) and that tracked-jobs.mjs serializes state mutations. Add a test that launches two concurrent job completions against the same state file and asserts both completions are recorded.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Read scripts/lib/bigmodel-errors.mjs in full and verify every error code mapping: flag any 4xx classified as retryable as a ship-blocker.\",\n    \"Read scripts/lib/retry.mjs and confirm there is a hard wall-clock timeout and a maximum-attempt cap that cannot be exceeded even if the error classifier keeps returning retryable.\",\n    \"Grep the entire repo for 'process.mjs' and 'lib/process' to confirm no orphaned references remain after the deletion.\",\n    \"Read scripts/lib/state.mjs write path and confirm atomic-replace semantics (write-to-temp + rename) are used for all state mutations.\",\n    \"Run the existing test suite (tests/retry.test.mjs, tests/bigmodel-errors.test.mjs) and confirm coverage of the error-classification→retry-decision integration path, not just unit-level behavior.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T21:10:55.601Z"
+}

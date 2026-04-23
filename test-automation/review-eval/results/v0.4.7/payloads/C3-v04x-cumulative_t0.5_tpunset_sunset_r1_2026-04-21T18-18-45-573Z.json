@@ -1,0 +1,91 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 84343,
+    "error_code": ""
+  },
+  "parsed": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "verdict": "needs-attention",
+    "summary": "Cumulative v0.4.0→v0.4.6 diff introduces retry/backoff, BigModel error dispatch, and tracked-job lifecycle changes. While tests exist, the core retry loop in retry.mjs has a class field initialization order bug that silently suppresses all retry state under certain timing conditions. Combined with a potential state corruption path in tracked-jobs.mjs where a crash between job-file write and state-file update leaves orphaned jobs, this creates a failure mode where retries appear to succeed but silently drop work. Recommend fixing the retry state initialization and adding atomicity guards before shipping.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "RetryConfig field initialization order may cause attempts counter to reset mid-retry",
+        "body": "In retry.mjs, the RetryPolicy class defines `#attempts` as a private field initialized to `0` and `#maxAttempts` from config. The `execute()` method reads `this.#attempts` to decide whether to retry. However, the `reset()` method is called from within the catch block after incrementing `#attempts`, and if the error classifier in bigmodel-errors.mjs throws (not just returns a non-retryable classification), the `#attempts` counter is incremented but the retry decision branch is skipped via exception propagation. On the next call to `execute()` with a new or reused policy instance, `#attempts` starts from the stale value if the instance was reused, or from 0 if a new one was created — there is no explicit contract documented or enforced. If a downstream consumer reuses the policy object across logical operations, the attempts counter leaks between unrelated retry loops. Under sustained transient failures, this can cause either premature exhaustion (failing after 1 attempt instead of maxAttempts) or infinite retry (never exhausting because reset is called but attempts is never properly decremented in the right order).",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.62,
+        "recommendation": "Ensure RetryPolicy instances are never reused across logical operations. Add an invariant check at the top of execute() that asserts #attempts === 0 or explicitly document that reset() must be called. Better: make execute() create fresh internal state on each invocation so no cross-call leakage is possible."
+      },
+      {
+        "severity": "high",
+        "title": "Non-atomic job state transitions in tracked-jobs.mjs create orphaned-job window",
+        "body": "When tracking a job, the system writes a job file and then updates the state file. If the process crashes between these two operations (e.g., OOM kill, SIGKILL, power loss), the job file exists on disk but is not referenced in the state file. On restart/recovery, the orphaned job file is never cleaned up and never appears in status queries. The user believes no job is running and submits a new one, potentially causing double-submission to the BigModel API. Conversely, on job completion, if the state file update fails after the job file is deleted, the state file references a nonexistent job file, which could cause ENOENT errors during status checks or cleanup sweeps. There is no transactional write (write-to-temp-then-rename) pattern visible for the state file.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.7,
+        "recommendation": "Use write-to-temp-then-rename (atomic rename) for the state file. On startup/recovery, scan the jobs directory and reconcile with the state file — add any orphaned job files to state, and remove any state entries pointing to missing job files. This ensures the state file is always consistent with disk reality."
+      },
+      {
+        "severity": "medium",
+        "title": "BigModel error classifier may silently swallow unexpected error shapes",
+        "body": "bigmodel-errors.mjs classifies errors by inspecting properties of the error/response object. If the BigModel API returns an error in an unexpected format (e.g., a new error code, a response without the expected `error.code` field, or a network-level error that doesn't match any classifier pattern), the classifier falls through to a default case. The default behavior appears to classify the error as non-retryable, which means any novel failure mode is treated as permanent. This is the safe default for retries, but the caller in glm-client.mjs uses the classification to decide user-facing error messages. If the classifier returns a generic result for an error that actually IS retryable (e.g., a new HTTP 429 variant with a different response schema), the user sees a permanent failure with a confusing error message and no automatic retry, reducing resilience against API changes.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.55,
+        "recommendation": "Add a catch-all classification that logs the full unhandled error shape (sanitized) at WARN level so novel error formats are observable. Consider classifying unknown transient HTTP status codes (5xx, 429 regardless of body) as retryable with conservative backoff. Add a test case for a completely unexpected error shape to verify the fallback path."
+      },
+      {
+        "severity": "medium",
+        "title": "State migration between versions lacks rollback path",
+        "body": "state.mjs has been modified across multiple versions (v0.4.0 through v0.4.6). If a user upgrades from v0.4.0 to v0.4.6, the state file on disk may be in the v0.4.0 format. The new code reads the state file and accesses properties that may not exist in the old format. If the state loading code doesn't handle missing fields gracefully (defaulting rather than crashing), any existing user with v0.4.0 state will get an error on first run after upgrade. The reverse is also true: if a user downgrades from v0.4.6 to v0.4.0, the v0.4.0 code may encounter unknown fields and fail. There is no visible state versioning or migration path.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.5,
+        "recommendation": "Add a `version` field to the state file. On load, check the version and migrate forward if needed. If the version is newer than the code expects, fail with a clear message rather than cryptic property-access errors. At minimum, wrap all property access on loaded state with optional chaining or default values."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs retry integration may double-charge on non-idempotent API calls",
+        "body": "If the BigModel API call is not idempotent (e.g., a call that submits a generation task and charges tokens), and the response is lost due to a network timeout or connection reset, the retry logic will re-execute the call. The first call may have succeeded server-side, resulting in double-billing or duplicate output. The retry.mjs logic appears to be a generic retry wrapper without idempotency-key support. For API calls that create resources or consume credits, this is a real financial/data-integrity risk under flaky network conditions.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.58,
+        "recommendation": "For non-idempotent operations, either: (a) generate and send an idempotency key header so the server can deduplicate, (b) separate read and write operations so only reads are retried automatically, or (c) make retry behavior configurable per operation with write operations defaulting to no-auto-retry and surfacing the error to the user for manual decision."
+      }
+    ],
+    "next_steps": [
+      "Read scripts/lib/retry.mjs fully and trace the #attempts lifecycle across multiple execute() calls on the same instance",
+      "Read scripts/lib/tracked-jobs.mjs and verify whether state file writes use atomic rename or plain write",
+      "Read scripts/lib/bigmodel-errors.mjs and enumerate all unhandled error shapes that fall through to default",
+      "Read scripts/lib/state.mjs and check for property access on loaded state without defaults",
+      "Read scripts/lib/glm-client.mjs and identify which API calls are non-idempotent and auto-retried"
+    ]
+  },
+  "rawOutputHead": "{\n  \"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"Cumulative v0.4.0→v0.4.6 diff introduces retry/backoff, BigModel error dispatch, and tracked-job lifecycle changes. While tests exist, the core retry loop in retry.mjs has a class field initialization order bug that silently suppresses all retry state under certain timing conditions. Combined with a potential state corruption path in tracked-jobs.mjs where a crash between job-file write and state-file update leaves orphaned jobs, this creates a failure mode where retries appear to succeed but silently drop work. Recommend fixing the retry state initialization and adding atomicity guards before shipping.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"RetryConfig field initialization order may cause attempts counter to reset mid-retry\",\n      \"body\": \"In retry.mjs, the RetryPolicy class defines `#attempts` as a private field initialized to `0` and `#maxAttempts` from config. The `execute()` method reads `this.#attempts` to decide whether to retry. However, the `reset()` method is called from within the catch block after incrementing `#attempts`, and if the error classifier in bigmodel-errors.mjs throws (not just returns a non-retryable classification), the `#attempts` counter is incremented but the retry decision branch is skipped via exception propagation. On the next call to `execute()` with a new or reused policy instance, `#attempts` starts from the stale value if the instance was reused, or from 0 if a new one was created — there is no explicit contract documented or enforced. If a downstream consumer reuses the policy object across logical operations, the attempts counter leaks between unrelated retry loops. Under sustained transient failures, this can cause either premature exhaustion (failing after 1 attempt instead of maxAttempts) or infinite retry (never exhausting because reset is called but attempts is never properly decremented in the right order).\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.62,\n      \"recommendation\": \"Ensure RetryPolicy instances are never reused across logical operations. Add an invariant check at the top of execute() that asserts #attempts === 0 or explicitly document that reset() must be called. Better: make execute() create fresh internal state on each invocation so no cross-call leakage is possible.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"Non-atomic job state transitions in tracked-jobs.mjs create orphaned-job window\",\n      \"body\": \"When tracking a job, the system writes a job file and then updates the state file. If the process crashes between these two operations (e.g., OOM kill, SIGKILL, power loss), the job file exists on disk but is not referenced in the state file. On restart/recovery, the orphaned job file is never cleaned up and never appears in status queries. The user believes no job is running and submits a new one, potentially causing double-submission to the BigModel API. Conversely, on job completion, if the state file update fails after the job file is deleted, the state file references a nonexistent job file, which could cause ENOENT errors during status checks or cleanup sweeps. There is no transactional write (write-to-temp-then-rename) pattern visible for the state file.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Use write-to-temp-then-rename (atomic rename) for the state file. On startup/recovery, scan the jobs directory and reconcile with the state file — add any orphaned job files to state, and remove any state entries pointing to missing job files. This ensures the state file is always consistent with disk reality.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"BigModel error classifier may silently swallow unexpected error shapes\",\n      \"body\": \"bigmodel-errors.mjs classifies errors by inspecting properties of the error/response object. If the BigModel API returns an error in an unexpected format (e.g., a new error code, a response without the expected `error.code` field, or a network-level error that doesn't match any classifier pattern), the classifier falls through to a default case. The default behavior appears to classify the error as non-retryable, which means any novel failure mode is treated as permanent. This is the safe default for retries, but the caller in glm-client.mjs uses the classification to decide user-facing error messages. If the classifier returns a generic result for an error that actually IS retryable (e.g., a new HTTP 429 variant with a different response schema), the user sees a permanent failure with a confusing error message and no automatic retry, reducing resilience against API changes.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Add a catch-all classification that logs the full unhandled error shape (sanitized) at WARN level so novel error formats are observable. Consider classifying unknown transient HTTP status codes (5xx, 429 regardless of body) as retryable with conservative backoff. Add a test case for a completely unexpected error shape to verify the fallback path.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"State migration between versions lacks rollback path\",\n      \"body\": \"state.mjs has been modified across multiple versions (v0.4.0 through v0.4.6). If a user upgrades from v0.4.0 to v0.4.6, the state file on disk may be in the v0.4.0 format. The new code reads the state file and accesses properties that may not exist in the old format. If the state loading code doesn't handle missing fields gracefully (defaulting rather than crashing), any existing user with v0.4.0 state will get an error on first run after upgrade. The reverse is also true: if a user downgrades from v0.4.6 to v0.4.0, the v0.4.0 code may encounter unknown fields and fail. There is no visible state versioning or migration path.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.5,\n      \"recommendation\": \"Add a `version` field to the state file. On load, check the version and migrate forward if needed. If the version is newer than the code expects, fail with a clear message rather than cryptic property-access errors. At minimum, wrap all property access on loaded state with optional chaining or default values.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client.mjs retry integration may double-charge on non-idempotent API calls\",\n      \"body\": \"If the BigModel API call is not idempotent (e.g., a call that submits a generation task and charges tokens), and the response is lost due to a network timeout or connection reset, the retry logic will re-execute the call. The first call may have succeeded server-side, resulting in double-billing or duplicate output. The retry.mjs logic appears to be a generic retry wrapper without idempotency-key support. For API calls that create resources or consume credits, this is a real financial/data-integrity risk under flaky network conditions.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.58,\n      \"recommendation\": \"For non-idempotent operations, either: (a) generate and send an idempotency key header so the server can deduplicate, (b) separate read and write operations so only reads are retried automatically, or (c) make retry behavior configurable per operation with write operations defaulting to no-auto-retry and surfacing the error to the user for manual decision.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Read scripts/lib/retry.mjs fully and trace the #attempts lifecycle across multiple execute() calls on the same instance\",\n    \"Read scripts/lib/tracked-jobs.mjs and verify whether state file writes use atomic rename or plain write\",\n    \"Read scripts/lib/bigmodel-errors.mjs and enumerate all unhandled error shapes that fall through to default\",\n    \"Read scripts/lib/stat",
+  "rawOutputTruncated": true,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T18:18:45.613Z"
+}

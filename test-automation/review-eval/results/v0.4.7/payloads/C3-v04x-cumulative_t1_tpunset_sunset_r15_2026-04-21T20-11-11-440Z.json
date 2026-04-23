@@ -1,0 +1,79 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 15
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 98560,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces critical runtime infrastructure (retry, error dispatch, client changes) alongside a full module deletion (process.mjs) with no corresponding v0.4.6 UAT evidence. The combination of a deleted module, new retry logic applied to API calls, and missing end-to-end validation creates unacceptable risk of latent import crashes and duplicated operations in production.",
+    "findings": [
+      {
+        "severity": "critical",
+        "title": "Deleted process.mjs creates latent import crash risk",
+        "body": "scripts/lib/process.mjs was entirely removed (67 lines deleted, 0 added). The commit message 'Bundle F — ReferenceError + full thread/resume scaffolding purge' confirms this was a purge. However, any surviving `import ... from './process.mjs'` or `import ... from '../lib/process.mjs'` in glm-companion.mjs (139 lines changed), glm-client.mjs (155 lines changed), or any other consumer will produce a runtime ERR_MODULE_NOT_FOUND crash — not a caught error. No CI check in the diff appears to validate that no remaining imports reference this deleted module. This class of bug is invisible until the specific code path executes under real conditions.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.82,
+        "recommendation": "Run `grep -r 'process\\.mjs' scripts/` across the codebase and confirm zero references remain. Add a CI gate (e.g., in check-imports.mjs or check-all.sh) that verifies every imported module resolves, preventing silent deletion regressions."
+      },
+      {
+        "severity": "high",
+        "title": "No UAT evidence for v0.4.6 retry/backoff infrastructure",
+        "body": "The test-automation/uat-reports/ directory contains evidence only for v0.4.4 and v0.4.5. The v0.4.6 release added retry.mjs (203 lines of new backoff/retry logic), bigmodel-errors.mjs (168 lines of error classification), and modified glm-client.mjs (155 lines changed) — all core runtime components that directly affect API call reliability. These were not subjected to documented end-to-end UAT. Unit tests (tests/retry.test.mjs at 352 lines) exist but do not validate real API interaction patterns with retry, backoff timing, or error dispatch under degraded conditions.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.9,
+        "recommendation": "Create test-automation/uat-reports/v0.4.6/ with scenarios that exercise retry under simulated API failures, backoff timing, and error classification against real or recorded API responses. Block v0.4.7 until this evidence exists."
+      },
+      {
+        "severity": "high",
+        "title": "Retry logic applied to API client risks duplicating non-idempotent operations",
+        "body": "retry.mjs (203 lines new) and glm-client.mjs (155 lines changed) were both modified in the same v0.4.6 release (commit e0a9ba8: 'BigModel error dispatch + auto retry/backoff'). If retry is applied broadly to all API calls rather than only idempotent ones (GET requests, idempotency-keyed operations), transient failures followed by retries could duplicate submissions — e.g., creating duplicate review jobs or sending duplicate status updates. The unit tests in tests/retry.test.mjs (352 lines) likely test retry mechanics in isolation, not whether the client correctly scopes retry to safe operations.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.75,
+        "recommendation": "Verify that glm-client.mjs applies retry only to idempotent HTTP methods or operations with idempotency keys. Add a test in tests/retry.test.mjs that confirms non-idempotent calls (POST without idempotency key) are NOT retried on failure."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs changes + tracked-jobs.mjs changes create state corruption window under concurrent operations",
+        "body": "state.mjs (32 lines changed) and tracked-jobs.mjs (78 lines changed) were both modified. These modules manage persisted job/state. If the changes altered the state schema or file format without a migration path, existing state files from v0.4.5 will be read with v0.4.6 code — potentially producing undefined deserialization behavior (silent corruption, not a crash). No migration or schema-versioning mechanism is visible in the diff stat.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.55,
+        "recommendation": "Verify that state.mjs and tracked-jobs.mjs handle reading state files written by v0.4.5 (and earlier) without data loss. Add a schema version field to state files and a migration path, or document that the on-disk format is backward-compatible."
+      }
+    ],
+    "next_steps": [
+      "grep -r 'process\\.mjs' scripts/ to confirm no dangling imports from the deleted module",
+      "Inspect retry.mjs to verify retries are scoped to idempotent operations only",
+      "Create v0.4.6 UAT report with retry-under-failure scenarios before cutting v0.4.7",
+      "Verify backward compatibility of state file format between v0.4.5 and v0.4.6"
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff introduces critical runtime infrastructure (retry, error dispatch, client changes) alongside a full module deletion (process.mjs) with no corresponding v0.4.6 UAT evidence. The combination of a deleted module, new retry logic applied to API calls, and missing end-to-end validation creates unacceptable risk of latent import crashes and duplicated operations in production.\",\n  \"findings\": [\n    {\n      \"severity\": \"critical\",\n      \"title\": \"Deleted process.mjs creates latent import crash risk\",\n      \"body\": \"scripts/lib/process.mjs was entirely removed (67 lines deleted, 0 added). The commit message 'Bundle F — ReferenceError + full thread/resume scaffolding purge' confirms this was a purge. However, any surviving `import ... from './process.mjs'` or `import ... from '../lib/process.mjs'` in glm-companion.mjs (139 lines changed), glm-client.mjs (155 lines changed), or any other consumer will produce a runtime ERR_MODULE_NOT_FOUND crash — not a caught error. No CI check in the diff appears to validate that no remaining imports reference this deleted module. This class of bug is invisible until the specific code path executes under real conditions.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.82,\n      \"recommendation\": \"Run `grep -r 'process\\\\.mjs' scripts/` across the codebase and confirm zero references remain. Add a CI gate (e.g., in check-imports.mjs or check-all.sh) that verifies every imported module resolves, preventing silent deletion regressions.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"No UAT evidence for v0.4.6 retry/backoff infrastructure\",\n      \"body\": \"The test-automation/uat-reports/ directory contains evidence only for v0.4.4 and v0.4.5. The v0.4.6 release added retry.mjs (203 lines of new backoff/retry logic), bigmodel-errors.mjs (168 lines of error classification), and modified glm-client.mjs (155 lines changed) — all core runtime components that directly affect API call reliability. These were not subjected to documented end-to-end UAT. Unit tests (tests/retry.test.mjs at 352 lines) exist but do not validate real API interaction patterns with retry, backoff timing, or error dispatch under degraded conditions.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.9,\n      \"recommendation\": \"Create test-automation/uat-reports/v0.4.6/ with scenarios that exercise retry under simulated API failures, backoff timing, and error classification against real or recorded API responses. Block v0.4.7 until this evidence exists.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"Retry logic applied to API client risks duplicating non-idempotent operations\",\n      \"body\": \"retry.mjs (203 lines new) and glm-client.mjs (155 lines changed) were both modified in the same v0.4.6 release (commit e0a9ba8: 'BigModel error dispatch + auto retry/backoff'). If retry is applied broadly to all API calls rather than only idempotent ones (GET requests, idempotency-keyed operations), transient failures followed by retries could duplicate submissions — e.g., creating duplicate review jobs or sending duplicate status updates. The unit tests in tests/retry.test.mjs (352 lines) likely test retry mechanics in isolation, not whether the client correctly scopes retry to safe operations.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Verify that glm-client.mjs applies retry only to idempotent HTTP methods or operations with idempotency keys. Add a test in tests/retry.test.mjs that confirms non-idempotent calls (POST without idempotency key) are NOT retried on failure.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"state.mjs changes + tracked-jobs.mjs changes create state corruption window under concurrent operations\",\n      \"body\": \"state.mjs (32 lines changed) and tracked-jobs.mjs (78 lines changed) were both modified. These modules manage persisted job/state. If the changes altered the state schema or file format without a migration path, existing state files from v0.4.5 will be read with v0.4.6 code — potentially producing undefined deserialization behavior (silent corruption, not a crash). No migration or schema-versioning mechanism is visible in the diff stat.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Verify that state.mjs and tracked-jobs.mjs handle reading state files written by v0.4.5 (and earlier) without data loss. Add a schema version field to state files and a migration path, or document that the on-disk format is backward-compatible.\"\n    }\n  ],\n  \"next_steps\": [\n    \"grep -r 'process\\\\.mjs' scripts/ to confirm no dangling imports from the deleted module\",\n    \"Inspect retry.mjs to verify retries are scoped to idempotent operations only\",\n    \"Create v0.4.6 UAT report with retry-under-failure scenarios before cutting v0.4.7\",\n    \"Verify backward compatibility of state file format between v0.4.5 and v0.4.6\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T20:11:11.469Z"
+}

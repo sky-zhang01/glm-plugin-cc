@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 57
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 130406,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces a new retry/backoff subsystem (retry.mjs, bigmodel-errors.mjs) and deletes process.mjs entirely. The process.mjs deletion (67 lines removed, 0 added) is the highest-confidence risk: if any surviving import references it, the resulting ReferenceError is only visible on the affected code path at runtime — exactly the class of defect the commit log itself documents ('Bundle F — ReferenceError + full thread/resume scaffolding purge'). The new retry infrastructure (371 combined lines with no production history) amplifies API-interaction risk through misclassified errors or retry storms. Recommend a targeted grep for process.mjs imports and a review of retry termination guarantees before shipping.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "process.mjs deleted — dangling import risk latent in surviving modules",
+        "body": "scripts/lib/process.mjs shows 67 lines removed and 0 added, indicating full deletion. The commit log confirms a prior ReferenceError incident ('Bundle F — ReferenceError + full thread/resume scaffolding purge'). While check-imports.mjs was modified (5 lines changed) to accommodate this removal, the surviving modules glm-companion.mjs (139 lines changed), glm-client.mjs (155 lines changed), render.mjs (79 lines changed), job-control.mjs (20 lines changed), and tracked-jobs.mjs (78 lines changed) were all concurrently modified. If any dynamic import, conditional require, re-export chain, or test file still references process.mjs, the error is invisible until that code path executes at runtime. The historical ReferenceError fix suggests this exact failure mode has already occurred once in this release line.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.82,
+        "recommendation": "Run `grep -rn 'process\\.mjs\\|from.*process' scripts/ tests/ commands/` against the current HEAD. If any match exists outside process.mjs itself, the import must be updated or the code path removed. Add a CI check that verifies no import resolves to a nonexistent file (the existing check-imports.mjs may already do this — confirm it covers all entry points, not just the main companion script)."
+      },
+      {
+        "severity": "medium",
+        "title": "New retry.mjs (203 lines) + bigmodel-errors.mjs (168 lines) — retry storm and silent misclassification risk",
+        "body": "These two new modules form the retry/backoff subsystem for BigModel API calls. The interaction between error classification (bigmodel-errors.mjs) and retry execution (retry.mjs) is a common source of two failure modes: (1) a non-retryable error misclassified as retryable causes wasteful retry storms, amplifying load and delaying user-visible failure; (2) a retryable error misclassified as non-retryable causes silent data loss or premature job termination. The tests (retry.test.mjs at 352 lines, bigmodel-errors.test.mjs at 189 lines) suggest coverage exists but the modules have zero production runtime history. Under real conditions — network partitions, rate limiting, credential rotation — classification edge cases are the primary failure vector.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.65,
+        "recommendation": "Verify retry.mjs has: (a) a hard upper bound on total retry duration or count that cannot be exceeded regardless of classification, (b) jitter on backoff intervals to prevent thundering herd on shared infrastructure, (c) a circuit-breaker or cooldown after N consecutive failures to the same endpoint. Verify bigmodel-errors.mjs classifies HTTP 429, 502, 503, 504, and network timeouts as retryable and all 4xx client errors (except 429/408) as non-retryable. Add integration test cases for each classification."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs modifications (32 lines changed) risk breaking upgrade path from v0.4.0–v0.4.5 state files",
+        "body": "scripts/lib/state.mjs was modified across 32 lines in a release that includes a 'thread/resume scaffolding purge.' If the state file schema changed (new required fields, renamed keys, changed defaults), existing state files from v0.4.0 through v0.4.5 will be read by the new code. Without migration logic or graceful degradation for missing/renamed keys, users upgrading across this boundary will encounter corrupted state, lost job tracking, or runtime crashes on first run. The state.test.mjs file (81 lines) may not cover cross-version schema compatibility.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.55,
+        "recommendation": "Confirm that state.mjs handles missing keys gracefully (default values, not undefined-access crashes). Add a test that loads a state file written in the v0.4.0 format and verifies no error is thrown and all reads return sensible defaults. If schema migration is needed, add a migration path with a schema version marker."
+      }
+    ],
+    "next_steps": [
+      "Run `grep -rn 'process\\.mjs' scripts/ tests/ commands/` on HEAD and confirm zero surviving references — this is the highest-confidence blocker.",
+      "Verify retry.mjs has hard termination bounds (max retries, max elapsed time) that cannot be bypassed by error classification logic.",
+      "Test state.mjs against a v0.4.0-era state file to confirm backward compatibility or add schema migration.",
+      "Review bigmodel-errors.mjs classification table against the actual BigModel API error catalog to catch any misclassified HTTP status codes."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff introduces a new retry/backoff subsystem (retry.mjs, bigmodel-errors.mjs) and deletes process.mjs entirely. The process.mjs deletion (67 lines removed, 0 added) is the highest-confidence risk: if any surviving import references it, the resulting ReferenceError is only visible on the affected code path at runtime — exactly the class of defect the commit log itself documents ('Bundle F — ReferenceError + full thread/resume scaffolding purge'). The new retry infrastructure (371 combined lines with no production history) amplifies API-interaction risk through misclassified errors or retry storms. Recommend a targeted grep for process.mjs imports and a review of retry termination guarantees before shipping.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"process.mjs deleted — dangling import risk latent in surviving modules\",\n      \"body\": \"scripts/lib/process.mjs shows 67 lines removed and 0 added, indicating full deletion. The commit log confirms a prior ReferenceError incident ('Bundle F — ReferenceError + full thread/resume scaffolding purge'). While check-imports.mjs was modified (5 lines changed) to accommodate this removal, the surviving modules glm-companion.mjs (139 lines changed), glm-client.mjs (155 lines changed), render.mjs (79 lines changed), job-control.mjs (20 lines changed), and tracked-jobs.mjs (78 lines changed) were all concurrently modified. If any dynamic import, conditional require, re-export chain, or test file still references process.mjs, the error is invisible until that code path executes at runtime. The historical ReferenceError fix suggests this exact failure mode has already occurred once in this release line.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.82,\n      \"recommendation\": \"Run `grep -rn 'process\\\\.mjs\\\\|from.*process' scripts/ tests/ commands/` against the current HEAD. If any match exists outside process.mjs itself, the import must be updated or the code path removed. Add a CI check that verifies no import resolves to a nonexistent file (the existing check-imports.mjs may already do this — confirm it covers all entry points, not just the main companion script).\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"New retry.mjs (203 lines) + bigmodel-errors.mjs (168 lines) — retry storm and silent misclassification risk\",\n      \"body\": \"These two new modules form the retry/backoff subsystem for BigModel API calls. The interaction between error classification (bigmodel-errors.mjs) and retry execution (retry.mjs) is a common source of two failure modes: (1) a non-retryable error misclassified as retryable causes wasteful retry storms, amplifying load and delaying user-visible failure; (2) a retryable error misclassified as non-retryable causes silent data loss or premature job termination. The tests (retry.test.mjs at 352 lines, bigmodel-errors.test.mjs at 189 lines) suggest coverage exists but the modules have zero production runtime history. Under real conditions — network partitions, rate limiting, credential rotation — classification edge cases are the primary failure vector.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Verify retry.mjs has: (a) a hard upper bound on total retry duration or count that cannot be exceeded regardless of classification, (b) jitter on backoff intervals to prevent thundering herd on shared infrastructure, (c) a circuit-breaker or cooldown after N consecutive failures to the same endpoint. Verify bigmodel-errors.mjs classifies HTTP 429, 502, 503, 504, and network timeouts as retryable and all 4xx client errors (except 429/408) as non-retryable. Add integration test cases for each classification.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"state.mjs modifications (32 lines changed) risk breaking upgrade path from v0.4.0–v0.4.5 state files\",\n      \"body\": \"scripts/lib/state.mjs was modified across 32 lines in a release that includes a 'thread/resume scaffolding purge.' If the state file schema changed (new required fields, renamed keys, changed defaults), existing state files from v0.4.0 through v0.4.5 will be read by the new code. Without migration logic or graceful degradation for missing/renamed keys, users upgrading across this boundary will encounter corrupted state, lost job tracking, or runtime crashes on first run. The state.test.mjs file (81 lines) may not cover cross-version schema compatibility.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Confirm that state.mjs handles missing keys gracefully (default values, not undefined-access crashes). Add a test that loads a state file written in the v0.4.0 format and verifies no error is thrown and all reads return sensible defaults. If schema migration is needed, add a migration path with a schema version marker.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `grep -rn 'process\\\\.mjs' scripts/ tests/ commands/` on HEAD and confirm zero surviving references — this is the highest-confidence blocker.\",\n    \"Verify retry.mjs has hard termination bounds (max retries, max elapsed time) that cannot be bypassed by error classification logic.\",\n    \"Test state.mjs against a v0.4.0-era state file to confirm backward compatibility or add schema migration.\",\n    \"Review bigmodel-errors.mjs classification table against the actual BigModel API error catalog to catch any misclassified HTTP status codes.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T19:36:01.346Z"
+}

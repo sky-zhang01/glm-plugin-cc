@@ -1,0 +1,70 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 45
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 126991,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "Cumulative v0.4.0→v0.4.6 diff ships 6600+ lines across 84 files including a new retry/backoff system (retry.mjs, 203 lines) and BigModel error dispatch (bigmodel-errors.mjs, 168 lines), yet the highest-risk feature—v0.4.6 auto retry/backoff—has zero UAT evidence (reports exist only for v0.4.4 and v0.4.5). A core module (process.mjs) was deleted outright, creating latent import-failure risk if any consumer was missed. Both issues sit on the critical path for every API call the plugin makes.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Deleted process.mjs creates latent import-failure risk across the codebase",
+        "body": "scripts/lib/process.mjs (67 lines) was deleted entirely. The diff also modifies glm-companion.mjs (139 lines changed), check-imports.mjs (5 lines), and multiple lib modules, suggesting import paths were updated. However, if any caller—inside or outside the tracked test files—still statically or dynamically imports from 'scripts/lib/process.mjs', the runtime will throw MODULE_NOT_FOUND. This class of failure is silent until the code path is exercised in production. The deletion was part of commit 225401a ('full thread/resume scaffolding purge'), which is a broad removal. Cross-module deletions in a plugin that third-party tooling may import are especially hazardous because the consumer surface is not fully enumerable.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.68,
+        "recommendation": "Run `grep -r \"from.*process\\.mjs\\|require.*process\\.mjs\" scripts/ commands/ tests/` against the full tree. If any reference survives, either restore a re-export shim from process.mjs or update the consumer. Add a CI guard in check-imports.mjs that fails if any file references a deleted module path."
+      },
+      {
+        "severity": "high",
+        "title": "v0.4.6 retry/backoff feature has no UAT evidence despite being highest-risk new code",
+        "body": "Commit e0a9ba8 (v0.4.6) introduced 'BigModel error dispatch + auto retry/backoff,' adding retry.mjs (203 lines) and bigmodel-errors.mjs (168 lines). These modules handle every failure path for external API calls—exactly the surface where bugs are most costly and hardest to reproduce. The test-automation/uat-reports/ directory contains reports for v0.4.4 and v0.4.5 only. There is no v0.4.6 (or v0.4.7) directory. The unit tests (retry.test.mjs at 352 lines, bigmodel-errors.test.mjs at 189 lines) cover logic in isolation but cannot validate retry behavior under real network failures, backoff timing, or error-classification accuracy against live API responses. Shipping retry logic without end-to-end failure-mode validation risks retry storms, hung connections, or silently swallowed errors.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.88,
+        "recommendation": "Before shipping, create a v0.4.6 UAT suite that exercises: (1) a transient 429/503 with retry succeeding, (2) a persistent 5xx exhausting retries, (3) a non-retryable error (400/401) that must NOT retry, (4) concurrent jobs triggering parallel retries to check for thundering-herd behavior. If the retry module lacks per-attempt jitter, add it. Confirm bigmodel-errors correctly maps real BigModel error codes by capturing a sample of live error responses."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs and tracked-jobs.mjs changes may introduce job-state corruption under concurrent writes",
+        "body": "scripts/lib/state.mjs (32 lines changed) and scripts/lib/tracked-jobs.mjs (78 lines changed) govern persisted job state. The v0.4.5 diff adds --wait/--background execution modes (commit d573807), meaning multiple jobs can now run or poll concurrently. If state writes are not atomic or serialized, two concurrent status checks or job completions could interleave writes and corrupt the state file—e.g., one job's completion erases another's in-flight status. Without seeing the implementation, the structural risk is real: the diff adds concurrency semantics to a module originally designed for single-job tracking.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.55,
+        "recommendation": "Verify that all state writes in tracked-jobs.mjs are atomic (read-modify-write under a lock or using atomic-file-write patterns). Add a concurrency test: launch two background jobs simultaneously, then check that state.mjs reflects both without data loss. If the state format changed, ensure there is a migration path from the v0.4.0 format."
+      }
+    ],
+    "next_steps": [
+      "Run a full-tree grep for any remaining import of scripts/lib/process.mjs and confirm zero hits.",
+      "Execute a manual failure-mode test against a live BigModel endpoint: force a 429, a timeout, and an invalid-auth error, and verify retry.mjs behaves correctly in each case.",
+      "Create test-automation/uat-reports/v0.4.6/ with at minimum scenarios for retry-exhaust, retry-success-on-second-attempt, and concurrent-background-jobs.",
+      "Verify that tracked-jobs.mjs state writes are atomic by inspecting the implementation for read-modify-write race conditions.",
+      "Add a CI gate that fails the build if a deleted module path is still referenced anywhere in the source tree."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"Cumulative v0.4.0→v0.4.6 diff ships 6600+ lines across 84 files including a new retry/backoff system (retry.mjs, 203 lines) and BigModel error dispatch (bigmodel-errors.mjs, 168 lines), yet the highest-risk feature—v0.4.6 auto retry/backoff—has zero UAT evidence (reports exist only for v0.4.4 and v0.4.5). A core module (process.mjs) was deleted outright, creating latent import-failure risk if any consumer was missed. Both issues sit on the critical path for every API call the plugin makes.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Deleted process.mjs creates latent import-failure risk across the codebase\",\n      \"body\": \"scripts/lib/process.mjs (67 lines) was deleted entirely. The diff also modifies glm-companion.mjs (139 lines changed), check-imports.mjs (5 lines), and multiple lib modules, suggesting import paths were updated. However, if any caller—inside or outside the tracked test files—still statically or dynamically imports from 'scripts/lib/process.mjs', the runtime will throw MODULE_NOT_FOUND. This class of failure is silent until the code path is exercised in production. The deletion was part of commit 225401a ('full thread/resume scaffolding purge'), which is a broad removal. Cross-module deletions in a plugin that third-party tooling may import are especially hazardous because the consumer surface is not fully enumerable.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Run `grep -r \\\"from.*process\\\\.mjs\\\\|require.*process\\\\.mjs\\\" scripts/ commands/ tests/` against the full tree. If any reference survives, either restore a re-export shim from process.mjs or update the consumer. Add a CI guard in check-imports.mjs that fails if any file references a deleted module path.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"v0.4.6 retry/backoff feature has no UAT evidence despite being highest-risk new code\",\n      \"body\": \"Commit e0a9ba8 (v0.4.6) introduced 'BigModel error dispatch + auto retry/backoff,' adding retry.mjs (203 lines) and bigmodel-errors.mjs (168 lines). These modules handle every failure path for external API calls—exactly the surface where bugs are most costly and hardest to reproduce. The test-automation/uat-reports/ directory contains reports for v0.4.4 and v0.4.5 only. There is no v0.4.6 (or v0.4.7) directory. The unit tests (retry.test.mjs at 352 lines, bigmodel-errors.test.mjs at 189 lines) cover logic in isolation but cannot validate retry behavior under real network failures, backoff timing, or error-classification accuracy against live API responses. Shipping retry logic without end-to-end failure-mode validation risks retry storms, hung connections, or silently swallowed errors.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.88,\n      \"recommendation\": \"Before shipping, create a v0.4.6 UAT suite that exercises: (1) a transient 429/503 with retry succeeding, (2) a persistent 5xx exhausting retries, (3) a non-retryable error (400/401) that must NOT retry, (4) concurrent jobs triggering parallel retries to check for thundering-herd behavior. If the retry module lacks per-attempt jitter, add it. Confirm bigmodel-errors correctly maps real BigModel error codes by capturing a sample of live error responses.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"state.mjs and tracked-jobs.mjs changes may introduce job-state corruption under concurrent writes\",\n      \"body\": \"scripts/lib/state.mjs (32 lines changed) and scripts/lib/tracked-jobs.mjs (78 lines changed) govern persisted job state. The v0.4.5 diff adds --wait/--background execution modes (commit d573807), meaning multiple jobs can now run or poll concurrently. If state writes are not atomic or serialized, two concurrent status checks or job completions could interleave writes and corrupt the state file—e.g., one job's completion erases another's in-flight status. Without seeing the implementation, the structural risk is real: the diff adds concurrency semantics to a module originally designed for single-job tracking.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Verify that all state writes in tracked-jobs.mjs are atomic (read-modify-write under a lock or using atomic-file-write patterns). Add a concurrency test: launch two background jobs simultaneously, then check that state.mjs reflects both without data loss. If the state format changed, ensure there is a migration path from the v0.4.0 format.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run a full-tree grep for any remaining import of scripts/lib/process.mjs and confirm zero hits.\",\n    \"Execute a manual failure-mode test against a live BigModel endpoint: force a 429, a timeout, and an invalid-auth error, and verify retry.mjs behaves correctly in each case.\",\n    \"Create test-automation/uat-reports/v0.4.6/ with at minimum scenarios for retry-exhaust, retry-success-on-second-attempt, and concurrent-background-jobs.\",\n    \"Verify that tracked-jobs.mjs state writes are atomic by inspecting the implementation for read-modify-write race conditions.\",\n    \"Add a CI gate that fails the build if a deleted module path is still referenced anywhere in the source tree.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T17:26:58.766Z"
+}

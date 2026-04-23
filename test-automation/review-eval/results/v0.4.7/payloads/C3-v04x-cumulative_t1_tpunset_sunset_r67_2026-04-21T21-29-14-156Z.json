@@ -1,0 +1,100 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 67
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 6,
+    "citation_accuracy": 0.833,
+    "citation_false_file_hits": 0,
+    "latency_ms": 52848,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces substantial new infrastructure (retry.mjs, bigmodel-errors.mjs, tracked-jobs.mjs changes, glm-client.mjs changes) without sufficient evidence of hardened failure semantics. Multiple code paths in the retry and error-dispatch layers have observable gaps around idempotency, partial-state recovery, and silent-failure modes that could corrupt job state under real production stress. This should not ship until the identified gaps are confirmed resolved.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry layer may silently swallow fatal errors and corrupt in-flight job state",
+        "body": "scripts/lib/retry.mjs is a new 200+ line module implementing retry/backoff logic. If a retried operation mutates state (e.g. job status in tracked-jobs.mjs or state.mjs) and fails mid-mutation, the retry will re-execute from an inconsistent intermediate state. There is no evidence in the diff of transactional guards, rollback-on-partial-failure, or idempotency tokens. Under concurrent or retried calls, a job could end up marked as 'completed' in one subsystem but 'failed' in another, with no recovery path. The 350-line test file (tests/retry.test.mjs) likely covers happy-path retry counts but not state-corruption under partial failure.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.78,
+        "recommendation": "Add explicit idempotency guards: before mutating job state, write a unique attempt marker; on retry, detect and recover from partial state. Add at least one integration test that simulates a mid-mutation crash and verifies state consistency after retry."
+      },
+      {
+        "severity": "high",
+        "title": "BigModel error dispatch may misclassify novel error shapes, causing infinite retry loops or silent drops",
+        "body": "scripts/lib/bigmodel-errors.mjs (168 lines) is a new error-classification module for dispatching BigModel API errors into retryable vs. fatal categories. Classification heuristics that match on error message strings or HTTP status codes are fragile: an upstream API change, a proxy returning an unexpected status, or a rate-limit response with a new format could cause every error to be classified as retryable, producing an infinite (or max-retry) loop that exhausts quota and delays user-visible failure by minutes. Alternatively, a novel error shape could fall through all matchers unclassified, producing a silent undefined return that propagates as a nondescript failure with no diagnostic context.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.82,
+        "recommendation": "Ensure the classifier has an explicit catch-all/default branch that tags unmatched errors as 'unclassified_fatal' with full error context, and logs a warning. Add a test case for a completely novel error shape and verify it does not produce an undefined classification."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs state mutations lack concurrency protection for parallel GLM client calls",
+        "body": "scripts/lib/tracked-jobs.mjs (78 lines changed) manages job tracking state that is read and written by glm-client.mjs. The glm-client.mjs diff shows significant changes (155 lines) likely adding parallel or batched API calls. If two concurrent client calls complete in interleaved order, tracked-jobs state updates could race: a later-finishing job could overwrite the status of an earlier one if they share a key, or a read-modify-write on the jobs map could lose an update. The job-control.mjs changes (20 lines) may compound this if they add wait/background modes that increase concurrency.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.72,
+        "recommendation": "Audit all write paths to tracked-jobs state for atomicity. If jobs are stored in a shared mutable object, ensure writes are serialized or use atomic upsert semantics. Add a concurrency stress test that submits multiple jobs simultaneously and verifies final state is consistent."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs file-based state may corrupt on crash during write, no atomic write pattern visible",
+        "body": "scripts/lib/state.mjs (32 lines changed) persists plugin state to the filesystem. The diff does not show evidence of atomic write patterns (write-to-temp-then-rename). If the process crashes or is killed during a state write, the state file can be left truncated or empty. On next startup, the plugin would read corrupt/empty state and either fail with an unhandled parse error or silently reset to defaults, losing user configuration. Given this is a settings/configuration store, silent reset is a data-loss scenario.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.68,
+        "recommendation": "Implement atomic file writes: write to a temporary file in the same directory, then rename over the target. On read, if the file is missing or corrupt, fall back to the previous version (keep a .bak). Add a test that simulates a truncated state file and verifies graceful recovery."
+      },
+      {
+        "severity": "medium",
+        "title": "fs.mjs changes remove process.mjs — deletion of shared utility may leave dangling imports or lost error handling",
+        "body": "scripts/lib/process.mjs was deleted entirely (67 lines removed). The diff stat shows it was a non-trivial module. If any other file in the codebase imported from process.mjs (even transitively), the import would resolve to undefined at runtime, producing a TypeError only when that code path is exercised. This is a silent failure that would not appear in normal startup — only when a specific error-handling or subprocess-management path is triggered under stress.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.74,
+        "recommendation": "Search the entire codebase for any remaining imports of 'process.mjs' or references to its exported functions. The check-imports.mjs script may catch static imports but will miss dynamic imports or string-based requires. If any references remain, either restore the module or migrate callers to the replacement."
+      },
+      {
+        "severity": "low",
+        "title": "render.mjs error paths may produce empty/misleading output for downstream consumers",
+        "body": "scripts/lib/render.mjs has 79 lines changed. If render functions encounter unexpected input shapes (null job, missing fields from a partially-failed API response), the render layer may produce empty strings or template literals with 'undefined' interpolated. These would propagate to the user as blank output or garbled text, making it impossible to diagnose the underlying failure. The test file (tests/render.test.mjs, 193 lines) may not cover these degenerate input cases.",
+        "file": "scripts/lib/render.mjs",
+        "line_start": 1,
+        "line_end": 79,
+        "confidence": 0.55,
+        "recommendation": "Add defensive guards at render entry points: if input is null/undefined or missing expected fields, return an explicit error string like '[render error: incomplete data]' rather than empty or undefined output."
+      }
+    ],
+    "next_steps": [
+      "Read scripts/lib/retry.mjs in full and trace every call site to verify idempotency under re-execution.",
+      "Read scripts/lib/bigmodel-errors.mjs and verify the default/fallthrough branch is not undefined.",
+      "Grep the entire codebase for any remaining import of 'process.mjs' to confirm safe deletion.",
+      "Inspect state.mjs write logic for atomic-write pattern (temp+rename vs direct write).",
+      "Run the full test suite against a simulated partial-failure scenario (kill mid-write, kill mid-retry) and verify recovery."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff introduces substantial new infrastructure (retry.mjs, bigmodel-errors.mjs, tracked-jobs.mjs changes, glm-client.mjs changes) without sufficient evidence of hardened failure semantics. Multiple code paths in the retry and error-dispatch layers have observable gaps around idempotency, partial-state recovery, and silent-failure modes that could corrupt job state under real production stress. This should not ship until the identified gaps are confirmed resolved.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Retry layer may silently swallow fatal errors and corrupt in-flight job state\",\n      \"body\": \"scripts/lib/retry.mjs is a new 200+ line module implementing retry/backoff logic. If a retried operation mutates state (e.g. job status in tracked-jobs.mjs or state.mjs) and fails mid-mutation, the retry will re-execute from an inconsistent intermediate state. There is no evidence in the diff of transactional guards, rollback-on-partial-failure, or idempotency tokens. Under concurrent or retried calls, a job could end up marked as 'completed' in one subsystem but 'failed' in another, with no recovery path. The 350-line test file (tests/retry.test.mjs) likely covers happy-path retry counts but not state-corruption under partial failure.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Add explicit idempotency guards: before mutating job state, write a unique attempt marker; on retry, detect and recover from partial state. Add at least one integration test that simulates a mid-mutation crash and verifies state consistency after retry.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"BigModel error dispatch may misclassify novel error shapes, causing infinite retry loops or silent drops\",\n      \"body\": \"scripts/lib/bigmodel-errors.mjs (168 lines) is a new error-classification module for dispatching BigModel API errors into retryable vs. fatal categories. Classification heuristics that match on error message strings or HTTP status codes are fragile: an upstream API change, a proxy returning an unexpected status, or a rate-limit response with a new format could cause every error to be classified as retryable, producing an infinite (or max-retry) loop that exhausts quota and delays user-visible failure by minutes. Alternatively, a novel error shape could fall through all matchers unclassified, producing a silent undefined return that propagates as a nondescript failure with no diagnostic context.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.82,\n      \"recommendation\": \"Ensure the classifier has an explicit catch-all/default branch that tags unmatched errors as 'unclassified_fatal' with full error context, and logs a warning. Add a test case for a completely novel error shape and verify it does not produce an undefined classification.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"tracked-jobs.mjs state mutations lack concurrency protection for parallel GLM client calls\",\n      \"body\": \"scripts/lib/tracked-jobs.mjs (78 lines changed) manages job tracking state that is read and written by glm-client.mjs. The glm-client.mjs diff shows significant changes (155 lines) likely adding parallel or batched API calls. If two concurrent client calls complete in interleaved order, tracked-jobs state updates could race: a later-finishing job could overwrite the status of an earlier one if they share a key, or a read-modify-write on the jobs map could lose an update. The job-control.mjs changes (20 lines) may compound this if they add wait/background modes that increase concurrency.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Audit all write paths to tracked-jobs state for atomicity. If jobs are stored in a shared mutable object, ensure writes are serialized or use atomic upsert semantics. Add a concurrency stress test that submits multiple jobs simultaneously and verifies final state is consistent.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"state.mjs file-based state may corrupt on crash during write, no atomic write pattern visible\",\n      \"body\": \"scripts/lib/state.mjs (32 lines changed) persists plugin state to the filesystem. The diff does not show evidence of atomic write patterns (write-to-temp-then-rename). If the process crashes or is killed during a state write, the state file can be left truncated or empty. On next startup, the plugin would read corrupt/empty state and either fail with an unhandled parse error or silently reset to defaults, losing user configuration. Given this is a settings/configuration store, silent reset is a data-loss scenario.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Implement atomic file writes: write to a temporary file in the same directory, then rename over the target. On read, if the file is missing or corrupt, fall back to the previous version (keep a .bak). Add a test that simulates a truncated state file and verifies graceful recovery.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"fs.mjs changes remove process.mjs — deletion of shared utility may leave dangling imports or lost error handling\",\n      \"body\": \"scripts/lib/process.mjs was deleted entirely (67 lines removed). The diff stat shows it was a non-trivial module. If any other file in the codebase imported from process.mjs (even transitively), the import would resolve to undefined at runtime, producing a TypeError only when that code path is exercised. This is a silent failure that would not appear in normal startup — only when a specific error-handling or subprocess-management path is triggered under stress.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.74,\n      \"recommendation\": \"Search the entire codebase for any remaining imports of 'process.mjs' or references to its exported functions. The check-imports.mjs script may catch static imports but will miss dynamic imports or string-based requires. If any references remain, either restore the module or migrate callers to the replacement.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"render.mjs error paths may produce empty/misleading output for downstream consumers\",\n      \"body\": \"scripts/lib/render.mjs has 79 lines changed. If render functions encounter unexpected input shapes (null job, missing fields from a partially-failed API response), the render layer may produce empty strings or template literals with 'undefined' interpolated. These would propagate to the user as blank output or garbled text, making it impossible to diagnose the underlying failure. The test file (tests/render.test.mjs, 193 lines) may not cover these degenerate input cases.\",\n      \"file\": \"scripts/lib/render.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 79,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Add defensive guards at render entry points: if input is null/undefined or missing expected fields, return an explicit error string like '[render error: incomplete data]' rather than empty or undefined output.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Read scripts/lib/retry.mjs in full and trace every call site to verify idempotency under re-execution.\",\n    \"Read scripts/lib/bigmodel-errors.mjs and verify the default/fallthrough branch is not undefined.\",\n    \"Grep the entire codebase for any remaining import of 'process.mjs' to confirm safe deletion.\",\n    \"Inspect state.mjs write logic for atomic-write pattern (temp+rename vs direct write).\",\n    \"Run the full test suite against a simulated partial-failure scenario (kill mid-write, kill mid-retry) and verify recovery.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T21:29:14.201Z"
+}

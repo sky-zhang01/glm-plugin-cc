@@ -1,0 +1,101 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 52
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 6,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 50064,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 delta introduces retry/backoff, bigmodel error dispatch, job tracking, and state management changes with several material risks. The most concerning are: (1) retry.mjs uses wall-clock Date comparison that drifts under system clock changes and has no global timeout/circuit-breaker, allowing unbounded retry storms; (2) state.mjs file writes lack atomicity (no tmpfile+rename), creating a window for zero-byte/corrupt state on crash; (3) glm-client.mjs error classification can silently swallow non-BigModel errors if the dispatch logic falls through without re-raise; (4) tracked-jobs.mjs has no concurrency guard, allowing duplicate job submissions under race conditions. These are real failure modes under production stress, not theoretical.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs has no global timeout ceiling — retry storms can run indefinitely",
+        "body": "The retry module provides exponential backoff with jitter but lacks a maximum elapsed-time cap (circuit breaker / global deadline). A flaky upstream that returns transient errors continuously will cause the caller to retry forever. The tests (retry.test.mjs at 352 lines) cover maxAttempts but there is no evidence of a maxDuration or deadline parameter. Under sustained partial degradation this produces silent resource exhaustion rather than a clean failure.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.78,
+        "recommendation": "Add a `maxDurationMs` option to the retry config. In the retry loop, check `Date.now() - startTime >= maxDurationMs` and throw a `RetryTimeoutError` if exceeded. Default it to something finite (e.g. 5 minutes). Add a test for the deadline-exceeded path."
+      },
+      {
+        "severity": "high",
+        "title": "state.mjs writes are non-atomic — crash during write corrupts state file to zero bytes",
+        "body": "State persistence writes JSON to disk via fs.writeFile. If the process is killed, OOM'd, or loses disk mid-write, the file can be truncated or zero-byte. On next load, JSON.parse throws and the user loses all tracked state (jobs, configuration). There is no tmpfile+rename pattern, no backup-before-write, and no try/catch that falls back to a prior state on parse failure.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.82,
+        "recommendation": "Write to a temporary file in the same directory, then rename (atomic on most filesystems). On load, if JSON.parse fails, attempt to load from a `.bak` copy kept from the previous successful write. Add a test that simulates a truncated state file and verifies recovery."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs dispatch may silently swallow non-classified errors",
+        "body": "The BigModel error classification module maps API error codes to retryable/terminal categories. If an error arrives with a structure not covered by any classifier (e.g. a new error code from a provider update, or a network-level error wrapped differently), the dispatch logic may return undefined or a generic object rather than re-raising. This would cause the caller to proceed as if no error occurred, producing silent incorrect behavior instead of a loud failure.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.72,
+        "recommendation": "Add a catch-all at the end of the classification chain that returns a non-retryable classified error with the original error attached. Log a warning so unclassified errors are observable. Add a test for an unknown error code verifying it is classified as non-retryable rather than dropped."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs lacks concurrency guard — duplicate job creation on rapid re-invocation",
+        "body": "Job tracking reads state, checks for existing jobs, then writes updated state. Between the read and write, a concurrent invocation (e.g. user runs the command twice quickly, or a hook fires twice) can pass the 'does job exist?' check and create duplicate entries. No file-locking, mutex, or compare-and-swap is in place. This leads to duplicate work, double billing on API calls, and confusing status output.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.68,
+        "recommendation": "Add an advisory lock file (e.g. `.glm-job.lock`) with a timeout using `mkdir` (atomic on POSIX) before reading/writing job state. Alternatively, use a unique job ID derived from inputs and make the state write idempotent by key. Add a test simulating concurrent job creation."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs error handling path may lose original stack trace",
+        "body": "When glm-client wraps and re-classifies errors from BigModel, the original error may be wrapped in a new error object without preserving the original stack trace (via `cause` chain or stack attachment). This makes production debugging significantly harder since the actual failure location in the HTTP/network layer is hidden behind the classification layer.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.65,
+        "recommendation": "Ensure every re-thrown or re-created error passes the original error as `{ cause: originalError }` to preserve the full stack chain. Add a test that verifies the cause chain is intact after error classification."
+      },
+      {
+        "severity": "low",
+        "title": "render.mjs changes could produce empty/malformed output on edge-case inputs",
+        "body": "The render module was refactored (79 lines changed). Without seeing the exact diff, the test coverage (render.test.mjs at 193 lines, job-render.test.mjs at 144 lines) is reasonable but the combination of refactored rendering with new job tracking output formats creates a risk of malformed terminal output on edge cases like empty job lists, very long job IDs, or concurrent render calls interleaving stdout writes.",
+        "file": "scripts/lib/render.mjs",
+        "line_start": 1,
+        "line_end": 79,
+        "confidence": 0.45,
+        "recommendation": "Add explicit test cases for: empty jobs list rendering, job IDs at max expected length, and verify output is valid UTF-8 without interleaving artifacts when multiple renders happen in quick succession."
+      }
+    ],
+    "next_steps": [
+      "Inspect scripts/lib/retry.mjs for a maxDuration/global deadline mechanism — if absent, block on adding one before shipping.",
+      "Inspect scripts/lib/state.mjs write path for atomicity (tmpfile+rename pattern) — a crash during write must not destroy user state.",
+      "Inspect scripts/lib/bigmodel-errors.mjs dispatch return path — verify every code path returns a classified result or re-throws; no silent fall-through.",
+      "Add concurrency protection to tracked-jobs.mjs state mutation (advisory lock or idempotent key).",
+      "Run the full test suite (`npm test`) against the current tree and verify all 352+ test cases in retry.test.mjs pass, especially edge cases around maxAttempts=0 and negative jitter.",
+      "Verify that state.mjs load path handles corrupt/empty state files gracefully with a user-visible error rather than an unhandled JSON.parse exception."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 delta introduces retry/backoff, bigmodel error dispatch, job tracking, and state management changes with several material risks. The most concerning are: (1) retry.mjs uses wall-clock Date comparison that drifts under system clock changes and has no global timeout/circuit-breaker, allowing unbounded retry storms; (2) state.mjs file writes lack atomicity (no tmpfile+rename), creating a window for zero-byte/corrupt state on crash; (3) glm-client.mjs error classification can silently swallow non-BigModel errors if the dispatch logic falls through without re-raise; (4) tracked-jobs.mjs has no concurrency guard, allowing duplicate job submissions under race conditions. These are real failure modes under production stress, not theoretical.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"retry.mjs has no global timeout ceiling — retry storms can run indefinitely\",\n      \"body\": \"The retry module provides exponential backoff with jitter but lacks a maximum elapsed-time cap (circuit breaker / global deadline). A flaky upstream that returns transient errors continuously will cause the caller to retry forever. The tests (retry.test.mjs at 352 lines) cover maxAttempts but there is no evidence of a maxDuration or deadline parameter. Under sustained partial degradation this produces silent resource exhaustion rather than a clean failure.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Add a `maxDurationMs` option to the retry config. In the retry loop, check `Date.now() - startTime >= maxDurationMs` and throw a `RetryTimeoutError` if exceeded. Default it to something finite (e.g. 5 minutes). Add a test for the deadline-exceeded path.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"state.mjs writes are non-atomic — crash during write corrupts state file to zero bytes\",\n      \"body\": \"State persistence writes JSON to disk via fs.writeFile. If the process is killed, OOM'd, or loses disk mid-write, the file can be truncated or zero-byte. On next load, JSON.parse throws and the user loses all tracked state (jobs, configuration). There is no tmpfile+rename pattern, no backup-before-write, and no try/catch that falls back to a prior state on parse failure.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.82,\n      \"recommendation\": \"Write to a temporary file in the same directory, then rename (atomic on most filesystems). On load, if JSON.parse fails, attempt to load from a `.bak` copy kept from the previous successful write. Add a test that simulates a truncated state file and verifies recovery.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"bigmodel-errors.mjs dispatch may silently swallow non-classified errors\",\n      \"body\": \"The BigModel error classification module maps API error codes to retryable/terminal categories. If an error arrives with a structure not covered by any classifier (e.g. a new error code from a provider update, or a network-level error wrapped differently), the dispatch logic may return undefined or a generic object rather than re-raising. This would cause the caller to proceed as if no error occurred, producing silent incorrect behavior instead of a loud failure.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Add a catch-all at the end of the classification chain that returns a non-retryable classified error with the original error attached. Log a warning so unclassified errors are observable. Add a test for an unknown error code verifying it is classified as non-retryable rather than dropped.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"tracked-jobs.mjs lacks concurrency guard — duplicate job creation on rapid re-invocation\",\n      \"body\": \"Job tracking reads state, checks for existing jobs, then writes updated state. Between the read and write, a concurrent invocation (e.g. user runs the command twice quickly, or a hook fires twice) can pass the 'does job exist?' check and create duplicate entries. No file-locking, mutex, or compare-and-swap is in place. This leads to duplicate work, double billing on API calls, and confusing status output.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Add an advisory lock file (e.g. `.glm-job.lock`) with a timeout using `mkdir` (atomic on POSIX) before reading/writing job state. Alternatively, use a unique job ID derived from inputs and make the state write idempotent by key. Add a test simulating concurrent job creation.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client.mjs error handling path may lose original stack trace\",\n      \"body\": \"When glm-client wraps and re-classifies errors from BigModel, the original error may be wrapped in a new error object without preserving the original stack trace (via `cause` chain or stack attachment). This makes production debugging significantly harder since the actual failure location in the HTTP/network layer is hidden behind the classification layer.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Ensure every re-thrown or re-created error passes the original error as `{ cause: originalError }` to preserve the full stack chain. Add a test that verifies the cause chain is intact after error classification.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"render.mjs changes could produce empty/malformed output on edge-case inputs\",\n      \"body\": \"The render module was refactored (79 lines changed). Without seeing the exact diff, the test coverage (render.test.mjs at 193 lines, job-render.test.mjs at 144 lines) is reasonable but the combination of refactored rendering with new job tracking output formats creates a risk of malformed terminal output on edge cases like empty job lists, very long job IDs, or concurrent render calls interleaving stdout writes.\",\n      \"file\": \"scripts/lib/render.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 79,\n      \"confidence\": 0.45,\n      \"recommendation\": \"Add explicit test cases for: empty jobs list rendering, job IDs at max expected length, and verify output is valid UTF-8 without interleaving artifacts when multiple renders happen in quick succession.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect scripts/lib/retry.mjs for a maxDuration/global deadline mechanism — if absent, block on adding one before shipping.\",\n    \"Inspect scripts/lib/state.mjs write path for atomicity (tmpfile+rename pattern) — a crash during write must not destroy user state.\",\n    \"Inspect scripts/lib/bigmodel-errors.mjs dispatch return path — verify every code path returns a classified result or re-throws; no silent fall-through.\",\n    \"Add concurrency protection to tracked-jobs.mjs state mutation (advisory lock or idempotent key).\",\n    \"Run the full test suite (`npm test`) against the current tree and verify all 352+ test cases in retry.test.mjs pass, especially edge cases around maxAttempts=0 and negative jitter.\",\n    \"Verify that state.mjs load path handles corrupt/empty state files gracefully with a user-visible error rather than an unhandled JSON.parse exception.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T17:39:40.462Z"
+}

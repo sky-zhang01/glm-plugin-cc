@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 50
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.6,
+    "citation_false_file_hits": 0,
+    "latency_ms": 54136,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces significant new runtime infrastructure (retry.mjs, bigmodel-errors.mjs, tracked-jobs.mjs, glm-client.mjs rewrite) without adequate guards against silent data loss, partial-state corruption, or concurrency hazards. The most dangerous finding is that tracked-jobs.mjs performs destructive state mutations (retire, clear) without atomicity guarantees, meaning a crash or concurrent invocation mid-write can silently drop job records. The retry module's cancellation path does not clean up side effects from partially-completed operations. I am blocking on these because they affect user-visible data integrity under real failure modes.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "tracked-jobs.mjs: non-atomic read-modify-write on job state enables silent data loss under concurrency or crash",
+        "body": "The tracked-jobs module reads a JSON file, mutates the in-memory object, and writes it back. If two invocations run concurrently (e.g. a background job completing while the user runs status or submit), the second write silently overwrites the first's mutations. Similarly, a process crash between the read and write leaves the file in whichever state it was last fully written — potentially missing jobs that were 'retired' by the other process. The `retire()` and `clear()` paths are destructive; losing a retire means a zombie job, but losing a submit means the user cannot track or cancel their work. There is no file-locking, atomic rename, or append-only strategy.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.82,
+        "recommendation": "Use atomic write-via-temp+rename for all state mutations: write to a .tmp file, fsync, then rename over the target. For concurrency, adopt a simple lockfile (pid + timestamp) with stale-lock detection, or use a append-only log format that is safe under concurrent readers."
+      },
+      {
+        "severity": "high",
+        "title": "retry.mjs: cancellation does not roll back or signal partially-completed operations, risking duplicate side effects on retry",
+        "body": "The retry module supports cancellation (abort via AbortSignal or cancellation token), but when a retryable operation is cancelled mid-execution, the caller has no way to know whether the underlying API call completed server-side. On the next retry of the same logical operation (e.g. a job submission), this can produce duplicate submissions with no deduplication key. The `RetryManager` and `withRetry` both treat cancellation as a final error but do not record or communicate partial-completion status. In a job-submission flow this means silent duplicate work.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Add an idempotency key parameter to withRetry/RetryManager that is propagated to the underlying operation. On cancellation, return a result object distinguishing 'cancelled-before-start', 'cancelled-mid-flight' (unknown server state), and 'cancelled-after-response'. Document that callers must handle the mid-flight case."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs: API key exposed in process.argv when GLM_API_KEY is passed via --api-key flag",
+        "body": "If a user invokes the companion with `--api-key sk-xxx` on the command line, the secret is visible in `ps aux` output to all local users and may be logged to shell history. The args parser stores it as a raw string. While environment variable usage is also supported, the flag path has no warning, no redaction, and the key is propagated through multiple call frames without being stripped from process.argv.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.68,
+        "recommendation": "At minimum, replace process.argv entries containing the API key with '[REDACTED]' immediately after parsing. Add a startup warning when --api-key is used on the CLI suggesting the environment variable instead. Consider removing the CLI flag entirely in favor of env-only or a credentials file with restricted permissions."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs: error classification is silently wrong for undocumented error codes — falls through to retry instead of surfacing",
+        "body": "The BigModel error dispatch classifies HTTP status codes to determine retry vs. fail behavior. For any status code not in the explicit mapping, the code defaults to a retryable error. This means new or undocumented error codes (e.g. 402 Payment Required, 429 without proper headers, 503 variants) will be retried with exponential backoff, potentially for minutes, before the user sees a meaningful message. The user sees only generic retry output, not the actual server error. This was the primary motivation for v0.4.6 but the fallback is still dangerous.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.75,
+        "recommendation": "Change the default classification from retryable to non-retryable with a clear error message that includes the unrecognized status code and full response body. Add a counter or max-retries-for-unknown-codes limit (e.g. 1 attempt for unrecognized codes) so the user gets fast feedback."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs: writeState does not use atomic rename — crash window can produce zero-length file",
+        "body": "writeState serializes JSON and calls fs.writeFile. If the process is killed (OOM, SIGKILL, disk full) between the file being opened for writing and the write completing, the file can be left as a zero-length or partially-written JSON blob. The next readState will then throw a JSON parse error, and there is no fallback to a backup or previous state. Combined with tracked-jobs.mjs sharing the same pattern, this is a systemic issue across all state persistence.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.78,
+        "recommendation": "Implement writeState as: write to a temp file in the same directory, fsync, then rename over the target. readState should attempt to read the primary file, and if it fails JSON parse, fall back to a .bak copy written before each mutation."
+      }
+    ],
+    "next_steps": [
+      "Inspect tracked-jobs.mjs retire/clear paths for atomicity — this is the highest-risk data-loss vector",
+      "Run a concurrent invocation test: start a long-running background job, then immediately run submit/status/retire from a second terminal",
+      "Verify whether --api-key CLI flag is documented and whether test fixtures contain real keys",
+      "Check whether bigmodel-errors.mjs default-retry behavior has been observed in production logs causing long silent stalls",
+      "Request the author add integration tests for crash-recovery of state files (kill -9 during writeState)"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 diff introduces significant new runtime infrastructure (retry.mjs, bigmodel-errors.mjs, tracked-jobs.mjs, glm-client.mjs rewrite) without adequate guards against silent data loss, partial-state corruption, or concurrency hazards. The most dangerous finding is that tracked-jobs.mjs performs destructive state mutations (retire, clear) without atomicity guarantees, meaning a crash or concurrent invocation mid-write can silently drop job records. The retry module's cancellation path does not clean up side effects from partially-completed operations. I am blocking on these because they affect user-visible data integrity under real failure modes.\",\"findings\":[{\"severity\":\"high\",\"title\":\"tracked-jobs.mjs: non-atomic read-modify-write on job state enables silent data loss under concurrency or crash\",\"body\":\"The tracked-jobs module reads a JSON file, mutates the in-memory object, and writes it back. If two invocations run concurrently (e.g. a background job completing while the user runs status or submit), the second write silently overwrites the first's mutations. Similarly, a process crash between the read and write leaves the file in whichever state it was last fully written — potentially missing jobs that were 'retired' by the other process. The `retire()` and `clear()` paths are destructive; losing a retire means a zombie job, but losing a submit means the user cannot track or cancel their work. There is no file-locking, atomic rename, or append-only strategy.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.82,\"recommendation\":\"Use atomic write-via-temp+rename for all state mutations: write to a .tmp file, fsync, then rename over the target. For concurrency, adopt a simple lockfile (pid + timestamp) with stale-lock detection, or use a append-only log format that is safe under concurrent readers.\"},{\"severity\":\"high\",\"title\":\"retry.mjs: cancellation does not roll back or signal partially-completed operations, risking duplicate side effects on retry\",\"body\":\"The retry module supports cancellation (abort via AbortSignal or cancellation token), but when a retryable operation is cancelled mid-execution, the caller has no way to know whether the underlying API call completed server-side. On the next retry of the same logical operation (e.g. a job submission), this can produce duplicate submissions with no deduplication key. The `RetryManager` and `withRetry` both treat cancellation as a final error but do not record or communicate partial-completion status. In a job-submission flow this means silent duplicate work.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.72,\"recommendation\":\"Add an idempotency key parameter to withRetry/RetryManager that is propagated to the underlying operation. On cancellation, return a result object distinguishing 'cancelled-before-start', 'cancelled-mid-flight' (unknown server state), and 'cancelled-after-response'. Document that callers must handle the mid-flight case.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs: API key exposed in process.argv when GLM_API_KEY is passed via --api-key flag\",\"body\":\"If a user invokes the companion with `--api-key sk-xxx` on the command line, the secret is visible in `ps aux` output to all local users and may be logged to shell history. The args parser stores it as a raw string. While environment variable usage is also supported, the flag path has no warning, no redaction, and the key is propagated through multiple call frames without being stripped from process.argv.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.68,\"recommendation\":\"At minimum, replace process.argv entries containing the API key with '[REDACTED]' immediately after parsing. Add a startup warning when --api-key is used on the CLI suggesting the environment variable instead. Consider removing the CLI flag entirely in favor of env-only or a credentials file with restricted permissions.\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors.mjs: error classification is silently wrong for undocumented error codes — falls through to retry instead of surfacing\",\"body\":\"The BigModel error dispatch classifies HTTP status codes to determine retry vs. fail behavior. For any status code not in the explicit mapping, the code defaults to a retryable error. This means new or undocumented error codes (e.g. 402 Payment Required, 429 without proper headers, 503 variants) will be retried with exponential backoff, potentially for minutes, before the user sees a meaningful message. The user sees only generic retry output, not the actual server error. This was the primary motivation for v0.4.6 but the fallback is still dangerous.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.75,\"recommendation\":\"Change the default classification from retryable to non-retryable with a clear error message that includes the unrecognized status code and full response body. Add a counter or max-retries-for-unknown-codes limit (e.g. 1 attempt for unrecognized codes) so the user gets fast feedback.\"},{\"severity\":\"medium\",\"title\":\"state.mjs: writeState does not use atomic rename — crash window can produce zero-length file\",\"body\":\"writeState serializes JSON and calls fs.writeFile. If the process is killed (OOM, SIGKILL, disk full) between the file being opened for writing and the write completing, the file can be left as a zero-length or partially-written JSON blob. The next readState will then throw a JSON parse error, and there is no fallback to a backup or previous state. Combined with tracked-jobs.mjs sharing the same pattern, this is a systemic issue across all state persistence.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.78,\"recommendation\":\"Implement writeState as: write to a temp file in the same directory, fsync, then rename over the target. readState should attempt to read the primary file, and if it fails JSON parse, fall back to a .bak copy written before each mutation.\"}],\"next_steps\":[\"Inspect tracked-jobs.mjs retire/clear paths for atomicity — this is the highest-risk data-loss vector\",\"Run a concurrent invocation test: start a long-running background job, then immediately run submit/status/retire from a second terminal\",\"Verify whether --api-key CLI flag is documented and whether test fixtures contain real keys\",\"Check whether bigmodel-errors.mjs default-retry behavior has been observed in production logs causing long silent stalls\",\"Request the author add integration tests for crash-recovery of state files (kill -9 during writeState)\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T21:02:03.298Z"
+}

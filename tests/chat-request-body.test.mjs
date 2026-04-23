@@ -7,7 +7,7 @@
  * presence_penalty) get stamped onto the POST body. These are the
  * surface bugs we already got bitten by — Codex's v0.4.7 repo review
  * flagged that v0.4.6/7 was NOT sending response_format even though
- * the parser assumed JSON, and the v0.4.7 149-run expanded sweep
+ * the parser assumed JSON, and the v0.4.7 457-run expanded sweep
  * surfaced parse-failures that `response_format` would have
  * reduced.
  *

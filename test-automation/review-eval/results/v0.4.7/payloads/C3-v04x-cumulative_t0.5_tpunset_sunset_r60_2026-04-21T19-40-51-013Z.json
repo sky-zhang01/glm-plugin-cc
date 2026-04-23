@@ -1,0 +1,102 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 60
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 6,
+    "citation_accuracy": 0.833,
+    "citation_false_file_hits": 0,
+    "latency_ms": 60867,
+    "error_code": ""
+  },
+  "parsed": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces a retry/backoff layer, BigModel error dispatch, job tracking, and state management with several material risks: silent state corruption in tracked-jobs, retry exhaustion that can swallow errors silently, race-prone file-based state, and incomplete error propagation in glm-client. Several of these are hard-to-detect under happy-path testing and could cause silent job loss or stuck state in production.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry exhaustion silently swallows errors without caller notification",
+        "body": "scripts/lib/retry.mjs implements an exponential backoff retry loop. When all retries are exhausted, the function needs to propagate the last error to the caller. If the final catch/rejection path returns undefined or a falsy result instead of throwing, callers (glm-client, glm-companion) will continue execution on a missing/undefined response, leading to silent downstream failures (e.g. undefined.message property access, writing undefined to state). This is especially dangerous in an automated sweep context where failures must be visible.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.75,
+        "recommendation": "Audit every exit path in retry.mjs to ensure that on exhaustion, the last error is always re-thrown or returned in a structured result that callers must check. Add an explicit test for the exhaustion path verifying the error is propagated, not swallowed."
+      },
+      {
+        "severity": "high",
+        "title": "Tracked-jobs file-based state has no concurrency protection",
+        "body": "scripts/lib/tracked-jobs.mjs reads and writes job tracking state to the filesystem with no locking mechanism. In a sweep/batch context where multiple GLM processes or concurrent invocations could run simultaneously, read-modify-write on the same state file can cause lost updates: one process reads state, another writes, the first overwrites with stale data. This causes job records to silently disappear.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.7,
+        "recommendation": "Add atomic file writes (write-to-temp then rename) at minimum. For true concurrency safety, implement file-based locking (e.g. lockfile with stale-lock detection) or use a per-job file scheme so concurrent writes don't collide. Document whether concurrent execution is supported."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client error dispatch may produce unhandled rejection on non-standard BigModel error shapes",
+        "body": "scripts/lib/bigmodel-errors.mjs classifies BigModel API errors for retry decisions. If the API returns an error response that doesn't match any classified error code (e.g. new error type, HTML error page, network-level corruption), the classifier likely falls through to a default that may not set retryable=false, causing infinite retry loops on permanently-failing requests, or conversely may not retry a transiently-failing request. The fallback behavior is critical and must be explicit.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.7,
+        "recommendation": "Ensure the error classifier has an explicit fallback case that logs the unrecognized error shape, marks it as non-retryable by default (fail-closed), and includes the raw error data for debugging. Add tests for unrecognized error codes and malformed response bodies."
+      },
+      {
+        "severity": "medium",
+        "title": "State file corruption risk on process interruption during write",
+        "body": "scripts/lib/state.mjs manages persistent state. If the process is killed (SIGKILL, OOM, crash) during a state file write, the file can be left partially written (truncated JSON), causing all subsequent reads to fail with a parse error. Combined with the tracked-jobs issue, this means a single crash can make the entire GLM state unreadable, blocking all future operations until manual intervention.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.75,
+        "recommendation": "Use atomic write pattern: write to a temporary file in the same directory, then fs.rename() (which is atomic on most filesystems). Add a recovery path that handles corrupt state gracefully (e.g. backup corrupt file, start fresh with a warning rather than crashing)."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-companion.mjs changes suggest error propagation gaps in main dispatch",
+        "body": "scripts/glm-companion.mjs had 139 lines changed and serves as the main CLI entry point. The addition of retry/backoff and BigModel error dispatch means error objects from new code paths may not be caught by existing error handlers in the companion dispatch. If a retry throws a non-standard error type or an error without a .message property, the top-level error handler could crash with a TypeError instead of showing the user a meaningful message.",
+        "file": "scripts/glm-companion.mjs",
+        "line_start": 1,
+        "line_end": 139,
+        "confidence": 0.6,
+        "recommendation": "Verify the top-level catch handler in glm-companion.mjs safely handles any thrown value (including non-Error objects, null, undefined). Add defensive stringification of the error before display. Add integration tests for retry-exhaustion and BigModel error paths propagating through the companion dispatch."
+      },
+      {
+        "severity": "low",
+        "title": "Removed process.mjs without verification of no remaining imports",
+        "body": "scripts/lib/process.mjs was deleted (67 lines removed). If any other file dynamically imports or conditionally references this module, the import will fail at runtime rather than at startup, potentially causing a delayed crash in a code path not covered by tests.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.5,
+        "recommendation": "Grep the entire codebase for any remaining references to 'process.mjs' or 'lib/process' to confirm no live import paths remain. The check-imports.mjs script change may partially cover this but should be verified."
+      }
+    ],
+    "next_steps": [
+      "Inspect retry.mjs exhaust paths to confirm errors are never swallowed",
+      "Review tracked-jobs.mjs for atomic write and concurrency safety",
+      "Verify bigmodel-errors.mjs has explicit fail-closed fallback for unrecognized errors",
+      "Audit state.mjs write path for crash-safety (atomic rename pattern)",
+      "Run grep for 'process.mjs' references across codebase to confirm clean removal",
+      "Add integration test for retry exhaustion propagating through glm-companion.mjs"
+    ]
+  },
+  "rawOutputHead": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 cumulative diff introduces a retry/backoff layer, BigModel error dispatch, job tracking, and state management with several material risks: silent state corruption in tracked-jobs, retry exhaustion that can swallow errors silently, race-prone file-based state, and incomplete error propagation in glm-client. Several of these are hard-to-detect under happy-path testing and could cause silent job loss or stuck state in production.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Retry exhaustion silently swallows errors without caller notification\",\"body\":\"scripts/lib/retry.mjs implements an exponential backoff retry loop. When all retries are exhausted, the function needs to propagate the last error to the caller. If the final catch/rejection path returns undefined or a falsy result instead of throwing, callers (glm-client, glm-companion) will continue execution on a missing/undefined response, leading to silent downstream failures (e.g. undefined.message property access, writing undefined to state). This is especially dangerous in an automated sweep context where failures must be visible.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.75,\"recommendation\":\"Audit every exit path in retry.mjs to ensure that on exhaustion, the last error is always re-thrown or returned in a structured result that callers must check. Add an explicit test for the exhaustion path verifying the error is propagated, not swallowed.\"},{\"severity\":\"high\",\"title\":\"Tracked-jobs file-based state has no concurrency protection\",\"body\":\"scripts/lib/tracked-jobs.mjs reads and writes job tracking state to the filesystem with no locking mechanism. In a sweep/batch context where multiple GLM processes or concurrent invocations could run simultaneously, read-modify-write on the same state file can cause lost updates: one process reads state, another writes, the first overwrites with stale data. This causes job records to silently disappear.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.7,\"recommendation\":\"Add atomic file writes (write-to-temp then rename) at minimum. For true concurrency safety, implement file-based locking (e.g. lockfile with stale-lock detection) or use a per-job file scheme so concurrent writes don't collide. Document whether concurrent execution is supported.\"},{\"severity\":\"medium\",\"title\":\"glm-client error dispatch may produce unhandled rejection on non-standard BigModel error shapes\",\"body\":\"scripts/lib/bigmodel-errors.mjs classifies BigModel API errors for retry decisions. If the API returns an error response that doesn't match any classified error code (e.g. new error type, HTML error page, network-level corruption), the classifier likely falls through to a default that may not set retryable=false, causing infinite retry loops on permanently-failing requests, or conversely may not retry a transiently-failing request. The fallback behavior is critical and must be explicit.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.7,\"recommendation\":\"Ensure the error classifier has an explicit fallback case that logs the unrecognized error shape, marks it as non-retryable by default (fail-closed), and includes the raw error data for debugging. Add tests for unrecognized error codes and malformed response bodies.\"},{\"severity\":\"medium\",\"title\":\"State file corruption risk on process interruption during write\",\"body\":\"scripts/lib/state.mjs manages persistent state. If the process is killed (SIGKILL, OOM, crash) during a state file write, the file can be left partially written (truncated JSON), causing all subsequent reads to fail with a parse error. Combined with the tracked-jobs issue, this means a single crash can make the entire GLM state unreadable, blocking all future operations until manual intervention.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.75,\"recommendation\":\"Use atomic write pattern: write to a temporary file in the same directory, then fs.rename() (which is atomic on most filesystems). Add a recovery path that handles corrupt state gracefully (e.g. backup corrupt file, start fresh with a warning rather than crashing).\"},{\"severity\":\"medium\",\"title\":\"glm-companion.mjs changes suggest error propagation gaps in main dispatch\",\"body\":\"scripts/glm-companion.mjs had 139 lines changed and serves as the main CLI entry point. The addition of retry/backoff and BigModel error dispatch means error objects from new code paths may not be caught by existing error handlers in the companion dispatch. If a retry throws a non-standard error type or an error without a .message property, the top-level error handler could crash with a TypeError instead of showing the user a meaningful message.\",\"file\":\"scripts/glm-companion.mjs\",\"line_start\":1,\"line_end\":139,\"confidence\":0.6,\"recommendation\":\"Verify the top-level catch handler in glm-companion.mjs safely handles any thrown value (including non-Error objects, null, undefined). Add defensive stringification of the error before display. Add integration tests for retry-exhaustion and BigModel error paths propagating through the companion dispatch.\"},{\"severity\":\"low\",\"title\":\"Removed process.mjs without verification of no remaining imports\",\"body\":\"scripts/lib/process.mjs was deleted (67 lines removed). If any other file dynamically imports or conditionally references this module, the import will fail at runtime rather than at startup, potentially causing a delayed crash in a code path not covered by tests.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":1,\"confidence\":0.5,\"recommendation\":\"Grep the entire codebase for any remaining references to 'process.mjs' or 'lib/process' to confirm no live import paths remain. The check-imports.mjs script change may partially cover this but should be verified.\"}],\"next_steps\":[\"Inspect retry.mjs exhaust paths to confirm errors are never swallowed\",\"Review tracked-jobs.mjs for atomic write and concurrency safety\",\"Verify bigmodel-errors.mjs has explicit fail-closed fallback for unrecognized errors\",\"Audit state.mjs write path for crash-safety (atomic rename pattern)\",\"Run grep for 'process.mjs' references across codebase to confirm clean removal\",\"Add integration test for retry exhaustion propagating through glm-companion.mjs\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T19:40:51.147Z"
+}

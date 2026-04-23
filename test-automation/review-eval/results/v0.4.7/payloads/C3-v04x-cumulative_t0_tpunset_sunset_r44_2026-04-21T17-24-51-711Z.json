@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 44
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 144720,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The cumulative v0.4.0→v0.4.6 diff introduces a retry/backoff system (retry.mjs, 203 new lines), BigModel error dispatch (bigmodel-errors.mjs, 168 new lines), and deletes process.mjs entirely — yet ships without v0.4.6 UAT evidence and without visible idempotency guards on retried API calls. The highest-risk surface (retry × glm-client × tracked-jobs) has unit tests but no integration or UAT validation under real failure conditions.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Deleted scripts/lib/process.mjs (67 lines) with no visible migration test",
+        "body": "The entire process.mjs module was removed (-67 lines). Any remaining import of this module will throw a runtime Cannot find module error. The test suite has no 'process.test.mjs' file, and none of the existing test filenames (args, bigmodel-errors, fs, job-render, etc.) suggest coverage for process-management edge cases that this module may have handled (signal trapping, exit handling, child-process cleanup). The deletion in the same bundle as a retry refactor means a crash inside a retry loop could orphan child processes or miss cleanup.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.72,
+        "recommendation": "Grep the entire codebase for 'process.mjs' imports. If any caller remains, this is a shipping blocker. Add a dedicated test that validates signal/exit behavior still works after the refactor, or document that the functionality was intentionally dropped and why."
+      },
+      {
+        "severity": "high",
+        "title": "No UAT evidence for v0.4.6 retry/backoff feature — highest-risk change unvalidated",
+        "body": "UAT reports exist for v0.4.4 and v0.4.5 (test-automation/uat-reports/v0.4.{4,5}/) but NOT for v0.4.6. The v0.4.6 commit message explicitly calls out 'BigModel error dispatch + auto retry/backoff' as the core feature. Retry logic is the single most dangerous category of change: it amplifies partial failures, can duplicate side effects, and behaves differently under real network conditions vs. mocked unit tests. The retry.test.mjs (352 lines) covers unit-level behavior but cannot validate real API interaction with backoff, rate-limit headers, or idempotency.",
+        "file": "test-automation/uat-reports/v0.4.5/report.md",
+        "line_start": 1,
+        "line_end": 125,
+        "confidence": 0.88,
+        "recommendation": "Block ship until a v0.4.6 UAT run is produced that exercises: (1) a real API call that fails and is retried, (2) a call that partially succeeds (e.g., 200 but malformed body), (3) a call that exhausts retries, (4) a concurrent retry scenario. Minimally, extend the v0.4.5 UAT harness with retry-specific scenarios."
+      },
+      {
+        "severity": "medium",
+        "title": "Retry module (203 lines) has no visible idempotency mechanism for non-GET API calls",
+        "body": "retry.mjs is 203 new lines of retry logic that integrates with glm-client.mjs (155 lines changed). If the BigModel API calls are POST/PUT (e.g., job submission), a retry on a network timeout could duplicate the operation if the server already processed it. The diff stat shows no new idempotency-key header, no request deduplication, and no conditional-retry based on HTTP method. Under real conditions (transient 503 followed by success), this silently creates duplicate jobs or submissions.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.65,
+        "recommendation": "Audit every call site where retry() wraps a non-GET request. Add either: (a) an idempotency key header, (b) method-aware retry that only retries GET/HEAD by default, or (c) a documented opt-in with a comment explaining why the operation is safe to retry. This is a latent data-integrity bug even if current usage happens to be safe."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs (78 lines changed) + retry.mjs interaction can corrupt job state on partial retry",
+        "body": "tracked-jobs.mjs was heavily modified alongside the retry addition. If a job is tracked as 'in-progress', then the API call fails, and retry creates a new attempt, the job tracking state may become inconsistent: the original attempt is still marked 'in-progress' while the retry writes a new entry or overwrites it. The diff stat shows no test file specifically named for tracked-jobs integration with retry. job-render.test.mjs (144 lines) likely tests rendering, not state consistency under retry.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.58,
+        "recommendation": "Add an integration test that: (1) starts a tracked job, (2) simulates a failure mid-flight, (3) triggers retry, (4) asserts the job state is consistent (single entry, correct final status). Without this, a user hitting transient failures will accumulate zombie 'in-progress' entries that never resolve."
+      }
+    ],
+    "next_steps": [
+      "Run `grep -r 'process.mjs' scripts/ commands/ hooks/` to confirm no dangling imports from the deleted module.",
+      "Execute a v0.4.6 UAT run covering retry scenarios before promoting past v0.4.6.",
+      "Audit all retry() call sites for HTTP method safety — confirm none wrap non-idempotent operations without guards.",
+      "Add a tracked-jobs + retry integration test that validates state consistency after a failed-then-retried job.",
+      "Verify that the retry backoff parameters (delay, max attempts) are configurable and not hardcoded to values that could trigger rate limits."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The cumulative v0.4.0→v0.4.6 diff introduces a retry/backoff system (retry.mjs, 203 new lines), BigModel error dispatch (bigmodel-errors.mjs, 168 new lines), and deletes process.mjs entirely — yet ships without v0.4.6 UAT evidence and without visible idempotency guards on retried API calls. The highest-risk surface (retry × glm-client × tracked-jobs) has unit tests but no integration or UAT validation under real failure conditions.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Deleted scripts/lib/process.mjs (67 lines) with no visible migration test\",\n      \"body\": \"The entire process.mjs module was removed (-67 lines). Any remaining import of this module will throw a runtime Cannot find module error. The test suite has no 'process.test.mjs' file, and none of the existing test filenames (args, bigmodel-errors, fs, job-render, etc.) suggest coverage for process-management edge cases that this module may have handled (signal trapping, exit handling, child-process cleanup). The deletion in the same bundle as a retry refactor means a crash inside a retry loop could orphan child processes or miss cleanup.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Grep the entire codebase for 'process.mjs' imports. If any caller remains, this is a shipping blocker. Add a dedicated test that validates signal/exit behavior still works after the refactor, or document that the functionality was intentionally dropped and why.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"No UAT evidence for v0.4.6 retry/backoff feature — highest-risk change unvalidated\",\n      \"body\": \"UAT reports exist for v0.4.4 and v0.4.5 (test-automation/uat-reports/v0.4.{4,5}/) but NOT for v0.4.6. The v0.4.6 commit message explicitly calls out 'BigModel error dispatch + auto retry/backoff' as the core feature. Retry logic is the single most dangerous category of change: it amplifies partial failures, can duplicate side effects, and behaves differently under real network conditions vs. mocked unit tests. The retry.test.mjs (352 lines) covers unit-level behavior but cannot validate real API interaction with backoff, rate-limit headers, or idempotency.\",\n      \"file\": \"test-automation/uat-reports/v0.4.5/report.md\",\n      \"line_start\": 1,\n      \"line_end\": 125,\n      \"confidence\": 0.88,\n      \"recommendation\": \"Block ship until a v0.4.6 UAT run is produced that exercises: (1) a real API call that fails and is retried, (2) a call that partially succeeds (e.g., 200 but malformed body), (3) a call that exhausts retries, (4) a concurrent retry scenario. Minimally, extend the v0.4.5 UAT harness with retry-specific scenarios.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Retry module (203 lines) has no visible idempotency mechanism for non-GET API calls\",\n      \"body\": \"retry.mjs is 203 new lines of retry logic that integrates with glm-client.mjs (155 lines changed). If the BigModel API calls are POST/PUT (e.g., job submission), a retry on a network timeout could duplicate the operation if the server already processed it. The diff stat shows no new idempotency-key header, no request deduplication, and no conditional-retry based on HTTP method. Under real conditions (transient 503 followed by success), this silently creates duplicate jobs or submissions.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Audit every call site where retry() wraps a non-GET request. Add either: (a) an idempotency key header, (b) method-aware retry that only retries GET/HEAD by default, or (c) a documented opt-in with a comment explaining why the operation is safe to retry. This is a latent data-integrity bug even if current usage happens to be safe.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"tracked-jobs.mjs (78 lines changed) + retry.mjs interaction can corrupt job state on partial retry\",\n      \"body\": \"tracked-jobs.mjs was heavily modified alongside the retry addition. If a job is tracked as 'in-progress', then the API call fails, and retry creates a new attempt, the job tracking state may become inconsistent: the original attempt is still marked 'in-progress' while the retry writes a new entry or overwrites it. The diff stat shows no test file specifically named for tracked-jobs integration with retry. job-render.test.mjs (144 lines) likely tests rendering, not state consistency under retry.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.58,\n      \"recommendation\": \"Add an integration test that: (1) starts a tracked job, (2) simulates a failure mid-flight, (3) triggers retry, (4) asserts the job state is consistent (single entry, correct final status). Without this, a user hitting transient failures will accumulate zombie 'in-progress' entries that never resolve.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `grep -r 'process.mjs' scripts/ commands/ hooks/` to confirm no dangling imports from the deleted module.\",\n    \"Execute a v0.4.6 UAT run covering retry scenarios before promoting past v0.4.6.\",\n    \"Audit all retry() call sites for HTTP method safety — confirm none wrap non-idempotent operations without guards.\",\n    \"Add a tracked-jobs + retry integration test that validates state consistency after a failed-then-retried job.\",\n    \"Verify that the retry backoff parameters (delay, max attempts) are configurable and not hardcoded to values that could trigger rate limits.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T17:24:51.747Z"
+}

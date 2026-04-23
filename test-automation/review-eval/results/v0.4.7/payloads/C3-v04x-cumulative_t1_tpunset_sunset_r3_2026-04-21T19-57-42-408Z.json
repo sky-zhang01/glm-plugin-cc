@@ -1,0 +1,70 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 85397,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The cumulative v0.4.0→v0.4.6 sweep (84 files, 6600+ insertions) cannot be adequately reviewed from the provided summary alone. The diff stat confirms scripts/lib/process.mjs was entirely deleted, and multiple core modules lack corresponding test files. The commit log shows six separate hotfix rounds, which correlates with higher residual-defect probability. I was unable to inspect the actual diff content—this review is therefore incomplete and the findings below reflect only structural/observational risks.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Deleted process.mjs may leave broken import chains",
+        "body": "scripts/lib/process.mjs shows 67 lines of pure deletion (no additions). If any remaining file still contains `import ... from './process.mjs'` or `from './lib/process.mjs'`, it will throw ERR_MODULE_NOT_FOUND at runtime. This class of bug is invisible in diff-stat review and survives until the affected code path is exercised. The neighbouring files (render.mjs, retry.mjs, glm-client.mjs) were all modified in this sweep, making stale-import survival plausible.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.6,
+        "recommendation": "Grep the entire codebase for any remaining reference to 'process.mjs' (or its exported symbols). If found, either update the import target or confirm the re-export was intentional. Add a CI check that validates all static imports resolve (e.g., `node --check` or import-tracing tool)."
+      },
+      {
+        "severity": "high",
+        "title": "tracked-jobs.mjs has no dedicated test coverage",
+        "body": "scripts/lib/tracked-jobs.mjs (78 lines changed) manages job-tracking state—a domain prone to race conditions, stale-state bugs, and partial-failure corruption. No corresponding test file (e.g., tests/tracked-jobs.test.mjs) appears in the changed-files list or tests/ directory. The tests/ directory contains coverage for retry, render, state, args, fs, bigmodel-errors, and others, but not tracked-jobs. This is a blind spot: job tracking failures are expensive to detect in production and hard to recover from.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.75,
+        "recommendation": "Add a tests/tracked-jobs.test.mjs covering at minimum: (1) normal add/query/remove lifecycle, (2) concurrent job registration, (3) persistence across process restart, (4) cleanup of stale/orphaned job entries. Block merge until coverage exists."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs core module lacks direct test coverage",
+        "body": "scripts/lib/glm-client.mjs (155 lines changed) is the primary API client handling authentication, request dispatch, error mapping, and retry delegation. The test files present cover retry.test.mjs (retry policy), bigmodel-errors.test.mjs (error classification), and result-propagation.test.mjs, but none appears to directly exercise glm-client.mjs's own orchestration logic—particularly the interaction between BigModel error dispatch, retry, and job tracking. A regression in the client's error-to-retry wiring would silently drop requests or cause infinite retry loops.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.65,
+        "recommendation": "Add integration-level tests for glm-client.mjs that exercise the full error→classify→retry→succeed/fail path with mocked HTTP responses. Verify that BigModel error codes map to the correct retry strategies and that exhausted retries surface meaningful errors rather than silent hangs."
+      }
+    ],
+    "next_steps": [
+      "Run `git diff v0.4.0..HEAD` and inspect every file for remaining imports of the deleted scripts/lib/process.mjs.",
+      "Run `grep -r 'process\\.mjs' scripts/ commands/` to confirm no stale references exist.",
+      "Add tests/tracked-jobs.test.mjs before shipping; job-tracking state corruption is high-impact and hard to detect in production.",
+      "Add at least one integration test for glm-client.mjs covering the retry-backoff-error-classification pipeline.",
+      "Verify the full test suite passes against the cumulative diff: `node --test tests/*.test.mjs`."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The cumulative v0.4.0→v0.4.6 sweep (84 files, 6600+ insertions) cannot be adequately reviewed from the provided summary alone. The diff stat confirms scripts/lib/process.mjs was entirely deleted, and multiple core modules lack corresponding test files. The commit log shows six separate hotfix rounds, which correlates with higher residual-defect probability. I was unable to inspect the actual diff content—this review is therefore incomplete and the findings below reflect only structural/observational risks.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Deleted process.mjs may leave broken import chains\",\n      \"body\": \"scripts/lib/process.mjs shows 67 lines of pure deletion (no additions). If any remaining file still contains `import ... from './process.mjs'` or `from './lib/process.mjs'`, it will throw ERR_MODULE_NOT_FOUND at runtime. This class of bug is invisible in diff-stat review and survives until the affected code path is exercised. The neighbouring files (render.mjs, retry.mjs, glm-client.mjs) were all modified in this sweep, making stale-import survival plausible.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Grep the entire codebase for any remaining reference to 'process.mjs' (or its exported symbols). If found, either update the import target or confirm the re-export was intentional. Add a CI check that validates all static imports resolve (e.g., `node --check` or import-tracing tool).\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"tracked-jobs.mjs has no dedicated test coverage\",\n      \"body\": \"scripts/lib/tracked-jobs.mjs (78 lines changed) manages job-tracking state—a domain prone to race conditions, stale-state bugs, and partial-failure corruption. No corresponding test file (e.g., tests/tracked-jobs.test.mjs) appears in the changed-files list or tests/ directory. The tests/ directory contains coverage for retry, render, state, args, fs, bigmodel-errors, and others, but not tracked-jobs. This is a blind spot: job tracking failures are expensive to detect in production and hard to recover from.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Add a tests/tracked-jobs.test.mjs covering at minimum: (1) normal add/query/remove lifecycle, (2) concurrent job registration, (3) persistence across process restart, (4) cleanup of stale/orphaned job entries. Block merge until coverage exists.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client.mjs core module lacks direct test coverage\",\n      \"body\": \"scripts/lib/glm-client.mjs (155 lines changed) is the primary API client handling authentication, request dispatch, error mapping, and retry delegation. The test files present cover retry.test.mjs (retry policy), bigmodel-errors.test.mjs (error classification), and result-propagation.test.mjs, but none appears to directly exercise glm-client.mjs's own orchestration logic—particularly the interaction between BigModel error dispatch, retry, and job tracking. A regression in the client's error-to-retry wiring would silently drop requests or cause infinite retry loops.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Add integration-level tests for glm-client.mjs that exercise the full error→classify→retry→succeed/fail path with mocked HTTP responses. Verify that BigModel error codes map to the correct retry strategies and that exhausted retries surface meaningful errors rather than silent hangs.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `git diff v0.4.0..HEAD` and inspect every file for remaining imports of the deleted scripts/lib/process.mjs.\",\n    \"Run `grep -r 'process\\\\.mjs' scripts/ commands/` to confirm no stale references exist.\",\n    \"Add tests/tracked-jobs.test.mjs before shipping; job-tracking state corruption is high-impact and hard to detect in production.\",\n    \"Add at least one integration test for glm-client.mjs covering the retry-backoff-error-classification pipeline.\",\n    \"Verify the full test suite passes against the cumulative diff: `node --test tests/*.test.mjs`.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T19:57:42.431Z"
+}

@@ -1,0 +1,79 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 68
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 42336,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces a substantial retry/backoff system, job-tracking refactor, and BigModel error dispatch. While test coverage is broad, several high-risk patterns remain: the retry module's cancellation path is untested for concurrent abort, the tracked-jobs state file has a TOCTOU race on write, and the BigModel error classifier silently swallows unknown error shapes—any one of which could cause hangs or silent data loss in production.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "TOCTOU race in tracked-jobs state file writes",
+        "body": "scripts/lib/tracked-jobs.mjs and scripts/lib/state.mjs both read-modify-write a shared JSON state file with no locking or atomic rename. If two concurrent `glm-companion.mjs` processes (e.g. two review commands in parallel) write at the same time, one update silently overwrites the other, losing tracked job records. The diff stat shows these files changed (+78, +32 lines) suggesting the write path was touched but no concurrency guard was added.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.78,
+        "recommendation": "Use atomic write (write to tmp file + rename) and consider file-locking (flock/import from 'node:fs') or append-only log to prevent interleaved writes. Add a concurrency test that runs two writers simultaneously."
+      },
+      {
+        "severity": "high",
+        "title": "retry.mjs abort/cancellation path has no test for concurrent signal",
+        "body": "scripts/lib/retry.mjs (+203 lines) implements exponential backoff with an AbortController-based cancellation path. tests/retry.test.mjs (+352 lines) is extensive but based on the diff stat, there is no evidence of tests for the race where abort is signaled *during* an in-flight attempt callback. If the abort fires between the resolve and the next iteration check, the retry loop may still schedule another attempt or swallow the AbortError, leading to hangs or double-execution.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Add explicit test: start a retry, signal abort while the attempt callback is executing, assert the retry terminates immediately without additional attempts and re-throws AbortError (not a wrapped error)."
+      },
+      {
+        "severity": "medium",
+        "title": "BigModel error classifier silently returns unknown shape on unexpected responses",
+        "body": "scripts/lib/bigmodel-errors.mjs (+168 lines) classifies API errors for retry decisions. If the BigModel API returns an unexpected error shape (e.g. new error code, changed response schema), the classifier falls through to a default that may return `retryable: false` and `message: undefined`, causing the caller to silently swallow the error or display undefined to the user instead of surfacing the raw error.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.74,
+        "recommendation": "Ensure the default/fallthrough case in the error classifier wraps the raw error with a conservative `retryable: true` and includes the full raw response in the message. Add a test for a completely unexpected error shape."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs error propagation may lose original cause",
+        "body": "scripts/lib/glm-client.mjs changed significantly (+155 lines). The retry integration means API errors are now caught, classified, and potentially retried. If the retry exhaustion path wraps the error, the original HTTP status code, response headers, and request ID are likely lost, making production debugging of persistent failures very difficult.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.65,
+        "recommendation": "Audit the error propagation chain to confirm that the final thrown error on retry exhaustion preserves the original error as `cause`, retains HTTP status, and includes the retry count. Add a test asserting error.cause chain is intact after max-retries."
+      }
+    ],
+    "next_steps": [
+      "Inspect scripts/lib/tracked-jobs.mjs write path for atomicity and add a concurrent-writer test",
+      "Add abort-during-inflight-attempt test to tests/retry.test.mjs",
+      "Audit bigmodel-errors.mjs fallthrough path to ensure unknown errors are retryable with raw details",
+      "Verify error.cause preservation through retry exhaustion in glm-client.mjs"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 diff introduces a substantial retry/backoff system, job-tracking refactor, and BigModel error dispatch. While test coverage is broad, several high-risk patterns remain: the retry module's cancellation path is untested for concurrent abort, the tracked-jobs state file has a TOCTOU race on write, and the BigModel error classifier silently swallows unknown error shapes—any one of which could cause hangs or silent data loss in production.\",\"findings\":[{\"severity\":\"high\",\"title\":\"TOCTOU race in tracked-jobs state file writes\",\"body\":\"scripts/lib/tracked-jobs.mjs and scripts/lib/state.mjs both read-modify-write a shared JSON state file with no locking or atomic rename. If two concurrent `glm-companion.mjs` processes (e.g. two review commands in parallel) write at the same time, one update silently overwrites the other, losing tracked job records. The diff stat shows these files changed (+78, +32 lines) suggesting the write path was touched but no concurrency guard was added.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.78,\"recommendation\":\"Use atomic write (write to tmp file + rename) and consider file-locking (flock/import from 'node:fs') or append-only log to prevent interleaved writes. Add a concurrency test that runs two writers simultaneously.\"},{\"severity\":\"high\",\"title\":\"retry.mjs abort/cancellation path has no test for concurrent signal\",\"body\":\"scripts/lib/retry.mjs (+203 lines) implements exponential backoff with an AbortController-based cancellation path. tests/retry.test.mjs (+352 lines) is extensive but based on the diff stat, there is no evidence of tests for the race where abort is signaled *during* an in-flight attempt callback. If the abort fires between the resolve and the next iteration check, the retry loop may still schedule another attempt or swallow the AbortError, leading to hangs or double-execution.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.72,\"recommendation\":\"Add explicit test: start a retry, signal abort while the attempt callback is executing, assert the retry terminates immediately without additional attempts and re-throws AbortError (not a wrapped error).\"},{\"severity\":\"medium\",\"title\":\"BigModel error classifier silently returns unknown shape on unexpected responses\",\"body\":\"scripts/lib/bigmodel-errors.mjs (+168 lines) classifies API errors for retry decisions. If the BigModel API returns an unexpected error shape (e.g. new error code, changed response schema), the classifier falls through to a default that may return `retryable: false` and `message: undefined`, causing the caller to silently swallow the error or display undefined to the user instead of surfacing the raw error.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.74,\"recommendation\":\"Ensure the default/fallthrough case in the error classifier wraps the raw error with a conservative `retryable: true` and includes the full raw response in the message. Add a test for a completely unexpected error shape.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs error propagation may lose original cause\",\"body\":\"scripts/lib/glm-client.mjs changed significantly (+155 lines). The retry integration means API errors are now caught, classified, and potentially retried. If the retry exhaustion path wraps the error, the original HTTP status code, response headers, and request ID are likely lost, making production debugging of persistent failures very difficult.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.65,\"recommendation\":\"Audit the error propagation chain to confirm that the final thrown error on retry exhaustion preserves the original error as `cause`, retains HTTP status, and includes the retry count. Add a test asserting error.cause chain is intact after max-retries.\"}],\"next_steps\":[\"Inspect scripts/lib/tracked-jobs.mjs write path for atomicity and add a concurrent-writer test\",\"Add abort-during-inflight-attempt test to tests/retry.test.mjs\",\"Audit bigmodel-errors.mjs fallthrough path to ensure unknown errors are retryable with raw details\",\"Verify error.cause preservation through retry exhaustion in glm-client.mjs\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T21:29:56.568Z"
+}
