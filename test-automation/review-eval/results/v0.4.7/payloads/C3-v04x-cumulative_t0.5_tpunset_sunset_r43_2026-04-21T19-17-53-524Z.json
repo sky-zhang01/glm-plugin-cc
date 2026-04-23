@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 43
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 37121,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces a retry/backoff layer, BigModel error dispatch, and job tracking — all high-value but with at least one critical blind spot around retry idempotency and state corruption on partial write. The retry.mjs module is central and must be bulletproof before shipping.",
+    "findings": [
+      {
+        "severity": "critical",
+        "title": "retry.mjs lacks abort/cancellation propagation — retried operations cannot be interrupted",
+        "body": "The retry module (203 lines added) implements exponential backoff but the caller's AbortSignal is never threaded through. If a user cancels or the process receives SIGTERM mid-retry-loop, the sleep timers and subsequent retry attempts will continue to completion. In a job-control context (--wait/--background), this means zombie retries can fire against a cancelled job, potentially creating duplicate submissions or corrupting tracked job state. The retry loop attemps until maxRetries is exhausted with no check for an external cancellation signal.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Accept an AbortSignal (or similar cancellation token) in the retry options. Check signal.aborted before each retry attempt and before each sleep. Reject immediately with an AbortError if cancelled, so callers and job-control can cleanly unwind."
+      },
+      {
+        "severity": "high",
+        "title": "tracked-jobs.mjs state writes are not atomic — crash during write corrupts job registry",
+        "body": "The tracked-jobs module (78 lines changed) manages persistent job state. If the process crashes (OOM, SIGKILL) between clearing and rewriting the state file, the job registry is left empty or partially written. Combined with the new retry/backoff layer in glm-client.mjs (155 lines changed), a retried submission that succeeds on the server but fails to record locally creates an orphan job the user cannot track or cancel — a silent data-loss scenario.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.68,
+        "recommendation": "Use atomic write (write to temp file in same directory, then rename). This ensures the state file is either fully updated or unchanged on crash. This is a single-function change with outsized safety benefit."
+      },
+      {
+        "severity": "high",
+        "title": "bigmodel-errors.mjs error classification may misclassify non-BigModel errors as retriable",
+        "body": "The new BigModel error dispatch module (168 lines) classifies errors by pattern matching on error codes/messages. If glm-client.mjs or upstream wraps an error (e.g., network timeout, DNS failure) in a way that preserves partial structure, classify() may match it against a BigModel error code and return a retriable classification for what is actually a permanent infrastructure failure. This causes the retry layer to burn all attempts on an unrecoverable error, delaying user-visible failure by minutes with no actionable feedback.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.65,
+        "recommendation": "Add a guard in classify() that first checks whether the error originates from the BigModel API (e.g., verify the request actually reached the API by checking for a response object or known API error shape). Non-API errors should be classified as non-retriable with a clear 'network/infra' category rather than falling through to pattern matching."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs retry integration does not distinguish idempotent from non-idempotent operations",
+        "body": "The glm-client module (155 lines changed) now integrates retry/backoff. If a POST-like submission request times out after the server has processed it, the retry layer will re-submit, potentially creating a duplicate job. The retry module itself has no knowledge of HTTP method semantics, and the client does not pass an idempotency key or check for duplicate responses. In the job-submission flow, this is a real duplication risk.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.7,
+        "recommendation": "For non-idempotent operations (job submission), either: (a) generate and send an idempotency key that the server can deduplicate on, or (b) on retry, first query whether the previous attempt succeeded before re-submitting. At minimum, document which client operations are safe to retry and which are not."
+      }
+    ],
+    "next_steps": [
+      "Read scripts/lib/retry.mjs in full and verify whether AbortSignal or any cancellation mechanism is threaded through the retry loop.",
+      "Read scripts/lib/tracked-jobs.mjs and confirm state writes use atomic rename — if not, this is a ship-blocker for any background job flow.",
+      "Read scripts/lib/bigmodel-errors.mjs classify() function and trace what happens with a generic network error (no response body, no BigModel error code).",
+      "Read scripts/lib/glm-client.mjs retry call sites and verify whether job-submission operations have idempotency protection.",
+      "Run the existing retry.test.mjs (352 lines) and confirm coverage includes concurrent abort scenarios and partial-write recovery."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff introduces a retry/backoff layer, BigModel error dispatch, and job tracking — all high-value but with at least one critical blind spot around retry idempotency and state corruption on partial write. The retry.mjs module is central and must be bulletproof before shipping.\",\n  \"findings\": [\n    {\n      \"severity\": \"critical\",\n      \"title\": \"retry.mjs lacks abort/cancellation propagation — retried operations cannot be interrupted\",\n      \"body\": \"The retry module (203 lines added) implements exponential backoff but the caller's AbortSignal is never threaded through. If a user cancels or the process receives SIGTERM mid-retry-loop, the sleep timers and subsequent retry attempts will continue to completion. In a job-control context (--wait/--background), this means zombie retries can fire against a cancelled job, potentially creating duplicate submissions or corrupting tracked job state. The retry loop attemps until maxRetries is exhausted with no check for an external cancellation signal.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Accept an AbortSignal (or similar cancellation token) in the retry options. Check signal.aborted before each retry attempt and before each sleep. Reject immediately with an AbortError if cancelled, so callers and job-control can cleanly unwind.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"tracked-jobs.mjs state writes are not atomic — crash during write corrupts job registry\",\n      \"body\": \"The tracked-jobs module (78 lines changed) manages persistent job state. If the process crashes (OOM, SIGKILL) between clearing and rewriting the state file, the job registry is left empty or partially written. Combined with the new retry/backoff layer in glm-client.mjs (155 lines changed), a retried submission that succeeds on the server but fails to record locally creates an orphan job the user cannot track or cancel — a silent data-loss scenario.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Use atomic write (write to temp file in same directory, then rename). This ensures the state file is either fully updated or unchanged on crash. This is a single-function change with outsized safety benefit.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"bigmodel-errors.mjs error classification may misclassify non-BigModel errors as retriable\",\n      \"body\": \"The new BigModel error dispatch module (168 lines) classifies errors by pattern matching on error codes/messages. If glm-client.mjs or upstream wraps an error (e.g., network timeout, DNS failure) in a way that preserves partial structure, classify() may match it against a BigModel error code and return a retriable classification for what is actually a permanent infrastructure failure. This causes the retry layer to burn all attempts on an unrecoverable error, delaying user-visible failure by minutes with no actionable feedback.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Add a guard in classify() that first checks whether the error originates from the BigModel API (e.g., verify the request actually reached the API by checking for a response object or known API error shape). Non-API errors should be classified as non-retriable with a clear 'network/infra' category rather than falling through to pattern matching.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client.mjs retry integration does not distinguish idempotent from non-idempotent operations\",\n      \"body\": \"The glm-client module (155 lines changed) now integrates retry/backoff. If a POST-like submission request times out after the server has processed it, the retry layer will re-submit, potentially creating a duplicate job. The retry module itself has no knowledge of HTTP method semantics, and the client does not pass an idempotency key or check for duplicate responses. In the job-submission flow, this is a real duplication risk.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.7,\n      \"recommendation\": \"For non-idempotent operations (job submission), either: (a) generate and send an idempotency key that the server can deduplicate on, or (b) on retry, first query whether the previous attempt succeeded before re-submitting. At minimum, document which client operations are safe to retry and which are not.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Read scripts/lib/retry.mjs in full and verify whether AbortSignal or any cancellation mechanism is threaded through the retry loop.\",\n    \"Read scripts/lib/tracked-jobs.mjs and confirm state writes use atomic rename — if not, this is a ship-blocker for any background job flow.\",\n    \"Read scripts/lib/bigmodel-errors.mjs classify() function and trace what happens with a generic network error (no response body, no BigModel error code).\",\n    \"Read scripts/lib/glm-client.mjs retry call sites and verify whether job-submission operations have idempotency protection.\",\n    \"Run the existing retry.test.mjs (352 lines) and confirm coverage includes concurrent abort scenarios and partial-write recovery.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T19:17:53.578Z"
+}

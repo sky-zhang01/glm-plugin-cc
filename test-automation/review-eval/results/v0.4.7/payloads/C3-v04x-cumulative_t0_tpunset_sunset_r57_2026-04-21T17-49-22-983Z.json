@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 57
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 133569,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "Cannot complete a meaningful adversarial review: the repository context provides only the diff stat and commit log, not the actual file contents. Based on what is available, the most defensible material finding is that scripts/lib/glm-client.mjs—the core HTTP client responsible for auth, network I/O, retry coordination, and error dispatch—received 155 lines of changes across v0.4.x but has no dedicated test file in the tests/ directory. This is a ship-blocking observability gap for the highest-risk module in the change set.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "glm-client.mjs has 155 lines of changes with zero dedicated test coverage",
+        "body": "scripts/lib/glm-client.mjs is the core integration point handling API authentication, network requests, retry coordination with the new retry.mjs, and BigModel error dispatch. The diff stat shows 155 lines changed. Every other new/modified library module (retry.mjs, bigmodel-errors.mjs, render.mjs, state.mjs, fs.mjs) has a corresponding test file. glm-client.mjs does not appear in the tests/ directory at all. If retry backoff, error classification, or credential handling regresses, there is no automated guard to catch it before users hit silent failures or hung requests. NOTE: line range is estimated from diff-stat magnitude; actual affected lines require file inspection.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.82,
+        "recommendation": "Add tests/glm-client.test.mjs covering at minimum: (1) retry behavior on transient errors, (2) BigModel error classification and dispatch, (3) auth header handling, (4) timeout and network failure paths, (5) idempotency under concurrent retry. Block ship until the client module has parity test coverage with the other lib modules."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs (78 lines changed) and job-control.mjs (20 lines changed) lack dedicated tests",
+        "body": "Job tracking and control are the backbone of the background/wait execution modes added in v0.4.5. tracked-jobs.mjs has 78 lines of changes and job-control.mjs has 20 lines changed, yet neither has a dedicated test file visible in the test directory. Job state corruption, orphaned jobs, or race conditions in job lifecycle would be expensive to diagnose in production and invisible to CI. NOTE: line range is estimated; actual lines require file inspection.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.7,
+        "recommendation": "Add tests/tracked-jobs.test.mjs and tests/job-control.test.mjs covering job creation, completion, cancellation, and crash-recovery (orphaned job detection). At minimum, add contract tests that verify job state transitions are atomic and idempotent."
+      },
+      {
+        "severity": "medium",
+        "title": "process.mjs deleted (67 lines) — unverified clean removal of all import sites",
+        "body": "scripts/lib/process.mjs was entirely removed (67 lines deleted, 0 added). The commit message 'fix: Bundle F — ReferenceError + full thread/resume scaffolding purge' confirms this was intentional cleanup of broken code. However, the diff stat alone cannot confirm that no remaining import or dynamic require of process.mjs exists elsewhere in the codebase. A lingering import would cause a runtime ReferenceError at first use — exactly the class of bug that prompted this deletion originally. NOTE: Without access to grep the full codebase, this is an unverified invariant.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.55,
+        "recommendation": "Run `grep -r 'process\\.mjs\\|from.*process' scripts/ commands/` and verify zero hits. Add a CI check that flags imports of deleted modules (the existing check-imports.mjs may cover this — confirm it catches stale import paths)."
+      }
+    ],
+    "next_steps": [
+      "Provide the actual file contents or a readable diff (git diff v0.4.0..HEAD) so the reviewer can trace error paths, retry logic, and state transitions line-by-line.",
+      "Add tests/glm-client.test.mjs before merging — this is the highest-risk untested module.",
+      "Verify zero remaining references to the deleted scripts/lib/process.mjs across the entire codebase.",
+      "Confirm that check-imports.mjs in CI would catch stale imports of deleted modules."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"Cannot complete a meaningful adversarial review: the repository context provides only the diff stat and commit log, not the actual file contents. Based on what is available, the most defensible material finding is that scripts/lib/glm-client.mjs—the core HTTP client responsible for auth, network I/O, retry coordination, and error dispatch—received 155 lines of changes across v0.4.x but has no dedicated test file in the tests/ directory. This is a ship-blocking observability gap for the highest-risk module in the change set.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"glm-client.mjs has 155 lines of changes with zero dedicated test coverage\",\n      \"body\": \"scripts/lib/glm-client.mjs is the core integration point handling API authentication, network requests, retry coordination with the new retry.mjs, and BigModel error dispatch. The diff stat shows 155 lines changed. Every other new/modified library module (retry.mjs, bigmodel-errors.mjs, render.mjs, state.mjs, fs.mjs) has a corresponding test file. glm-client.mjs does not appear in the tests/ directory at all. If retry backoff, error classification, or credential handling regresses, there is no automated guard to catch it before users hit silent failures or hung requests. NOTE: line range is estimated from diff-stat magnitude; actual affected lines require file inspection.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.82,\n      \"recommendation\": \"Add tests/glm-client.test.mjs covering at minimum: (1) retry behavior on transient errors, (2) BigModel error classification and dispatch, (3) auth header handling, (4) timeout and network failure paths, (5) idempotency under concurrent retry. Block ship until the client module has parity test coverage with the other lib modules.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"tracked-jobs.mjs (78 lines changed) and job-control.mjs (20 lines changed) lack dedicated tests\",\n      \"body\": \"Job tracking and control are the backbone of the background/wait execution modes added in v0.4.5. tracked-jobs.mjs has 78 lines of changes and job-control.mjs has 20 lines changed, yet neither has a dedicated test file visible in the test directory. Job state corruption, orphaned jobs, or race conditions in job lifecycle would be expensive to diagnose in production and invisible to CI. NOTE: line range is estimated; actual lines require file inspection.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Add tests/tracked-jobs.test.mjs and tests/job-control.test.mjs covering job creation, completion, cancellation, and crash-recovery (orphaned job detection). At minimum, add contract tests that verify job state transitions are atomic and idempotent.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"process.mjs deleted (67 lines) — unverified clean removal of all import sites\",\n      \"body\": \"scripts/lib/process.mjs was entirely removed (67 lines deleted, 0 added). The commit message 'fix: Bundle F — ReferenceError + full thread/resume scaffolding purge' confirms this was intentional cleanup of broken code. However, the diff stat alone cannot confirm that no remaining import or dynamic require of process.mjs exists elsewhere in the codebase. A lingering import would cause a runtime ReferenceError at first use — exactly the class of bug that prompted this deletion originally. NOTE: Without access to grep the full codebase, this is an unverified invariant.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Run `grep -r 'process\\\\.mjs\\\\|from.*process' scripts/ commands/` and verify zero hits. Add a CI check that flags imports of deleted modules (the existing check-imports.mjs may cover this — confirm it catches stale import paths).\"\n    }\n  ],\n  \"next_steps\": [\n    \"Provide the actual file contents or a readable diff (git diff v0.4.0..HEAD) so the reviewer can trace error paths, retry logic, and state transitions line-by-line.\",\n    \"Add tests/glm-client.test.mjs before merging — this is the highest-risk untested module.\",\n    \"Verify zero remaining references to the deleted scripts/lib/process.mjs across the entire codebase.\",\n    \"Confirm that check-imports.mjs in CI would catch stale imports of deleted modules.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T17:49:23.006Z"
+}

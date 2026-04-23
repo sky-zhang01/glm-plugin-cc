@@ -1,0 +1,79 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 30
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.25,
+    "citation_false_file_hits": 0,
+    "latency_ms": 93503,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces critical reliability infrastructure (retry/backoff, BigModel error dispatch) without corresponding end-to-end UAT evidence, and deletes a module (process.mjs) that could leave dangling imports. The new retry+error-classification chain has individual unit tests but no visible integration test proving the full error→classify→retry→client path works under real API failure conditions. Shipping this as the basis for a v0.4.7 sweep risks silent misclassification of API errors and cost-affecting retry storms.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "No UAT report for v0.4.6 — retry/backoff feature unvalidated end-to-end",
+        "body": "Commit e0a9ba8 introduces 'BigModel error dispatch + auto retry/backoff' and is tagged v0.4.6. The test-automation/uat-reports/ directory contains subdirectories for v0.4.4 and v0.4.5 with full scenario suites, run scripts, and reports — but nothing for v0.4.6. The retry/backoff feature directly governs how API failures are handled: a misclassification can cause either silent permanent failure (user sees no result, no error) or retry storms hitting rate limits and incurring cost. This is exactly the class of defect UAT is meant to catch, and the absence of evidence is itself a risk signal.",
+        "file": "test-automation/uat-reports",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.92,
+        "recommendation": "Create test-automation/uat-reports/v0.4.6/ with scenarios covering: (1) retry on transient 5xx, (2) no-retry on auth 401/403, (3) backoff timing under consecutive failures, (4) max-retry exhaustion with user-visible error. Block the v0.4.7 sweep until these pass."
+      },
+      {
+        "severity": "high",
+        "title": "Deleted process.mjs may leave dangling imports at runtime",
+        "body": "The diff stat shows scripts/lib/process.mjs removed (67 lines deleted, 0 added). The commit message 'Bundle F — ReferenceError + full thread/resume scaffolding purge' confirms intentional deletion, and check-imports.mjs was updated (+5/-1). However, static import checking cannot catch dynamic imports, eval-based requires, or conditional imports that only execute on specific code paths (e.g., background mode from v0.4.5). Any remaining reference to process.mjs would surface as a runtime MODULE_NOT_FOUND error, not a startup error — making it invisible until the specific code path is exercised.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.78,
+        "recommendation": "Run `grep -r 'process\\.mjs\\|lib/process' scripts/ commands/ tests/` across the full tree to confirm no remaining references. Add an explicit import-resolution test that attempts to import every module referenced in glm-companion.mjs and glm-client.mjs to guard against future regressions of this type."
+      },
+      {
+        "severity": "medium",
+        "title": "Retry/error-classification chain lacks integration test",
+        "body": "Three new/modified modules form a critical chain: bigmodel-errors.mjs (168 lines, classifies errors) → retry.mjs (203 lines, decides whether/how to retry) → glm-client.mjs (155 lines changed, executes requests). Each has unit tests (bigmodel-errors.test.mjs at 189 lines, retry.test.mjs at 352 lines), but no test file exercises the integrated path: simulated API error → classification → retry decision → actual HTTP retry with backoff. A mismatch between what bigmodel-errors classifies as retryable and what retry.mjs expects would cause either over-retry (cost, rate limits) or under-retry (silent data loss). The unit tests cannot catch interface drift between these modules.",
+        "file": "tests",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.82,
+        "recommendation": "Add an integration test (e.g., tests/retry-integration.test.mjs) that: mocks the HTTP layer to return specific error codes, verifies bigmodel-errors classifies them correctly, passes the classified error to retry.mjs, and asserts the correct number of retries, backoff timing, and final error propagation to glm-client's caller."
+      },
+      {
+        "severity": "medium",
+        "title": "Massive scope (+6623/-480 lines, 84 files) for minor-version bump raises regression risk",
+        "body": "The v0.4.0→v0.4.6 diff touches 84 files with a net addition of over 6600 lines. This includes new CI scripts (8 files), new library modules, deleted modules, significant rewrites of existing modules (glm-client.mjs, render.mjs, glm-companion.mjs), and new command/prompt definitions. For a minor version range (0.4.x), this scope makes it impractical to verify behavioral equivalence across all code paths. The CHANGELOG shows multiple rounds of post-review hotfixes (Bundles C, D3+, E+, F), indicating the code was already unstable during development — a signal that edge cases may remain.",
+        "file": "CHANGELOG.md",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.7,
+        "recommendation": "For the v0.4.7 sweep, pin the cumulative diff and run a focused regression suite that exercises every subcommand (setup, status, review, rescue, adversarial-review) with both happy-path and failure-path inputs. Consider a feature-flag or opt-in mechanism for the retry/backoff behavior so it can be disabled without rollback if issues surface in production."
+      }
+    ],
+    "next_steps": [
+      "Generate v0.4.6 UAT report with scenarios covering retry/backoff behavior under simulated API failures before proceeding with v0.4.7 sweep.",
+      "Audit all files for any remaining import of or reference to the deleted scripts/lib/process.mjs via grep across the entire tree.",
+      "Create a cross-module integration test covering the bigmodel-errors → retry → glm-client error handling chain.",
+      "Verify that the retry module includes jitter in its backoff to prevent thundering-herd behavior when multiple users hit the same API endpoint simultaneously."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff introduces critical reliability infrastructure (retry/backoff, BigModel error dispatch) without corresponding end-to-end UAT evidence, and deletes a module (process.mjs) that could leave dangling imports. The new retry+error-classification chain has individual unit tests but no visible integration test proving the full error→classify→retry→client path works under real API failure conditions. Shipping this as the basis for a v0.4.7 sweep risks silent misclassification of API errors and cost-affecting retry storms.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"No UAT report for v0.4.6 — retry/backoff feature unvalidated end-to-end\",\n      \"body\": \"Commit e0a9ba8 introduces 'BigModel error dispatch + auto retry/backoff' and is tagged v0.4.6. The test-automation/uat-reports/ directory contains subdirectories for v0.4.4 and v0.4.5 with full scenario suites, run scripts, and reports — but nothing for v0.4.6. The retry/backoff feature directly governs how API failures are handled: a misclassification can cause either silent permanent failure (user sees no result, no error) or retry storms hitting rate limits and incurring cost. This is exactly the class of defect UAT is meant to catch, and the absence of evidence is itself a risk signal.\",\n      \"file\": \"test-automation/uat-reports\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.92,\n      \"recommendation\": \"Create test-automation/uat-reports/v0.4.6/ with scenarios covering: (1) retry on transient 5xx, (2) no-retry on auth 401/403, (3) backoff timing under consecutive failures, (4) max-retry exhaustion with user-visible error. Block the v0.4.7 sweep until these pass.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"Deleted process.mjs may leave dangling imports at runtime\",\n      \"body\": \"The diff stat shows scripts/lib/process.mjs removed (67 lines deleted, 0 added). The commit message 'Bundle F — ReferenceError + full thread/resume scaffolding purge' confirms intentional deletion, and check-imports.mjs was updated (+5/-1). However, static import checking cannot catch dynamic imports, eval-based requires, or conditional imports that only execute on specific code paths (e.g., background mode from v0.4.5). Any remaining reference to process.mjs would surface as a runtime MODULE_NOT_FOUND error, not a startup error — making it invisible until the specific code path is exercised.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Run `grep -r 'process\\\\.mjs\\\\|lib/process' scripts/ commands/ tests/` across the full tree to confirm no remaining references. Add an explicit import-resolution test that attempts to import every module referenced in glm-companion.mjs and glm-client.mjs to guard against future regressions of this type.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Retry/error-classification chain lacks integration test\",\n      \"body\": \"Three new/modified modules form a critical chain: bigmodel-errors.mjs (168 lines, classifies errors) → retry.mjs (203 lines, decides whether/how to retry) → glm-client.mjs (155 lines changed, executes requests). Each has unit tests (bigmodel-errors.test.mjs at 189 lines, retry.test.mjs at 352 lines), but no test file exercises the integrated path: simulated API error → classification → retry decision → actual HTTP retry with backoff. A mismatch between what bigmodel-errors classifies as retryable and what retry.mjs expects would cause either over-retry (cost, rate limits) or under-retry (silent data loss). The unit tests cannot catch interface drift between these modules.\",\n      \"file\": \"tests\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.82,\n      \"recommendation\": \"Add an integration test (e.g., tests/retry-integration.test.mjs) that: mocks the HTTP layer to return specific error codes, verifies bigmodel-errors classifies them correctly, passes the classified error to retry.mjs, and asserts the correct number of retries, backoff timing, and final error propagation to glm-client's caller.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Massive scope (+6623/-480 lines, 84 files) for minor-version bump raises regression risk\",\n      \"body\": \"The v0.4.0→v0.4.6 diff touches 84 files with a net addition of over 6600 lines. This includes new CI scripts (8 files), new library modules, deleted modules, significant rewrites of existing modules (glm-client.mjs, render.mjs, glm-companion.mjs), and new command/prompt definitions. For a minor version range (0.4.x), this scope makes it impractical to verify behavioral equivalence across all code paths. The CHANGELOG shows multiple rounds of post-review hotfixes (Bundles C, D3+, E+, F), indicating the code was already unstable during development — a signal that edge cases may remain.\",\n      \"file\": \"CHANGELOG.md\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.7,\n      \"recommendation\": \"For the v0.4.7 sweep, pin the cumulative diff and run a focused regression suite that exercises every subcommand (setup, status, review, rescue, adversarial-review) with both happy-path and failure-path inputs. Consider a feature-flag or opt-in mechanism for the retry/backoff behavior so it can be disabled without rollback if issues surface in production.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Generate v0.4.6 UAT report with scenarios covering retry/backoff behavior under simulated API failures before proceeding with v0.4.7 sweep.\",\n    \"Audit all files for any remaining import of or reference to the deleted scripts/lib/process.mjs via grep across the entire tree.\",\n    \"Create a cross-module integration test covering the bigmodel-errors → retry → glm-client error handling chain.\",\n    \"Verify that the retry module includes jitter in its backoff to prevent thundering-herd behavior when multiple users hit the same API endpoint simultaneously.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T18:58:22.014Z"
+}

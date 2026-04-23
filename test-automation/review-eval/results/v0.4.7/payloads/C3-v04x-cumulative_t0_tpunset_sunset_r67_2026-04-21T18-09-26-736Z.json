@@ -1,0 +1,68 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 67
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 179155,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces foundational infrastructure changes—automatic retry/backoff, BigModel error dispatch, and deletion of process.mjs—without sufficient visibility into whether idempotency, partial-failure, and migration-completeness invariants hold. The risk profile is elevated by the interleaving of three new modules (retry.mjs, bigmodel-errors.mjs, tracked-jobs.mjs) into the critical API-client path, plus a hard module deletion. Ship blocker until the retry-on-mutation and dead-import questions are confirmed resolved against actual code, not just test coverage.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "process.mjs deleted; remaining dynamic or deferred imports will crash at runtime",
+        "body": "scripts/lib/process.mjs was entirely removed (67 lines, 0 added). check-imports.mjs was updated (5-line delta) to account for the removal, but static import analysis cannot cover dynamic import(), eval-based loading, or string-concat require paths. If any code path at runtime still resolves 'scripts/lib/process.mjs' or re-exports from it, the result is an uncaught MODULE_NOT_FOUND. The deleted module's responsibilities (process management utilities) are not clearly mapped to a single replacement—retry.mjs (203 new lines) and glm-client.mjs (155-line delta) both grew, suggesting scattered migration. No test file explicitly validates that process.mjs's original API surface is fully covered elsewhere.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.7,
+        "recommendation": "grep -r 'process' across all .mjs files (including dynamic import patterns like import(${...}) and string-concat paths). Add an explicit contract test that asserts every exported function from the old process.mjs has a verified replacement and that importing the old path throws in CI, catching regressions early."
+      },
+      {
+        "severity": "high",
+        "title": "Automatic retry/backoff on glm-client calls may duplicate non-idempotent mutations",
+        "body": "v0.4.6 added retry.mjs (203 lines) and bigmodel-errors.mjs (168 lines) specifically for 'BigModel error dispatch + auto retry/backoff,' integrated into glm-client.mjs (155-line delta). If the client issues mutation requests (job submission, status transitions, state writes) and the server processes them but the response is lost (timeout, network reset), automatic retry will re-issue the mutation. The error classifier in bigmodel-errors.mjs decides retryability, but error classification that doesn't account for 'request might have succeeded' scenarios (HTTP 408/502/503/504 where the server may have committed) creates a silent duplication path. The 352-line retry.test.mjs covers retry mechanics well but cannot prove idempotency of the underlying API calls.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.65,
+        "recommendation": "Audit every glm-client.mjs call site that goes through retry to classify it as read (safe to retry) or write (requires idempotency key or retry-after-commit check). For write operations, either disable automatic retry or add an idempotency token header. Document the classification in a comment or companion file so future changes don't silently introduce a non-idempotent retry path."
+      },
+      {
+        "severity": "medium",
+        "title": "verify-release.yml retired without a visible functional replacement for release-gate checks",
+        "body": "Commit e0a9ba8 explicitly retires verify-release.yml. The new CI workflows (ai-quality-gate.yml 56 lines, pr-check.yml 57 lines) target PR quality checks, not release-readiness gating. check-release-ready.sh (84 lines) exists but is a standalone script not wired into a release-triggered workflow. This means tagged releases can be cut without automated verification that changelog, versions, manifests, and imports are consistent—exactly the class of error the retired workflow was designed to prevent.",
+        "file": ".github/workflows/ai-quality-gate.yml",
+        "line_start": 1,
+        "line_end": 56,
+        "confidence": 0.6,
+        "recommendation": "Wire check-release-ready.sh into a workflow triggered on tag push (v*) or add a release-gate job to the existing pr-check.yml that runs on the main/develop branch after merge. Ensure the gate runs the same checks verify-release.yml performed before it was retired."
+      }
+    ],
+    "next_steps": [
+      "Run `git grep -n 'from.*process' -- '*.mjs'` and `git grep -n 'import.*process' -- '*.mjs'` to confirm no live code references the deleted process.mjs module. Report results.",
+      "Audit each function in glm-client.mjs that invokes `retry()` (or a wrapper) and list which HTTP methods/operations are retried. Flag any POST/PUT/PATCH calls that lack idempotency guards.",
+      "Verify check-release-ready.sh is invoked in a workflow triggered by tag pushes; if not, create or restore the release-gate workflow before cutting v0.4.7."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 cumulative diff introduces foundational infrastructure changes—automatic retry/backoff, BigModel error dispatch, and deletion of process.mjs—without sufficient visibility into whether idempotency, partial-failure, and migration-completeness invariants hold. The risk profile is elevated by the interleaving of three new modules (retry.mjs, bigmodel-errors.mjs, tracked-jobs.mjs) into the critical API-client path, plus a hard module deletion. Ship blocker until the retry-on-mutation and dead-import questions are confirmed resolved against actual code, not just test coverage.\",\"findings\":[{\"severity\":\"high\",\"title\":\"process.mjs deleted; remaining dynamic or deferred imports will crash at runtime\",\"body\":\"scripts/lib/process.mjs was entirely removed (67 lines, 0 added). check-imports.mjs was updated (5-line delta) to account for the removal, but static import analysis cannot cover dynamic import(), eval-based loading, or string-concat require paths. If any code path at runtime still resolves 'scripts/lib/process.mjs' or re-exports from it, the result is an uncaught MODULE_NOT_FOUND. The deleted module's responsibilities (process management utilities) are not clearly mapped to a single replacement—retry.mjs (203 new lines) and glm-client.mjs (155-line delta) both grew, suggesting scattered migration. No test file explicitly validates that process.mjs's original API surface is fully covered elsewhere.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":67,\"confidence\":0.7,\"recommendation\":\"grep -r 'process' across all .mjs files (including dynamic import patterns like import(${...}) and string-concat paths). Add an explicit contract test that asserts every exported function from the old process.mjs has a verified replacement and that importing the old path throws in CI, catching regressions early.\"},{\"severity\":\"high\",\"title\":\"Automatic retry/backoff on glm-client calls may duplicate non-idempotent mutations\",\"body\":\"v0.4.6 added retry.mjs (203 lines) and bigmodel-errors.mjs (168 lines) specifically for 'BigModel error dispatch + auto retry/backoff,' integrated into glm-client.mjs (155-line delta). If the client issues mutation requests (job submission, status transitions, state writes) and the server processes them but the response is lost (timeout, network reset), automatic retry will re-issue the mutation. The error classifier in bigmodel-errors.mjs decides retryability, but error classification that doesn't account for 'request might have succeeded' scenarios (HTTP 408/502/503/504 where the server may have committed) creates a silent duplication path. The 352-line retry.test.mjs covers retry mechanics well but cannot prove idempotency of the underlying API calls.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.65,\"recommendation\":\"Audit every glm-client.mjs call site that goes through retry to classify it as read (safe to retry) or write (requires idempotency key or retry-after-commit check). For write operations, either disable automatic retry or add an idempotency token header. Document the classification in a comment or companion file so future changes don't silently introduce a non-idempotent retry path.\"},{\"severity\":\"medium\",\"title\":\"verify-release.yml retired without a visible functional replacement for release-gate checks\",\"body\":\"Commit e0a9ba8 explicitly retires verify-release.yml. The new CI workflows (ai-quality-gate.yml 56 lines, pr-check.yml 57 lines) target PR quality checks, not release-readiness gating. check-release-ready.sh (84 lines) exists but is a standalone script not wired into a release-triggered workflow. This means tagged releases can be cut without automated verification that changelog, versions, manifests, and imports are consistent—exactly the class of error the retired workflow was designed to prevent.\",\"file\":\".github/workflows/ai-quality-gate.yml\",\"line_start\":1,\"line_end\":56,\"confidence\":0.6,\"recommendation\":\"Wire check-release-ready.sh into a workflow triggered on tag push (v*) or add a release-gate job to the existing pr-check.yml that runs on the main/develop branch after merge. Ensure the gate runs the same checks verify-release.yml performed before it was retired.\"}],\"next_steps\":[\"Run `git grep -n 'from.*process' -- '*.mjs'` and `git grep -n 'import.*process' -- '*.mjs'` to confirm no live code references the deleted process.mjs module. Report results.\",\"Audit each function in glm-client.mjs that invokes `retry()` (or a wrapper) and list which HTTP methods/operations are retried. Flag any POST/PUT/PATCH calls that lack idempotency guards.\",\"Verify check-release-ready.sh is invoked in a workflow triggered by tag pushes; if not, create or restore the release-gate workflow before cutting v0.4.7.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T18:09:26.765Z"
+}

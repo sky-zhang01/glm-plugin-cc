@@ -1,0 +1,91 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 12
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 47998,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The cumulative v0.4.0→v0.4.6 diff introduces retry/backoff, BigModel error dispatch, tracked-jobs, and new state/job-control modules without sufficient guards against partial-failure corruption, stale-state reads, or silent data loss. The retry layer has no maximum-wall-clock ceiling, the state module performs non-atomic read-modify-write on JSON files, and the tracked-jobs cleanup path can silently swallow errors during shutdown. These are the exact class of defects that surface only under concurrent/retry stress and are invisible to happy-path UAT.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs has no maximum elapsed-time / wall-clock ceiling — unbounded retry storms under persistent failures",
+        "body": "The retry module implements exponential backoff with jitter and a max-attempts guard, but there is no maximum total elapsed time (wall-clock cap). Under a persistent downstream failure (e.g. BigModel API returning 429 or 503 continuously), retries will run for the full attempt count with no time-based escape hatch. Combined with the backoff multiplier, this can block a job slot for tens of minutes. More critically, if maxAttempts is set to a high value or derived from user input, the retry loop becomes effectively unbounded. This is especially dangerous in the 'background' execution mode (--background flag from v0.4.5) where the user has no visibility into the retry loop and no way to interrupt it beyond killing the process.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.82,
+        "recommendation": "Add a maxElapsedTimeMs parameter (default e.g. 300000 for 5 minutes) and check elapsed time at the top of each retry iteration. If exceeded, throw immediately regardless of remaining attempts. Document the default in the module's JSDoc."
+      },
+      {
+        "severity": "high",
+        "title": "state.mjs uses non-atomic read-modify-write on JSON state files — data loss under concurrency",
+        "body": "The state module reads a JSON file, modifies the parsed object in memory, then writes it back with writeFile. There is no file locking, no atomic rename-based write, and no merge-on-conflict logic. If two invocations of the companion run concurrently (e.g. two terminal tabs, or a background job + foreground status check), the second write will silently overwrite state changes from the first. This can cause job tracking records to disappear, which in turn means jobs whose state was 'running' become orphaned with no recovery path. The tracked-jobs module depends on state.mjs for persistence, so this corruption propagates upward.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.88,
+        "recommendation": "Use atomic write-via-rename: write to a temp file in the same directory, then fs.rename() to the target path. For concurrent access, either add a lockfile (e.g. proper-lockfile pattern) or switch to a format that supports append-only writes with periodic compaction."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs cleanup on shutdown silently catches and discards errors — orphaned job records",
+        "body": "The tracked-jobs module registers a shutdown/cleanup handler (likely via process event hooks) that attempts to update job status on exit. If this cleanup write fails (disk full, permissions, concurrent access), the error is caught and swallowed. The job record remains in 'running' state indefinitely, creating ghost jobs that never resolve. Subsequent runs have no logic to detect or recover stale 'running' jobs beyond a certain age, so these accumulate over time and corrupt status reporting.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.75,
+        "recommendation": "Add a stale-job detection pass at startup: any job in 'running' state whose PID is no longer alive or whose startedAt is older than a reasonable timeout (e.g. 2 hours) should be marked as 'interrupted' or 'unknown'. Log a warning when stale jobs are detected."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error classification returns generic fallback for unrecognized error shapes — silent misrouting",
+        "body": "The BigModel error dispatch module classifies errors into retryable vs non-retryable categories. If an error response has an unexpected shape (new API error code, changed response format, network-level error wrapped differently), it falls through to a default/generic classification. If the default is 'non-retryable', transient errors that should be retried will fail immediately. If the default is 'retryable', permanent errors (auth failures, quota exceeded) will waste retry budget. The test file covers known error codes but does not verify behavior for completely unrecognized error shapes, which is the exact scenario that occurs when the upstream API changes without notice.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.7,
+        "recommendation": "Add explicit coverage for unrecognized error shapes in tests. Make the default classification explicitly 'unknown' and have the retry caller treat 'unknown' as non-retryable with a logged warning, rather than guessing. This makes API regressions noisy and visible instead of silent."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs timeout handling may leave pending connections open — resource leak under sustained failures",
+        "body": "The GLM client wraps HTTP requests with timeout and retry logic. If a request times out at the client level but the underlying TCP connection is still pending, the connection may not be properly destroyed before retry. Under sustained timeout conditions (network partition, slow upstream), this can accumulate leaked sockets, eventually hitting the OS file descriptor limit and causing failures in unrelated operations. The retry module will keep retrying, but each retry may leak another socket.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.65,
+        "recommendation": "Ensure that on timeout, the underlying request/connection is explicitly destroyed (abort/destroy on the request object) before scheduling a retry. Add a max-concurrent-connections guard or use an HTTP agent with keepAlive=false and proper connection pooling."
+      }
+    ],
+    "next_steps": [
+      "Add wall-clock ceiling to retry.mjs and test the timeout path explicitly.",
+      "Convert state.mjs writes to atomic rename-based writes and add a concurrency test.",
+      "Add stale-job detection at startup in tracked-jobs.mjs and log warnings for ghost jobs.",
+      "Test bigmodel-errors.mjs with completely unrecognized error shapes and verify the default classification is safe.",
+      "Verify glm-client.mjs properly destroys connections on timeout before retry.",
+      "Add integration test that simulates concurrent companion invocations writing to the same state file."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The cumulative v0.4.0→v0.4.6 diff introduces retry/backoff, BigModel error dispatch, tracked-jobs, and new state/job-control modules without sufficient guards against partial-failure corruption, stale-state reads, or silent data loss. The retry layer has no maximum-wall-clock ceiling, the state module performs non-atomic read-modify-write on JSON files, and the tracked-jobs cleanup path can silently swallow errors during shutdown. These are the exact class of defects that surface only under concurrent/retry stress and are invisible to happy-path UAT.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"retry.mjs has no maximum elapsed-time / wall-clock ceiling — unbounded retry storms under persistent failures\",\n      \"body\": \"The retry module implements exponential backoff with jitter and a max-attempts guard, but there is no maximum total elapsed time (wall-clock cap). Under a persistent downstream failure (e.g. BigModel API returning 429 or 503 continuously), retries will run for the full attempt count with no time-based escape hatch. Combined with the backoff multiplier, this can block a job slot for tens of minutes. More critically, if maxAttempts is set to a high value or derived from user input, the retry loop becomes effectively unbounded. This is especially dangerous in the 'background' execution mode (--background flag from v0.4.5) where the user has no visibility into the retry loop and no way to interrupt it beyond killing the process.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.82,\n      \"recommendation\": \"Add a maxElapsedTimeMs parameter (default e.g. 300000 for 5 minutes) and check elapsed time at the top of each retry iteration. If exceeded, throw immediately regardless of remaining attempts. Document the default in the module's JSDoc.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"state.mjs uses non-atomic read-modify-write on JSON state files — data loss under concurrency\",\n      \"body\": \"The state module reads a JSON file, modifies the parsed object in memory, then writes it back with writeFile. There is no file locking, no atomic rename-based write, and no merge-on-conflict logic. If two invocations of the companion run concurrently (e.g. two terminal tabs, or a background job + foreground status check), the second write will silently overwrite state changes from the first. This can cause job tracking records to disappear, which in turn means jobs whose state was 'running' become orphaned with no recovery path. The tracked-jobs module depends on state.mjs for persistence, so this corruption propagates upward.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.88,\n      \"recommendation\": \"Use atomic write-via-rename: write to a temp file in the same directory, then fs.rename() to the target path. For concurrent access, either add a lockfile (e.g. proper-lockfile pattern) or switch to a format that supports append-only writes with periodic compaction.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"tracked-jobs cleanup on shutdown silently catches and discards errors — orphaned job records\",\n      \"body\": \"The tracked-jobs module registers a shutdown/cleanup handler (likely via process event hooks) that attempts to update job status on exit. If this cleanup write fails (disk full, permissions, concurrent access), the error is caught and swallowed. The job record remains in 'running' state indefinitely, creating ghost jobs that never resolve. Subsequent runs have no logic to detect or recover stale 'running' jobs beyond a certain age, so these accumulate over time and corrupt status reporting.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Add a stale-job detection pass at startup: any job in 'running' state whose PID is no longer alive or whose startedAt is older than a reasonable timeout (e.g. 2 hours) should be marked as 'interrupted' or 'unknown'. Log a warning when stale jobs are detected.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"bigmodel-errors.mjs error classification returns generic fallback for unrecognized error shapes — silent misrouting\",\n      \"body\": \"The BigModel error dispatch module classifies errors into retryable vs non-retryable categories. If an error response has an unexpected shape (new API error code, changed response format, network-level error wrapped differently), it falls through to a default/generic classification. If the default is 'non-retryable', transient errors that should be retried will fail immediately. If the default is 'retryable', permanent errors (auth failures, quota exceeded) will waste retry budget. The test file covers known error codes but does not verify behavior for completely unrecognized error shapes, which is the exact scenario that occurs when the upstream API changes without notice.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Add explicit coverage for unrecognized error shapes in tests. Make the default classification explicitly 'unknown' and have the retry caller treat 'unknown' as non-retryable with a logged warning, rather than guessing. This makes API regressions noisy and visible instead of silent.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client.mjs timeout handling may leave pending connections open — resource leak under sustained failures\",\n      \"body\": \"The GLM client wraps HTTP requests with timeout and retry logic. If a request times out at the client level but the underlying TCP connection is still pending, the connection may not be properly destroyed before retry. Under sustained timeout conditions (network partition, slow upstream), this can accumulate leaked sockets, eventually hitting the OS file descriptor limit and causing failures in unrelated operations. The retry module will keep retrying, but each retry may leak another socket.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Ensure that on timeout, the underlying request/connection is explicitly destroyed (abort/destroy on the request object) before scheduling a retry. Add a max-concurrent-connections guard or use an HTTP agent with keepAlive=false and proper connection pooling.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Add wall-clock ceiling to retry.mjs and test the timeout path explicitly.\",\n    \"Convert state.mjs writes to atomic rename-based writes and add a concurrency test.\",\n    \"Add stale-job detection at startup in tracked-jobs.mjs and log warnings for ghost jobs.\",\n    \"Test bigmodel-errors.mjs with completely unrecognized error shapes and verify the default classification is safe.\",\n    \"Verify glm-client.mjs properly destroys connections on timeout before retry.\",\n    \"Add integration test that simulates concurrent companion invocations writing to the same state file.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T20:05:49.739Z"
+}

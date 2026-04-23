@@ -1,0 +1,101 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 69
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 6,
+    "citation_accuracy": 0.833,
+    "citation_false_file_hits": 0,
+    "latency_ms": 45041,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces a retry/backoff system (retry.mjs), BigModel error dispatch (bigmodel-errors.mjs), and significant changes to glm-client.mjs, render.mjs, and state management. Multiple material concerns remain: the retry module's jitter and backoff behavior under concurrent/re-entrant calls, error classification that could silently swallow retriable errors, and state-file races in tracked-jobs. The absence of concurrency guards in state.mjs and the complexity of the new retry logic with partial-failure handling warrant blocking until key scenarios are verified.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs exponential backoff with jitter can produce zero-delay retries under edge-case RNG",
+        "body": "The retry module uses `Math.random()` for jitter. If the base delay multiplied by the jitter factor rounds to zero (e.g., very small base delay or integer truncation), a retry fires immediately with no backoff, potentially hammering a rate-limited API. Under sustained 429/503 storms, this defeats the purpose of backoff and can amplify quota exhaustion. The tests in retry.test.mjs cover nominal cases but there is no test asserting a minimum non-zero delay floor.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 10,
+        "confidence": 0.7,
+        "recommendation": "Add a `Math.max(minDelay, ...)` clamp around the computed delay to guarantee a positive minimum backoff. Add a test that confirms computed delay is always >= minDelay for all attempt counts and jitter values."
+      },
+      {
+        "severity": "high",
+        "title": "bigmodel-errors.mjs error classification may misclassify unknown errors as non-retriable, causing silent job failure",
+        "body": "The BigModel error dispatch module classifies API errors to decide retry behavior. If an error response contains an unmapped error code or an unexpected shape (e.g., new error variant added by the provider), the default classification path likely marks it as non-retriable. This means transient but unrecognized failures become permanent failures with no retry and potentially no clear user-facing signal beyond a generic error message. The tests cover known codes but not the 'unknown code' default path explicitly.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 10,
+        "confidence": 0.75,
+        "recommendation": "Default unknown/unrecognized error codes to retriable (with standard backoff) rather than non-retriable. Add an explicit test case for an unmapped error code asserting it is classified as retriable."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs state file writes lack atomicity — partial writes on crash corrupt job tracking",
+        "body": "Job state is persisted to the filesystem. If the process is killed mid-write (OOM, signal, disk full), the state file can be truncated or contain partial JSON. On next read, JSON.parse will throw, causing all tracked-job queries to fail. There is no evidence of write-to-temp-then-rename atomicity or try/catch with fallback for corrupted state files in the diff.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 10,
+        "confidence": 0.7,
+        "recommendation": "Write state to a temporary file in the same directory, then atomically rename over the target. Wrap reads in try/catch that treats corrupted state as empty (or backs up the corrupt file) rather than propagating a parse error."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs retry integration may double-fire callbacks on timeout + retry race",
+        "body": "The GLM client now integrates with the retry module. If an API call times out at the HTTP layer while the retry layer also considers it a retriable failure, the same logical request can result in multiple callback invocations — the original timed-out response and the retried response. Without idempotency guards or response deduplication, downstream consumers (render, state updates) may process results twice.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 10,
+        "confidence": 0.65,
+        "recommendation": "Ensure the retry wrapper owns the full lifecycle — the underlying HTTP call should not independently invoke callbacks on timeout. Use a single resolution path (Promise-based) where retry replaces rather than supplements the original call."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs concurrent access has no file-locking — parallel glm commands can lose state",
+        "body": "Multiple concurrent invocations of glm commands (e.g., two terminals running review simultaneously) will read-modify-write the same state file with no locking. The last writer wins, silently dropping state mutations from the other process. This is especially likely with the new --background mode that spawns long-running jobs.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 10,
+        "confidence": 0.7,
+        "recommendation": "Add advisory file locking (e.g., `proper-lockfile` or `flock`) around read-modify-write cycles. Alternatively, use atomic append-only operations where possible. At minimum, document that concurrent invocation is unsupported."
+      },
+      {
+        "severity": "low",
+        "title": "scripts/lib/process.mjs deleted but may still be imported by untested code paths",
+        "body": "The diff shows process.mjs was deleted. If any command or script dynamically imports or conditionally references this module, it will throw at runtime with a MODULE_NOT_FOUND error that only manifests on the specific code path. The test suite may not cover all dynamic import paths.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.55,
+        "recommendation": "Grep the entire codebase for any remaining references to `process.mjs` (including dynamic imports, string references, or command templates) and confirm complete removal."
+      }
+    ],
+    "next_steps": [
+      "Inspect retry.mjs delay computation to confirm a minimum positive delay is enforced for all jitter values and attempt counts",
+      "Audit bigmodel-errors.mjs default/fallback error classification to confirm unknown codes are retriable rather than silently fatal",
+      "Verify tracked-jobs.mjs uses atomic file writes (write-to-temp + rename) and handles corrupt state gracefully on read",
+      "Check glm-client.mjs retry integration for double-callback scenarios under timeout conditions",
+      "Add file locking or concurrency warnings to state.mjs for parallel command execution",
+      "Search codebase for any remaining imports of deleted process.mjs"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 diff introduces a retry/backoff system (retry.mjs), BigModel error dispatch (bigmodel-errors.mjs), and significant changes to glm-client.mjs, render.mjs, and state management. Multiple material concerns remain: the retry module's jitter and backoff behavior under concurrent/re-entrant calls, error classification that could silently swallow retriable errors, and state-file races in tracked-jobs. The absence of concurrency guards in state.mjs and the complexity of the new retry logic with partial-failure handling warrant blocking until key scenarios are verified.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs exponential backoff with jitter can produce zero-delay retries under edge-case RNG\",\"body\":\"The retry module uses `Math.random()` for jitter. If the base delay multiplied by the jitter factor rounds to zero (e.g., very small base delay or integer truncation), a retry fires immediately with no backoff, potentially hammering a rate-limited API. Under sustained 429/503 storms, this defeats the purpose of backoff and can amplify quota exhaustion. The tests in retry.test.mjs cover nominal cases but there is no test asserting a minimum non-zero delay floor.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":10,\"confidence\":0.7,\"recommendation\":\"Add a `Math.max(minDelay, ...)` clamp around the computed delay to guarantee a positive minimum backoff. Add a test that confirms computed delay is always >= minDelay for all attempt counts and jitter values.\"},{\"severity\":\"high\",\"title\":\"bigmodel-errors.mjs error classification may misclassify unknown errors as non-retriable, causing silent job failure\",\"body\":\"The BigModel error dispatch module classifies API errors to decide retry behavior. If an error response contains an unmapped error code or an unexpected shape (e.g., new error variant added by the provider), the default classification path likely marks it as non-retriable. This means transient but unrecognized failures become permanent failures with no retry and potentially no clear user-facing signal beyond a generic error message. The tests cover known codes but not the 'unknown code' default path explicitly.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":10,\"confidence\":0.75,\"recommendation\":\"Default unknown/unrecognized error codes to retriable (with standard backoff) rather than non-retriable. Add an explicit test case for an unmapped error code asserting it is classified as retriable.\"},{\"severity\":\"medium\",\"title\":\"tracked-jobs.mjs state file writes lack atomicity — partial writes on crash corrupt job tracking\",\"body\":\"Job state is persisted to the filesystem. If the process is killed mid-write (OOM, signal, disk full), the state file can be truncated or contain partial JSON. On next read, JSON.parse will throw, causing all tracked-job queries to fail. There is no evidence of write-to-temp-then-rename atomicity or try/catch with fallback for corrupted state files in the diff.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":10,\"confidence\":0.7,\"recommendation\":\"Write state to a temporary file in the same directory, then atomically rename over the target. Wrap reads in try/catch that treats corrupted state as empty (or backs up the corrupt file) rather than propagating a parse error.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs retry integration may double-fire callbacks on timeout + retry race\",\"body\":\"The GLM client now integrates with the retry module. If an API call times out at the HTTP layer while the retry layer also considers it a retriable failure, the same logical request can result in multiple callback invocations — the original timed-out response and the retried response. Without idempotency guards or response deduplication, downstream consumers (render, state updates) may process results twice.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":10,\"confidence\":0.65,\"recommendation\":\"Ensure the retry wrapper owns the full lifecycle — the underlying HTTP call should not independently invoke callbacks on timeout. Use a single resolution path (Promise-based) where retry replaces rather than supplements the original call.\"},{\"severity\":\"medium\",\"title\":\"state.mjs concurrent access has no file-locking — parallel glm commands can lose state\",\"body\":\"Multiple concurrent invocations of glm commands (e.g., two terminals running review simultaneously) will read-modify-write the same state file with no locking. The last writer wins, silently dropping state mutations from the other process. This is especially likely with the new --background mode that spawns long-running jobs.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":10,\"confidence\":0.7,\"recommendation\":\"Add advisory file locking (e.g., `proper-lockfile` or `flock`) around read-modify-write cycles. Alternatively, use atomic append-only operations where possible. At minimum, document that concurrent invocation is unsupported.\"},{\"severity\":\"low\",\"title\":\"scripts/lib/process.mjs deleted but may still be imported by untested code paths\",\"body\":\"The diff shows process.mjs was deleted. If any command or script dynamically imports or conditionally references this module, it will throw at runtime with a MODULE_NOT_FOUND error that only manifests on the specific code path. The test suite may not cover all dynamic import paths.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":1,\"confidence\":0.55,\"recommendation\":\"Grep the entire codebase for any remaining references to `process.mjs` (including dynamic imports, string references, or command templates) and confirm complete removal.\"}],\"next_steps\":[\"Inspect retry.mjs delay computation to confirm a minimum positive delay is enforced for all jitter values and attempt counts\",\"Audit bigmodel-errors.mjs default/fallback error classification to confirm unknown codes are retriable rather than silently fatal\",\"Verify tracked-jobs.mjs uses atomic file writes (write-to-temp + rename) and handles corrupt state gracefully on read\",\"Check glm-client.mjs retry integration for double-callback scenarios under timeout conditions\",\"Add file locking or concurrency warnings to state.mjs for parallel command execution\",\"Search codebase for any remaining imports of deleted process.mjs\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T18:10:48.911Z"
+}

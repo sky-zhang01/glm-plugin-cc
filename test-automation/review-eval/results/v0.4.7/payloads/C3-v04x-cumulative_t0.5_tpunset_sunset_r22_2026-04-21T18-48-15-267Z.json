@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 22
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 49693,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 cumulative diff introduces a retry/backoff subsystem (retry.mjs), BigModel error dispatch (bigmodel-errors.mjs), and a tracked-jobs module. These touch core data-flow paths. Three material defects survive: (1) the retry module can silently swallow fatal errors by treating them as retriable, risking invisible data-loss on the companion→API write path; (2) the new job-control/tracked-jobs state machine lacks explicit crash-recovery or stale-lock cleanup, meaning a killed process or timeout can leave orphan state that blocks subsequent runs; (3) the BigModel error dispatcher uses heuristic status-code classification without covering all non-retriable 4xx variants (e.g. 413 Payload Too Large, 422 Unprocessable Entity), potentially causing infinite or wasteful retry loops that mask real configuration errors. These are not speculative — the test files confirm the code paths exist but do not fully cover failure exhaustion, crash mid-write, or edge-case status codes.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs may reclassify non-retriable API errors as retriable, causing silent infinite loops or exhausted budgets that mask real failures",
+        "body": "The retry module (scripts/lib/retry.mjs, 203 new lines) provides a generic retry-with-backoff facility consumed by glm-client.mjs. Tests (tests/retry.test.mjs, 352 lines) cover the happy path and basic exhaustion, but the error classification boundary between retriable and fatal is delegated to bigmodel-errors.mjs which uses status-code heuristics. If any non-retriable error (e.g. 403 Forbidden due to expired credentials, 413 Payload Too Large, 422 schema validation failure) is misclassified as retriable, the retry loop will burn through attempts with exponential backoff, potentially taking minutes before surfacing the real error. During that window the user sees silence or a spinner. Worse, if the caller treats exhaustion as 'success with no data' (a pattern visible in the companion's result-propagation path), the failure becomes invisible. The test suite does not assert behavior for 4xx codes outside the explicitly handled set.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Add an explicit deny-list of non-retriable status codes (401, 403, 413, 422, etc.) in bigmodel-errors.mjs with a default-to-non-retriable policy for any unclassified 4xx. Add tests for each edge-case code. Ensure retry exhaustion always propagates the original error, never resolves to a silent empty result."
+      },
+      {
+        "severity": "high",
+        "title": "tracked-jobs.mjs and state.mjs lack crash-recovery or stale-lock cleanup — killed processes leave orphan state that blocks future runs",
+        "body": "scripts/lib/tracked-jobs.mjs (78 lines new/changed) and scripts/lib/state.mjs (32 lines changed) manage persistent job state. If the companion process is killed (OOM, user Ctrl+C, system suspend) mid-operation, the state file can contain an in-progress job record with no corresponding live process. On next invocation, the new process may refuse to start or operate on stale/incorrect state because there is no visible lock-acquisition protocol, heartbeat mechanism, or stale-lock TTL cleanup in the diff. The tests (tests/state.test.mjs) cover basic read/write but not crash-recovery scenarios. This is a classic silent-failure vector: the user kills a stuck job, restarts, and the new run immediately fails or behaves incorrectly with no clear error message.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.68,
+        "recommendation": "Add a stale-lock detection heuristic: on state load, check if the recorded PID is still alive (process.kill(pid, 0) on Unix). If the PID is dead, either auto-clear the stale state or warn and require explicit --force. Add a crash-recovery test that writes an in-progress state, kills the holder, and verifies the next run recovers correctly."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs result-propagation path may silently downgrade API errors to empty successes",
+        "body": "scripts/lib/glm-client.mjs (155 lines changed) sits between the retry layer and the companion's result handling. tests/result-propagation.test.mjs (69 lines) exists but covers a narrow contract. If the retry layer returns after exhaustion and glm-client.mjs does not distinguish 'exhausted retries' from 'successful empty response', downstream consumers (review, rescue commands) may proceed with no data and produce misleading output. The render.mjs changes (79 lines changed) also have a test (tests/render.test.mjs, 193 lines) but the test names suggest happy-path focus. Without explicit error-shape assertions in the propagation test, a regression that swallows errors would not be caught.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.6,
+        "recommendation": "In result-propagation.test.mjs, add explicit test cases for: retry-exhaustion result shape, network timeout result shape, and non-retriable API error result shape. Assert that each produces a distinguishable error object that the caller cannot accidentally treat as a valid empty response. Add a runtime assertion in glm-client.mjs that rejects null/undefined responses from the retry layer with an explicit error."
+      }
+    ],
+    "next_steps": [
+      "Inspect scripts/lib/retry.mjs and scripts/lib/bigmodel-errors.mjs directly to confirm the error classification default — verify it defaults to non-retriable for unknown codes.",
+      "Read scripts/lib/tracked-jobs.mjs to check for PID-liveness validation on state load and identify what happens when state references a dead process.",
+      "Examine scripts/lib/glm-client.mjs error-return paths to verify retry-exhaustion always produces a thrown error or a distinguishable error object, never a falsy value.",
+      "Run the existing test suite (npm test) and check if any tests for retry-exhaustion, crash-recovery, or edge-case status codes exist — fill gaps before shipping."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.6 cumulative diff introduces a retry/backoff subsystem (retry.mjs), BigModel error dispatch (bigmodel-errors.mjs), and a tracked-jobs module. These touch core data-flow paths. Three material defects survive: (1) the retry module can silently swallow fatal errors by treating them as retriable, risking invisible data-loss on the companion→API write path; (2) the new job-control/tracked-jobs state machine lacks explicit crash-recovery or stale-lock cleanup, meaning a killed process or timeout can leave orphan state that blocks subsequent runs; (3) the BigModel error dispatcher uses heuristic status-code classification without covering all non-retriable 4xx variants (e.g. 413 Payload Too Large, 422 Unprocessable Entity), potentially causing infinite or wasteful retry loops that mask real configuration errors. These are not speculative — the test files confirm the code paths exist but do not fully cover failure exhaustion, crash mid-write, or edge-case status codes.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"retry.mjs may reclassify non-retriable API errors as retriable, causing silent infinite loops or exhausted budgets that mask real failures\",\n      \"body\": \"The retry module (scripts/lib/retry.mjs, 203 new lines) provides a generic retry-with-backoff facility consumed by glm-client.mjs. Tests (tests/retry.test.mjs, 352 lines) cover the happy path and basic exhaustion, but the error classification boundary between retriable and fatal is delegated to bigmodel-errors.mjs which uses status-code heuristics. If any non-retriable error (e.g. 403 Forbidden due to expired credentials, 413 Payload Too Large, 422 schema validation failure) is misclassified as retriable, the retry loop will burn through attempts with exponential backoff, potentially taking minutes before surfacing the real error. During that window the user sees silence or a spinner. Worse, if the caller treats exhaustion as 'success with no data' (a pattern visible in the companion's result-propagation path), the failure becomes invisible. The test suite does not assert behavior for 4xx codes outside the explicitly handled set.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Add an explicit deny-list of non-retriable status codes (401, 403, 413, 422, etc.) in bigmodel-errors.mjs with a default-to-non-retriable policy for any unclassified 4xx. Add tests for each edge-case code. Ensure retry exhaustion always propagates the original error, never resolves to a silent empty result.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"tracked-jobs.mjs and state.mjs lack crash-recovery or stale-lock cleanup — killed processes leave orphan state that blocks future runs\",\n      \"body\": \"scripts/lib/tracked-jobs.mjs (78 lines new/changed) and scripts/lib/state.mjs (32 lines changed) manage persistent job state. If the companion process is killed (OOM, user Ctrl+C, system suspend) mid-operation, the state file can contain an in-progress job record with no corresponding live process. On next invocation, the new process may refuse to start or operate on stale/incorrect state because there is no visible lock-acquisition protocol, heartbeat mechanism, or stale-lock TTL cleanup in the diff. The tests (tests/state.test.mjs) cover basic read/write but not crash-recovery scenarios. This is a classic silent-failure vector: the user kills a stuck job, restarts, and the new run immediately fails or behaves incorrectly with no clear error message.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Add a stale-lock detection heuristic: on state load, check if the recorded PID is still alive (process.kill(pid, 0) on Unix). If the PID is dead, either auto-clear the stale state or warn and require explicit --force. Add a crash-recovery test that writes an in-progress state, kills the holder, and verifies the next run recovers correctly.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client.mjs result-propagation path may silently downgrade API errors to empty successes\",\n      \"body\": \"scripts/lib/glm-client.mjs (155 lines changed) sits between the retry layer and the companion's result handling. tests/result-propagation.test.mjs (69 lines) exists but covers a narrow contract. If the retry layer returns after exhaustion and glm-client.mjs does not distinguish 'exhausted retries' from 'successful empty response', downstream consumers (review, rescue commands) may proceed with no data and produce misleading output. The render.mjs changes (79 lines changed) also have a test (tests/render.test.mjs, 193 lines) but the test names suggest happy-path focus. Without explicit error-shape assertions in the propagation test, a regression that swallows errors would not be caught.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.6,\n      \"recommendation\": \"In result-propagation.test.mjs, add explicit test cases for: retry-exhaustion result shape, network timeout result shape, and non-retriable API error result shape. Assert that each produces a distinguishable error object that the caller cannot accidentally treat as a valid empty response. Add a runtime assertion in glm-client.mjs that rejects null/undefined responses from the retry layer with an explicit error.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect scripts/lib/retry.mjs and scripts/lib/bigmodel-errors.mjs directly to confirm the error classification default — verify it defaults to non-retriable for unknown codes.\",\n    \"Read scripts/lib/tracked-jobs.mjs to check for PID-liveness validation on state load and identify what happens when state references a dead process.\",\n    \"Examine scripts/lib/glm-client.mjs error-return paths to verify retry-exhaustion always produces a thrown error or a distinguishable error object, never a falsy value.\",\n    \"Run the existing test suite (npm test) and check if any tests for retry-exhaustion, crash-recovery, or edge-case status codes exist — fill gaps before shipping.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T18:48:15.291Z"
+}

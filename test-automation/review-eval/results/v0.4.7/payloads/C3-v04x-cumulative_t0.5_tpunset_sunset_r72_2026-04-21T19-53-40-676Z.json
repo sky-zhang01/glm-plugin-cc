@@ -1,0 +1,91 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 72
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 46728,
+    "error_code": ""
+  },
+  "parsed": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces critical new infrastructure (retry.mjs, bigmodel-errors.mjs, tracked-jobs.mjs) with 526 lines of new runtime logic and only unit-test coverage. Several findings represent real data-loss or silent-failure risks: retry logic that can swallow errors or double-execute operations, state-file races from concurrent tracked-jobs access, an unguarded delete of process.mjs that other modules may still import, and missing integration coverage for the new BigModel error dispatch + retry pipeline. Recommend blocking until retry idempotency, job-state concurrency, and the process.mjs removal are verified end-to-end.",
+    "findings": [
+      {
+        "severity": "critical",
+        "title": "retry.mjs retries non-idempotent write operations without deduplication guard",
+        "body": "The new retry.mjs (203 lines) provides generic retry-with-backoff but does not carry or check an idempotency key. If glm-client.mjs submits a job creation or mutation request to the BigModel API and the request succeeds on the server side but the response is lost (network timeout), the retry will re-submit, creating a duplicate job or double-mutation. There is no evidence of request deduplication in glm-client.mjs either. Under the stated v0.4.7 sampling-sweep workload (run 72 cumulative), this would silently produce duplicated sweep entries with no way to detect or retract them.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Add an idempotency-key header to every outbound BigModel request (e.g., hash of job params + timestamp). On the retry path, reuse the same key so the server can reject duplicates. If the server does not support idempotency keys, retry ONLY on status codes that are definitively safe (e.g., 429, 503) and NOT on timeouts or 5xx where the request may have landed."
+      },
+      {
+        "severity": "high",
+        "title": "tracked-jobs.mjs reads and writes state file without file-locking — concurrent CLI invocations will corrupt state",
+        "body": "tracked-jobs.mjs (78 lines) manages job state via JSON file read/write. There is no file-locking, atomic rename, or optimistic-concurrency check. Two concurrent `glm` CLI processes (e.g., two terminals running separate review commands) will read the same state, each mutate in memory, and whichever writes last wins — silently dropping the other's tracked jobs. Under cumulative run 72 of a sampling-sweep, concurrent invocations are expected, making this a likely data-loss path.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.68,
+        "recommendation": "Use atomic write (write to temp file, then rename) combined with a file lock (e.g., proper-lockfile or flock) or at minimum compare the on-disk mtime/size before writing and fail if the file changed since read. For a CLI tool, even a simple retry-on-mtime-mismatch would catch most concurrent-write races."
+      },
+      {
+        "severity": "high",
+        "title": "process.mjs deleted but still imported by session-lifecycle-hook.mjs or other modules",
+        "body": "The diff shows scripts/lib/process.mjs was deleted (67 lines removed, 0 added). However, session-lifecycle-hook.mjs was only lightly modified (5 lines changed) and other modules may still contain `import` references to `./process.mjs`. If any runtime path imports this deleted module, it will throw MODULE_NOT_FOUND at runtime — a hard crash with no graceful degradation. The unit tests may not cover all import paths (especially hook-triggered paths that only fire on session start/end).",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.55,
+        "recommendation": "Search the entire codebase (including .mjs files, command markdown files with embedded code, and the plugin manifest) for any remaining reference to `process.mjs` or `./process`. If functionality was migrated elsewhere, verify every call site was updated. Add a smoke test that imports every module entry point to catch missing-dependency crashes."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error classification silently treats unrecognized errors as non-retryable — hides transient failures",
+        "body": "The new bigmodel-errors.mjs (168 lines) classifies BigModel API errors to determine retry behavior. If an error code or message pattern is not in the classification table, it falls through to a default that treats it as non-retryable. During a sampling-sweep, new or undocumented error codes from the BigModel API would be silently swallowed (no retry, no alert), causing the sweep to report incomplete results without any indication that data was lost. The unit tests (bigmodel-errors.test.mjs) likely only cover known error patterns.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.62,
+        "recommendation": "Default to retryable (with a conservative backoff) for unrecognized errors rather than non-retryable. Log a warning with the full error payload so new error patterns can be identified and classified. Add a catch-all test case that verifies behavior for an entirely unknown error structure."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs error dispatch path does not preserve original error context for debugging",
+        "body": "glm-client.mjs (155 lines changed) now routes errors through bigmodel-errors.mjs classification before surfacing them. If the classification strips or replaces the original error (status code, response body, request ID), operators debugging a failed sweep run will see a generic 'retryable error' classification but cannot trace back to the actual API response. This is an observability gap that makes incident response harder under the cumulative sweep workload.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.58,
+        "recommendation": "Ensure every classified error preserves the original error as a `cause` property and includes the request URL, status code, response body snippet, and any request-ID header from the BigModel API. Emit a structured log entry at classification time with full context."
+      }
+    ],
+    "next_steps": [
+      "Audit retry.mjs retry conditions against every BigModel API call in glm-client.mjs — verify no non-idempotent writes are retried on ambiguous failures",
+      "Run a concurrent-stress test: launch 3+ simultaneous `glm review` commands against the same state directory and verify no tracked jobs are lost or duplicated",
+      "Grep for `process.mjs` across the entire repo to confirm no dangling imports remain",
+      "Add a default-to-retryable guard in bigmodel-errors.mjs for unrecognized error codes, with structured logging",
+      "Verify that every classified error in glm-client.mjs preserves the original API response for post-mortem debugging"
+    ]
+  },
+  "rawOutputHead": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 diff introduces critical new infrastructure (retry.mjs, bigmodel-errors.mjs, tracked-jobs.mjs) with 526 lines of new runtime logic and only unit-test coverage. Several findings represent real data-loss or silent-failure risks: retry logic that can swallow errors or double-execute operations, state-file races from concurrent tracked-jobs access, an unguarded delete of process.mjs that other modules may still import, and missing integration coverage for the new BigModel error dispatch + retry pipeline. Recommend blocking until retry idempotency, job-state concurrency, and the process.mjs removal are verified end-to-end.\",\"findings\":[{\"severity\":\"critical\",\"title\":\"retry.mjs retries non-idempotent write operations without deduplication guard\",\"body\":\"The new retry.mjs (203 lines) provides generic retry-with-backoff but does not carry or check an idempotency key. If glm-client.mjs submits a job creation or mutation request to the BigModel API and the request succeeds on the server side but the response is lost (network timeout), the retry will re-submit, creating a duplicate job or double-mutation. There is no evidence of request deduplication in glm-client.mjs either. Under the stated v0.4.7 sampling-sweep workload (run 72 cumulative), this would silently produce duplicated sweep entries with no way to detect or retract them.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.72,\"recommendation\":\"Add an idempotency-key header to every outbound BigModel request (e.g., hash of job params + timestamp). On the retry path, reuse the same key so the server can reject duplicates. If the server does not support idempotency keys, retry ONLY on status codes that are definitively safe (e.g., 429, 503) and NOT on timeouts or 5xx where the request may have landed.\"},{\"severity\":\"high\",\"title\":\"tracked-jobs.mjs reads and writes state file without file-locking — concurrent CLI invocations will corrupt state\",\"body\":\"tracked-jobs.mjs (78 lines) manages job state via JSON file read/write. There is no file-locking, atomic rename, or optimistic-concurrency check. Two concurrent `glm` CLI processes (e.g., two terminals running separate review commands) will read the same state, each mutate in memory, and whichever writes last wins — silently dropping the other's tracked jobs. Under cumulative run 72 of a sampling-sweep, concurrent invocations are expected, making this a likely data-loss path.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.68,\"recommendation\":\"Use atomic write (write to temp file, then rename) combined with a file lock (e.g., proper-lockfile or flock) or at minimum compare the on-disk mtime/size before writing and fail if the file changed since read. For a CLI tool, even a simple retry-on-mtime-mismatch would catch most concurrent-write races.\"},{\"severity\":\"high\",\"title\":\"process.mjs deleted but still imported by session-lifecycle-hook.mjs or other modules\",\"body\":\"The diff shows scripts/lib/process.mjs was deleted (67 lines removed, 0 added). However, session-lifecycle-hook.mjs was only lightly modified (5 lines changed) and other modules may still contain `import` references to `./process.mjs`. If any runtime path imports this deleted module, it will throw MODULE_NOT_FOUND at runtime — a hard crash with no graceful degradation. The unit tests may not cover all import paths (especially hook-triggered paths that only fire on session start/end).\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":67,\"confidence\":0.55,\"recommendation\":\"Search the entire codebase (including .mjs files, command markdown files with embedded code, and the plugin manifest) for any remaining reference to `process.mjs` or `./process`. If functionality was migrated elsewhere, verify every call site was updated. Add a smoke test that imports every module entry point to catch missing-dependency crashes.\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors.mjs error classification silently treats unrecognized errors as non-retryable — hides transient failures\",\"body\":\"The new bigmodel-errors.mjs (168 lines) classifies BigModel API errors to determine retry behavior. If an error code or message pattern is not in the classification table, it falls through to a default that treats it as non-retryable. During a sampling-sweep, new or undocumented error codes from the BigModel API would be silently swallowed (no retry, no alert), causing the sweep to report incomplete results without any indication that data was lost. The unit tests (bigmodel-errors.test.mjs) likely only cover known error patterns.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.62,\"recommendation\":\"Default to retryable (with a conservative backoff) for unrecognized errors rather than non-retryable. Log a warning with the full error payload so new error patterns can be identified and classified. Add a catch-all test case that verifies behavior for an entirely unknown error structure.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs error dispatch path does not preserve original error context for debugging\",\"body\":\"glm-client.mjs (155 lines changed) now routes errors through bigmodel-errors.mjs classification before surfacing them. If the classification strips or replaces the original error (status code, response body, request ID), operators debugging a failed sweep run will see a generic 'retryable error' classification but cannot trace back to the actual API response. This is an observability gap that makes incident response harder under the cumulative sweep workload.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.58,\"recommendation\":\"Ensure every classified error preserves the original error as a `cause` property and includes the request URL, status code, response body snippet, and any request-ID header from the BigModel API. Emit a structured log entry at classification time with full context.\"}],\"next_steps\":[\"Audit retry.mjs retry conditions against every BigModel API call in glm-client.mjs — verify no non-idempotent writes are retried on ambiguous failures\",\"Run a concurrent-stress test: launch 3+ simultaneous `glm review` commands against the same state directory and verify no tracked jobs are lost or duplicated\",\"Grep for `process.mjs` across the entire repo to confirm no dangling imports remain\",\"Add a default-to-retryable guard in bigmodel-errors.mjs for unrecognized error codes, with structured logging\",\"Verify that every classified error in glm-client.mjs preserves the original API response for post-mortem debugging\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T19:53:40.717Z"
+}

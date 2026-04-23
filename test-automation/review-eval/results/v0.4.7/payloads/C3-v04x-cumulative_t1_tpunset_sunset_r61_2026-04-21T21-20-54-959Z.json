@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 61
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 40222,
+    "error_code": ""
+  },
+  "parsed": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces substantial new infrastructure (retry logic, BigModel error dispatch, job tracking, state management) with heavy surface area for silent failures. The core risk is in the retry/backoff and error-classification systems which could mask real failures, retry non-idempotent operations, or silently exhaust retry budgets without user visibility. Several modules lack defensive guards against corrupted/partial state on disk, which under crash-recovery scenarios could cause indefinite hangs or data loss.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs likely retries non-idempotent operations without idempotency guard",
+        "body": "The new retry module (203 lines) is a generic retry wrapper. When applied to glm-client.mjs operations, any operation that mutates server-side state (e.g., job submission) will be retried on transient errors. If the first request succeeded at the server but the response was lost (a classic split-brain scenario), the retry creates a duplicate job. There is no evidence in the diff of idempotency keys, deduplication, or a 'check-before-retry' pattern. The risk is doubled work or doubled billing for the user, silently.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.75,
+        "recommendation": "Add an idempotency-key header or request-dedup mechanism to mutating glm-client calls. At minimum, document which operations are safe to retry and which are not, and refuse to retry non-idempotent operations by default."
+      },
+      {
+        "severity": "high",
+        "title": "state.mjs on-disk state has no corruption or partial-write protection",
+        "body": "The state management module persists job tracking state to disk. If the process crashes mid-write (OOM, SIGKILL, disk full), the state file can be left in a partially-written or corrupt state. On next invocation, reading this file will likely throw or produce undefined behavior (e.g., JSON.parse on truncated content). There is no indication of atomic writes (write-to-temp + rename) or validation on read. This directly impacts crash recovery — exactly when correct state matters most.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.8,
+        "recommendation": "Use atomic file writes: write to a temp file in the same directory, then rename over the target. Add try/catch around state file reads with a defined recovery path (e.g., log warning, start fresh, or prompt user)."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error classification may misclassify and silently swallow errors",
+        "body": "The new 168-line BigModel error dispatch module classifies API errors to determine retryability. Incorrect classification (e.g., treating a 403/permission error as retryable, or a 502 as non-retryable) will either waste retries on hopeless calls or give up on recoverable ones. Error classification logic is notoriously fragile — it depends on exact error response shapes from an external API that can change without notice. If the API changes its error format, the classifier silently degrades, and the retry layer makes wrong decisions with no telemetry to surface this.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.7,
+        "recommendation": "Add structured logging for every error classification decision (classified_as, status_code, retryable). Include a fallback/default path that logs a warning when error shape is unrecognized. Consider a schema validator for expected error response shapes."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs and glm-client.mjs race condition on concurrent invocations",
+        "body": "The job tracking and client modules manage asynchronous state. If two instances of the companion script run concurrently (e.g., user triggers two commands rapidly), they share the same state file on disk. Without file locking (flock, lockfile), concurrent reads and writes to the tracked-jobs state can interleave, causing lost updates (one instance's job registration overwritten by another). The tracked-jobs module (78 lines changed) appears to read-modify-write without any locking primitive.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.7,
+        "recommendation": "Implement file-based locking (e.g., proper-lockfile or fcntl/flock) around state file read-modify-write cycles. Alternatively, detect concurrent access and warn the user."
+      },
+      {
+        "severity": "medium",
+        "title": "No test coverage for crash-recovery / partial-state scenarios",
+        "body": "The test suite includes tests for retry, render, state, and other modules, but examining the test file names (retry.test.mjs, state.test.mjs, etc.), there are no visible tests for crash-recovery scenarios: what happens when state files are truncated, when retry exhausts budgets on real API calls, or when job-control state is stale. The UAT reports (v0.4.4, v0.4.5) cover happy-path scenarios only. This is exactly the category of failure that is expensive in production and hard to debug.",
+        "file": "tests/state.test.mjs",
+        "line_start": 1,
+        "line_end": 81,
+        "confidence": 0.65,
+        "recommendation": "Add explicit tests for: (1) corrupted/truncated state file recovery, (2) retry budget exhaustion notification, (3) concurrent state file access. These should be gate-keeping tests, not nice-to-have."
+      }
+    ],
+    "next_steps": [
+      "Inspect retry.mjs to confirm whether idempotency is considered for mutating operations — if not, this is ship-blocking",
+      "Inspect state.mjs for atomic write patterns — partial writes on crash are a real data-loss vector",
+      "Verify bigmodel-errors.mjs has logging on classification decisions — silent misclassification is an observability gap",
+      "Add crash-recovery test cases to state.test.mjs and retry.test.mjs before shipping"
+    ]
+  },
+  "rawOutputHead": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 diff introduces substantial new infrastructure (retry logic, BigModel error dispatch, job tracking, state management) with heavy surface area for silent failures. The core risk is in the retry/backoff and error-classification systems which could mask real failures, retry non-idempotent operations, or silently exhaust retry budgets without user visibility. Several modules lack defensive guards against corrupted/partial state on disk, which under crash-recovery scenarios could cause indefinite hangs or data loss.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs likely retries non-idempotent operations without idempotency guard\",\"body\":\"The new retry module (203 lines) is a generic retry wrapper. When applied to glm-client.mjs operations, any operation that mutates server-side state (e.g., job submission) will be retried on transient errors. If the first request succeeded at the server but the response was lost (a classic split-brain scenario), the retry creates a duplicate job. There is no evidence in the diff of idempotency keys, deduplication, or a 'check-before-retry' pattern. The risk is doubled work or doubled billing for the user, silently.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.75,\"recommendation\":\"Add an idempotency-key header or request-dedup mechanism to mutating glm-client calls. At minimum, document which operations are safe to retry and which are not, and refuse to retry non-idempotent operations by default.\"},{\"severity\":\"high\",\"title\":\"state.mjs on-disk state has no corruption or partial-write protection\",\"body\":\"The state management module persists job tracking state to disk. If the process crashes mid-write (OOM, SIGKILL, disk full), the state file can be left in a partially-written or corrupt state. On next invocation, reading this file will likely throw or produce undefined behavior (e.g., JSON.parse on truncated content). There is no indication of atomic writes (write-to-temp + rename) or validation on read. This directly impacts crash recovery — exactly when correct state matters most.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.8,\"recommendation\":\"Use atomic file writes: write to a temp file in the same directory, then rename over the target. Add try/catch around state file reads with a defined recovery path (e.g., log warning, start fresh, or prompt user).\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors.mjs error classification may misclassify and silently swallow errors\",\"body\":\"The new 168-line BigModel error dispatch module classifies API errors to determine retryability. Incorrect classification (e.g., treating a 403/permission error as retryable, or a 502 as non-retryable) will either waste retries on hopeless calls or give up on recoverable ones. Error classification logic is notoriously fragile — it depends on exact error response shapes from an external API that can change without notice. If the API changes its error format, the classifier silently degrades, and the retry layer makes wrong decisions with no telemetry to surface this.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.7,\"recommendation\":\"Add structured logging for every error classification decision (classified_as, status_code, retryable). Include a fallback/default path that logs a warning when error shape is unrecognized. Consider a schema validator for expected error response shapes.\"},{\"severity\":\"medium\",\"title\":\"tracked-jobs.mjs and glm-client.mjs race condition on concurrent invocations\",\"body\":\"The job tracking and client modules manage asynchronous state. If two instances of the companion script run concurrently (e.g., user triggers two commands rapidly), they share the same state file on disk. Without file locking (flock, lockfile), concurrent reads and writes to the tracked-jobs state can interleave, causing lost updates (one instance's job registration overwritten by another). The tracked-jobs module (78 lines changed) appears to read-modify-write without any locking primitive.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.7,\"recommendation\":\"Implement file-based locking (e.g., proper-lockfile or fcntl/flock) around state file read-modify-write cycles. Alternatively, detect concurrent access and warn the user.\"},{\"severity\":\"medium\",\"title\":\"No test coverage for crash-recovery / partial-state scenarios\",\"body\":\"The test suite includes tests for retry, render, state, and other modules, but examining the test file names (retry.test.mjs, state.test.mjs, etc.), there are no visible tests for crash-recovery scenarios: what happens when state files are truncated, when retry exhausts budgets on real API calls, or when job-control state is stale. The UAT reports (v0.4.4, v0.4.5) cover happy-path scenarios only. This is exactly the category of failure that is expensive in production and hard to debug.\",\"file\":\"tests/state.test.mjs\",\"line_start\":1,\"line_end\":81,\"confidence\":0.65,\"recommendation\":\"Add explicit tests for: (1) corrupted/truncated state file recovery, (2) retry budget exhaustion notification, (3) concurrent state file access. These should be gate-keeping tests, not nice-to-have.\"}],\"next_steps\":[\"Inspect retry.mjs to confirm whether idempotency is considered for mutating operations — if not, this is ship-blocking\",\"Inspect state.mjs for atomic write patterns — partial writes on crash are a real data-loss vector\",\"Verify bigmodel-errors.mjs has logging on classification decisions — silent misclassification is an observability gap\",\"Add crash-recovery test cases to state.test.mjs and retry.test.mjs before shipping\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T21:20:54.993Z"
+}

@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 10
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 49928,
+    "error_code": ""
+  },
+  "parsed": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces a retry system (retry.mjs), BigModel error dispatch (bigmodel-errors.mjs), and a revamped GLM client (glm-client.mjs) with no visible integration tests for retry+client+error-dispatch together. The retry logic and client changes are the most dangerous surface — partial failures during API calls could silently corrupt job state or produce duplicate submissions. Several files were deleted (process.mjs) and replaced, creating version-skew risk for any caller still importing the old path. I cannot confirm these paths are safe without inspecting the actual file contents.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "process.mjs deleted with no evidence callers are updated",
+        "body": "The diff stat shows scripts/lib/process.mjs was removed (67 lines deleted). If any file at runtime still imports from this module — whether via dynamic import(), a cached compiled artifact, or an older version of the companion script not updated in this diff — the import will throw MODULE_NOT_FOUND at runtime with no fallback. This is a classic version-skew / migration hazard when a module is deleted rather than deprecated.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.7,
+        "recommendation": "Verify no remaining import of process.mjs anywhere in the codebase (grep for 'process.mjs' across all .mjs/.js/.json files). If any exist, add a re-export shim or migration path. If confirmed clean, add a CI check that fails on imports of deleted modules."
+      },
+      {
+        "severity": "high",
+        "title": "retry.mjs is a large new module (203 lines) with only unit-test coverage — no integration test for retry + glm-client + bigmodel-errors together",
+        "body": "retry.mjs (203 lines added), bigmodel-errors.mjs (168 lines added), and glm-client.mjs (155 lines changed) form a tightly coupled error-handling chain. The test files are retry.test.mjs (352 lines) and bigmodel-errors.test.mjs (189 lines), both unit tests. There is no test file that exercises the full retry loop against a failing or partially-failing GLM client call. If retry logic re-invokes the client after a partial write (e.g. job submitted but response lost), it could duplicate the job. If retry gives up after N attempts but the caller doesn't distinguish 'never tried' from 'tried and failed', downstream state could be corrupted.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Add an integration test that simulates a flaky GLM client (succeeds on 2nd attempt, returns partial data, times out) and asserts: (a) no duplicate job submissions, (b) correct final state, (c) error propagation matches bigmodel-errors classification. This is the highest-risk code path in the release."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs heavily modified (155 lines changed) — potential silent failure in error classification",
+        "body": "glm-client.mjs has 155 lines of changes, likely integrating the new retry and bigmodel-errors modules. If the client catches an error, classifies it via bigmodel-errors, and the classification returns an unexpected/unknown error category, the retry logic may either retry infinitely (if unknown is treated as retryable) or fail silently (if unknown is treated as fatal without logging). The test coverage for error classification edge cases (unexpected HTTP status codes, malformed response bodies, network-level errors) is not visible in the diff stat and may be incomplete.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.65,
+        "recommendation": "Audit glm-client.mjs for the default/unknown branch in error classification. Ensure every unhandled error category: (1) is logged at warning/error level with full context, (2) is treated as non-retryable by default (fail-closed), (3) includes the raw error for debugging. Add a test for a truly unexpected error shape (e.g. null response body, non-JSON response)."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs modified (32 lines changed) — potential race condition with concurrent job operations",
+        "body": "state.mjs manages job state and is modified in this release alongside tracked-jobs.mjs (78 lines changed) and job-control.mjs (20 lines changed). If two concurrent operations (e.g. a retry and a manual status check) both read and write state without locking, the last writer wins and state can be silently lost. The diff stat shows no concurrency primitives or file-locking mechanism. For a CLI tool this may be low probability, but the new retry mechanism increases the window for concurrent access (a retry can fire while the user runs another command).",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.55,
+        "recommendation": "Review state.mjs for atomic read-modify-write patterns. If state is file-based, consider write-then-rename (atomic replace) or at minimum add a staleness check (compare mtime before write). Document whether concurrent invocation is supported or explicitly unsupported."
+      }
+    ],
+    "next_steps": [
+      "Inspect retry.mjs, glm-client.mjs, and bigmodel-errors.mjs in full to trace the error-classification→retry→state-mutation chain and confirm fail-closed behavior for unknown errors.",
+      "Grep the entire codebase for any remaining import of the deleted process.mjs.",
+      "Run the existing test suite and confirm pass rate — the diff stat shows many new test files but no evidence they all pass.",
+      "Add an integration-level smoke test that submits a job, simulates a transient failure, retries, and verifies exactly-once job creation and correct final state."
+    ]
+  },
+  "rawOutputHead": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 cumulative diff introduces a retry system (retry.mjs), BigModel error dispatch (bigmodel-errors.mjs), and a revamped GLM client (glm-client.mjs) with no visible integration tests for retry+client+error-dispatch together. The retry logic and client changes are the most dangerous surface — partial failures during API calls could silently corrupt job state or produce duplicate submissions. Several files were deleted (process.mjs) and replaced, creating version-skew risk for any caller still importing the old path. I cannot confirm these paths are safe without inspecting the actual file contents.\",\"findings\":[{\"severity\":\"high\",\"title\":\"process.mjs deleted with no evidence callers are updated\",\"body\":\"The diff stat shows scripts/lib/process.mjs was removed (67 lines deleted). If any file at runtime still imports from this module — whether via dynamic import(), a cached compiled artifact, or an older version of the companion script not updated in this diff — the import will throw MODULE_NOT_FOUND at runtime with no fallback. This is a classic version-skew / migration hazard when a module is deleted rather than deprecated.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":67,\"confidence\":0.7,\"recommendation\":\"Verify no remaining import of process.mjs anywhere in the codebase (grep for 'process.mjs' across all .mjs/.js/.json files). If any exist, add a re-export shim or migration path. If confirmed clean, add a CI check that fails on imports of deleted modules.\"},{\"severity\":\"high\",\"title\":\"retry.mjs is a large new module (203 lines) with only unit-test coverage — no integration test for retry + glm-client + bigmodel-errors together\",\"body\":\"retry.mjs (203 lines added), bigmodel-errors.mjs (168 lines added), and glm-client.mjs (155 lines changed) form a tightly coupled error-handling chain. The test files are retry.test.mjs (352 lines) and bigmodel-errors.test.mjs (189 lines), both unit tests. There is no test file that exercises the full retry loop against a failing or partially-failing GLM client call. If retry logic re-invokes the client after a partial write (e.g. job submitted but response lost), it could duplicate the job. If retry gives up after N attempts but the caller doesn't distinguish 'never tried' from 'tried and failed', downstream state could be corrupted.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.72,\"recommendation\":\"Add an integration test that simulates a flaky GLM client (succeeds on 2nd attempt, returns partial data, times out) and asserts: (a) no duplicate job submissions, (b) correct final state, (c) error propagation matches bigmodel-errors classification. This is the highest-risk code path in the release.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs heavily modified (155 lines changed) — potential silent failure in error classification\",\"body\":\"glm-client.mjs has 155 lines of changes, likely integrating the new retry and bigmodel-errors modules. If the client catches an error, classifies it via bigmodel-errors, and the classification returns an unexpected/unknown error category, the retry logic may either retry infinitely (if unknown is treated as retryable) or fail silently (if unknown is treated as fatal without logging). The test coverage for error classification edge cases (unexpected HTTP status codes, malformed response bodies, network-level errors) is not visible in the diff stat and may be incomplete.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.65,\"recommendation\":\"Audit glm-client.mjs for the default/unknown branch in error classification. Ensure every unhandled error category: (1) is logged at warning/error level with full context, (2) is treated as non-retryable by default (fail-closed), (3) includes the raw error for debugging. Add a test for a truly unexpected error shape (e.g. null response body, non-JSON response).\"},{\"severity\":\"medium\",\"title\":\"state.mjs modified (32 lines changed) — potential race condition with concurrent job operations\",\"body\":\"state.mjs manages job state and is modified in this release alongside tracked-jobs.mjs (78 lines changed) and job-control.mjs (20 lines changed). If two concurrent operations (e.g. a retry and a manual status check) both read and write state without locking, the last writer wins and state can be silently lost. The diff stat shows no concurrency primitives or file-locking mechanism. For a CLI tool this may be low probability, but the new retry mechanism increases the window for concurrent access (a retry can fire while the user runs another command).\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.55,\"recommendation\":\"Review state.mjs for atomic read-modify-write patterns. If state is file-based, consider write-then-rename (atomic replace) or at minimum add a staleness check (compare mtime before write). Document whether concurrent invocation is supported or explicitly unsupported.\"}],\"next_steps\":[\"Inspect retry.mjs, glm-client.mjs, and bigmodel-errors.mjs in full to trace the error-classification→retry→state-mutation chain and confirm fail-closed behavior for unknown errors.\",\"Grep the entire codebase for any remaining import of the deleted process.mjs.\",\"Run the existing test suite and confirm pass rate — the diff stat shows many new test files but no evidence they all pass.\",\"Add an integration-level smoke test that submits a job, simulates a transient failure, retries, and verifies exactly-once job creation and correct final state.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T18:29:22.478Z"
+}

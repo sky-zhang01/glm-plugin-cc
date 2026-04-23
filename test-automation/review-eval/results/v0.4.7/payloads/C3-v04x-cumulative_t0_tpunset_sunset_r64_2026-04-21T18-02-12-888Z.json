@@ -1,0 +1,91 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 64
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.6,
+    "citation_false_file_hits": 0,
+    "latency_ms": 104722,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "Cumulative v0.4.0→v0.4.6+ diff adds ~6600 lines across 84 files, introducing critical new infrastructure (retry.mjs, bigmodel-errors.mjs) and substantially rewriting the API client (glm-client.mjs) and job tracking. The diff is too large and touches too many failure-critical paths to validate from metadata alone. Key structural risks: new retry/error-dispatch modules lack evidence of retry budgets or circuit breakers; tracked-jobs and state modules have concurrent-access surface area; and no integration test evidence covers the combined retry→error-classification→client flow end-to-end.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "New retry.mjs (203 lines) has no evidence of retry budget or circuit breaker",
+        "body": "The commit 'BigModel error dispatch + auto retry/backoff' introduces a 203-line retry module. The test file (retry.test.mjs, 352 lines) suggests unit coverage, but without seeing the implementation there is no metadata evidence of a retry budget, maximum wall-clock time, or circuit breaker to prevent retry storms cascading into upstream API rate limits or cost overruns. A misclassified retryable error in bigmodel-errors.mjs could trigger unbounded retries through glm-client.mjs.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.65,
+        "recommendation": "Verify retry.mjs enforces a hard maximum on total retry attempts, cumulative wall-clock time, and per-host concurrency. If absent, add a retry budget with a circuit breaker before shipping. Also verify bigmodel-errors.mjs only classifies truly transient/http-5xx/rate-limit errors as retryable and never classifies 4xx/auth errors as retryable."
+      },
+      {
+        "severity": "high",
+        "title": "glm-client.mjs integrates new retry + error dispatch without visible integration test coverage",
+        "body": "glm-client.mjs has 155 lines of changes that integrate the new retry.mjs and bigmodel-errors.mjs modules. While unit tests exist for each module independently (retry.test.mjs, bigmodel-errors.test.mjs), no test file name suggests end-to-end integration coverage for the client→error-classify→retry-decide→retry-execute flow. A bug in error classification that marks a non-idempotent mutating request as retryable would cause duplicate side effects (e.g., duplicate job submissions).",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.6,
+        "recommendation": "Add an integration test that exercises glm-client with mocked HTTP responses triggering various bigmodel-errors.mjs classifications, verifying that: (a) non-idempotent requests are never retried, (b) retry budget is respected across the full call stack, (c) the final error surfaced to the caller preserves the original failure context."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs (78 lines changed) likely has file-based state race condition surface",
+        "body": "tracked-jobs.mjs handles concurrent job tracking with 78 lines of changes. If this module uses file-based state (consistent with state.mjs and fs.mjs also being modified), concurrent invocations of the companion could read stale job state, leading to duplicate job launches or lost job references. The absence of a file-locking or atomic-write primitive in the changed files list increases this risk.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.55,
+        "recommendation": "Inspect tracked-jobs.mjs for atomic read-modify-write patterns. If state is file-based, verify that writes use atomic rename (write-to-temp-then-rename) and that concurrent readers cannot observe partial state. Add a concurrency test that launches multiple glm-companion invocations simultaneously."
+      },
+      {
+        "severity": "medium",
+        "title": "process.mjs deleted (67 lines removed) — callers may have stale imports",
+        "body": "scripts/lib/process.mjs was entirely deleted (67 lines removed). If any runtime code path still imports from this module, it will throw a MODULE_NOT_FOUND at runtime. The check-imports.mjs script has 5 lines of changes suggesting import validation exists, but a stale dynamic import or conditional require would bypass static checks and only fail under specific execution paths.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.7,
+        "recommendation": "Grep the entire codebase (including .md command files that may reference process.mjs functions) for any remaining reference to 'process.mjs' or its exported symbols. Verify check-imports.mjs covers dynamic imports and all entry points."
+      },
+      {
+        "severity": "medium",
+        "title": "Massive cumulative diff (6600+ lines) makes safe review infeasible without line-level inspection",
+        "body": "The diff spans 84 files with 6623 insertions across multiple critical subsystems (retry, error handling, API client, state management, job control, CI, hooks). The commit log shows at least 3 rounds of post-review hotfixes (Bundle D3+, C, E+), indicating the codebase has been fragile. Shipping this as a cumulative release without line-by-line inspection of the retry/error/client integration is a material risk to production stability.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.8,
+        "recommendation": "Before tagging v0.4.7, perform a focused line-level review of the three critical modules (retry.mjs, bigmodel-errors.mjs, glm-client.mjs) and their integration points. Consider splitting the release into: (1) retry+errors infrastructure, (2) client integration, (3) everything else, to narrow the blast radius of any single issue."
+      }
+    ],
+    "next_steps": [
+      "Read scripts/lib/retry.mjs in full — verify retry budget, max attempts, wall-clock timeout, and circuit breaker exist and are tested.",
+      "Read scripts/lib/bigmodel-errors.mjs in full — verify non-idempotent operations and 4xx errors are never classified as retryable.",
+      "Read scripts/lib/glm-client.mjs in full — trace how errors from HTTP responses flow through bigmodel-errors classification into retry decisions, checking for duplicate-request risk on mutating calls.",
+      "Grep all source files for 'process.mjs' to confirm no stale imports remain after its deletion.",
+      "Read scripts/lib/tracked-jobs.mjs and scripts/lib/state.mjs — verify atomic state updates and concurrent-access safety.",
+      "Run the full test suite (including tests/retry.test.mjs and tests/bigmodel-errors.test.mjs) and verify no skipped or flaky tests."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"Cumulative v0.4.0→v0.4.6+ diff adds ~6600 lines across 84 files, introducing critical new infrastructure (retry.mjs, bigmodel-errors.mjs) and substantially rewriting the API client (glm-client.mjs) and job tracking. The diff is too large and touches too many failure-critical paths to validate from metadata alone. Key structural risks: new retry/error-dispatch modules lack evidence of retry budgets or circuit breakers; tracked-jobs and state modules have concurrent-access surface area; and no integration test evidence covers the combined retry→error-classification→client flow end-to-end.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"New retry.mjs (203 lines) has no evidence of retry budget or circuit breaker\",\n      \"body\": \"The commit 'BigModel error dispatch + auto retry/backoff' introduces a 203-line retry module. The test file (retry.test.mjs, 352 lines) suggests unit coverage, but without seeing the implementation there is no metadata evidence of a retry budget, maximum wall-clock time, or circuit breaker to prevent retry storms cascading into upstream API rate limits or cost overruns. A misclassified retryable error in bigmodel-errors.mjs could trigger unbounded retries through glm-client.mjs.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Verify retry.mjs enforces a hard maximum on total retry attempts, cumulative wall-clock time, and per-host concurrency. If absent, add a retry budget with a circuit breaker before shipping. Also verify bigmodel-errors.mjs only classifies truly transient/http-5xx/rate-limit errors as retryable and never classifies 4xx/auth errors as retryable.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"glm-client.mjs integrates new retry + error dispatch without visible integration test coverage\",\n      \"body\": \"glm-client.mjs has 155 lines of changes that integrate the new retry.mjs and bigmodel-errors.mjs modules. While unit tests exist for each module independently (retry.test.mjs, bigmodel-errors.test.mjs), no test file name suggests end-to-end integration coverage for the client→error-classify→retry-decide→retry-execute flow. A bug in error classification that marks a non-idempotent mutating request as retryable would cause duplicate side effects (e.g., duplicate job submissions).\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Add an integration test that exercises glm-client with mocked HTTP responses triggering various bigmodel-errors.mjs classifications, verifying that: (a) non-idempotent requests are never retried, (b) retry budget is respected across the full call stack, (c) the final error surfaced to the caller preserves the original failure context.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"tracked-jobs.mjs (78 lines changed) likely has file-based state race condition surface\",\n      \"body\": \"tracked-jobs.mjs handles concurrent job tracking with 78 lines of changes. If this module uses file-based state (consistent with state.mjs and fs.mjs also being modified), concurrent invocations of the companion could read stale job state, leading to duplicate job launches or lost job references. The absence of a file-locking or atomic-write primitive in the changed files list increases this risk.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Inspect tracked-jobs.mjs for atomic read-modify-write patterns. If state is file-based, verify that writes use atomic rename (write-to-temp-then-rename) and that concurrent readers cannot observe partial state. Add a concurrency test that launches multiple glm-companion invocations simultaneously.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"process.mjs deleted (67 lines removed) — callers may have stale imports\",\n      \"body\": \"scripts/lib/process.mjs was entirely deleted (67 lines removed). If any runtime code path still imports from this module, it will throw a MODULE_NOT_FOUND at runtime. The check-imports.mjs script has 5 lines of changes suggesting import validation exists, but a stale dynamic import or conditional require would bypass static checks and only fail under specific execution paths.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Grep the entire codebase (including .md command files that may reference process.mjs functions) for any remaining reference to 'process.mjs' or its exported symbols. Verify check-imports.mjs covers dynamic imports and all entry points.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Massive cumulative diff (6600+ lines) makes safe review infeasible without line-level inspection\",\n      \"body\": \"The diff spans 84 files with 6623 insertions across multiple critical subsystems (retry, error handling, API client, state management, job control, CI, hooks). The commit log shows at least 3 rounds of post-review hotfixes (Bundle D3+, C, E+), indicating the codebase has been fragile. Shipping this as a cumulative release without line-by-line inspection of the retry/error/client integration is a material risk to production stability.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.8,\n      \"recommendation\": \"Before tagging v0.4.7, perform a focused line-level review of the three critical modules (retry.mjs, bigmodel-errors.mjs, glm-client.mjs) and their integration points. Consider splitting the release into: (1) retry+errors infrastructure, (2) client integration, (3) everything else, to narrow the blast radius of any single issue.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Read scripts/lib/retry.mjs in full — verify retry budget, max attempts, wall-clock timeout, and circuit breaker exist and are tested.\",\n    \"Read scripts/lib/bigmodel-errors.mjs in full — verify non-idempotent operations and 4xx errors are never classified as retryable.\",\n    \"Read scripts/lib/glm-client.mjs in full — trace how errors from HTTP responses flow through bigmodel-errors classification into retry decisions, checking for duplicate-request risk on mutating calls.\",\n    \"Grep all source files for 'process.mjs' to confirm no stale imports remain after its deletion.\",\n    \"Read scripts/lib/tracked-jobs.mjs and scripts/lib/state.mjs — verify atomic state updates and concurrent-access safety.\",\n    \"Run the full test suite (including tests/retry.test.mjs and tests/bigmodel-errors.test.mjs) and verify no skipped or flaky tests.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T18:02:13.183Z"
+}

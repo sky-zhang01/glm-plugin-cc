@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 62
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 60969,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff is massive (6,600+ lines, 84 files) and includes a core refactor where process.mjs was deleted while retry.mjs, glm-client.mjs, state.mjs, job-control.mjs, and tracked-jobs.mjs were all changed simultaneously. These are interdependent systems governing job lifecycle, error handling, and state persistence. Without verifying that every import path referencing process.mjs has been updated, and that the new retry/state/job-control interaction is race-free, this cannot be considered safe to ship. The attack surface is concentrated in the process→retry+job-control migration and the new BigModel error dispatch path.",
+    "findings": [
+      {
+        "severity": "critical",
+        "title": "process.mjs deleted — dangling imports risk runtime crash",
+        "body": "scripts/lib/process.mjs was removed entirely (67 lines deleted per diff stat). Any remaining `import` or `require` referencing this module will throw an uncaught MODULE_NOT_FOUND at runtime. The diff simultaneously modifies glm-client.mjs, job-control.mjs, render.mjs, and glm-companion.mjs — all of which are plausible consumers of process.mjs. A single missed import update causes a silent hard crash on the affected code path, which may not be exercised until a specific failure mode triggers it (e.g., a background job or retry scenario).",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.72,
+        "recommendation": "Run `grep -r 'process\\.mjs' scripts/` across the tree to confirm zero remaining references. If this was renamed, verify the new module exports an identical or backward-compatible surface. Add a CI guard that fails if any import resolves to a deleted file."
+      },
+      {
+        "severity": "high",
+        "title": "New retry.mjs (203 lines) introduces retry logic without visible circuit-breaker or idempotency guards",
+        "body": "A brand-new 203-line retry module is the largest single addition to scripts/lib/. Retry logic is a classic source of thundering-herd, duplicate-operation, and cost-amplification bugs. Without seeing the implementation, the risk profile includes: (1) retrying non-idempotent API calls that may have already succeeded on the server side, causing duplicate resources; (2) no visible jitter in backoff causing synchronized retries across multiple instances; (3) no circuit breaker to stop retrying when the downstream service is hard-down. The BigModel error dispatch (bigmodel-errors.mjs, 168 new lines) feeds into this retry path, meaning error classification errors cascade into inappropriate retry behavior.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.68,
+        "recommendation": "Verify that: (a) retry.mjs only retries operations that are provably idempotent or that include a request deduplication key; (b) exponential backoff includes random jitter; (c) there is an absolute ceiling on total retry time/wall-clock cost; (d) the BigModel error classifier distinguishes retryable vs non-retryable errors correctly and has tests for every error code in the dispatch table. Review tests/retry.test.mjs (352 lines) for coverage of these edge cases."
+      },
+      {
+        "severity": "high",
+        "title": "Simultaneous changes to state.mjs + job-control.mjs + tracked-jobs.mjs create race-condition surface",
+        "body": "state.mjs (32 lines changed), job-control.mjs (20 lines changed), and tracked-jobs.mjs (78 lines changed) all govern shared mutable job state. When these modules are refactored in the same release, the invariants between them can silently break: e.g., a job marked 'running' in tracked-jobs but 'completed' in state, or a job that is retried by retry.mjs while tracked-jobs has already cleaned it up. The --background/--wait flags added to review (from commit d573807) introduce async execution modes that amplify these races because a job can be polled, retried, and garbage-collected concurrently.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.62,
+        "recommendation": "Trace the full lifecycle of a background job: submit → track → poll → retry → complete/cleanup. Verify there is a single authoritative state owner (not split between state.mjs and tracked-jobs.mjs). Confirm that concurrent poll+retry on the same job ID cannot produce divergent state. Add an integration test that exercises the --background path with an induced transient failure to verify the retry+cleanup sequence is race-free."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error dispatch may silently swallow unrecognized error codes",
+        "body": "A new 168-line BigModel error dispatch module classifies errors for retry decisions. If the upstream API adds or changes error codes not present in the dispatch table, the default/fallback path determines whether the error is retried or surfaced. A silent fallback to 'retry' causes cost amplification on unknown errors; a fallback to 'fail' causes user-visible errors that should have been retried. Neither path should be implicit.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.58,
+        "recommendation": "Verify the default/fallback branch in the error classifier logs the unrecognized error code at WARN level and has a documented policy (retry or fail). Check tests/bigmodel-errors.test.mjs (189 lines) for an explicit test case covering an unrecognized error code."
+      }
+    ],
+    "next_steps": [
+      "Run `grep -rn 'process\\.mjs\\|from.*process' scripts/` and verify zero hits. If any remain, this is a ship-blocker.",
+      "Inspect retry.mjs for: max retry count, jitter in backoff, idempotency key usage, and total wall-clock timeout ceiling.",
+      "Trace a --background review job through submit→track→retry→cleanup to verify no state divergence between state.mjs and tracked-jobs.mjs under concurrent access.",
+      "Verify bigmodel-errors.mjs default branch logs and has a test for unrecognized error codes.",
+      "Run the full test suite (`npm test` or equivalent) and confirm zero failures before merge."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 diff is massive (6,600+ lines, 84 files) and includes a core refactor where process.mjs was deleted while retry.mjs, glm-client.mjs, state.mjs, job-control.mjs, and tracked-jobs.mjs were all changed simultaneously. These are interdependent systems governing job lifecycle, error handling, and state persistence. Without verifying that every import path referencing process.mjs has been updated, and that the new retry/state/job-control interaction is race-free, this cannot be considered safe to ship. The attack surface is concentrated in the process→retry+job-control migration and the new BigModel error dispatch path.\",\n  \"findings\": [\n    {\n      \"severity\": \"critical\",\n      \"title\": \"process.mjs deleted — dangling imports risk runtime crash\",\n      \"body\": \"scripts/lib/process.mjs was removed entirely (67 lines deleted per diff stat). Any remaining `import` or `require` referencing this module will throw an uncaught MODULE_NOT_FOUND at runtime. The diff simultaneously modifies glm-client.mjs, job-control.mjs, render.mjs, and glm-companion.mjs — all of which are plausible consumers of process.mjs. A single missed import update causes a silent hard crash on the affected code path, which may not be exercised until a specific failure mode triggers it (e.g., a background job or retry scenario).\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Run `grep -r 'process\\\\.mjs' scripts/` across the tree to confirm zero remaining references. If this was renamed, verify the new module exports an identical or backward-compatible surface. Add a CI guard that fails if any import resolves to a deleted file.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"New retry.mjs (203 lines) introduces retry logic without visible circuit-breaker or idempotency guards\",\n      \"body\": \"A brand-new 203-line retry module is the largest single addition to scripts/lib/. Retry logic is a classic source of thundering-herd, duplicate-operation, and cost-amplification bugs. Without seeing the implementation, the risk profile includes: (1) retrying non-idempotent API calls that may have already succeeded on the server side, causing duplicate resources; (2) no visible jitter in backoff causing synchronized retries across multiple instances; (3) no circuit breaker to stop retrying when the downstream service is hard-down. The BigModel error dispatch (bigmodel-errors.mjs, 168 new lines) feeds into this retry path, meaning error classification errors cascade into inappropriate retry behavior.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Verify that: (a) retry.mjs only retries operations that are provably idempotent or that include a request deduplication key; (b) exponential backoff includes random jitter; (c) there is an absolute ceiling on total retry time/wall-clock cost; (d) the BigModel error classifier distinguishes retryable vs non-retryable errors correctly and has tests for every error code in the dispatch table. Review tests/retry.test.mjs (352 lines) for coverage of these edge cases.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"Simultaneous changes to state.mjs + job-control.mjs + tracked-jobs.mjs create race-condition surface\",\n      \"body\": \"state.mjs (32 lines changed), job-control.mjs (20 lines changed), and tracked-jobs.mjs (78 lines changed) all govern shared mutable job state. When these modules are refactored in the same release, the invariants between them can silently break: e.g., a job marked 'running' in tracked-jobs but 'completed' in state, or a job that is retried by retry.mjs while tracked-jobs has already cleaned it up. The --background/--wait flags added to review (from commit d573807) introduce async execution modes that amplify these races because a job can be polled, retried, and garbage-collected concurrently.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.62,\n      \"recommendation\": \"Trace the full lifecycle of a background job: submit → track → poll → retry → complete/cleanup. Verify there is a single authoritative state owner (not split between state.mjs and tracked-jobs.mjs). Confirm that concurrent poll+retry on the same job ID cannot produce divergent state. Add an integration test that exercises the --background path with an induced transient failure to verify the retry+cleanup sequence is race-free.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"bigmodel-errors.mjs error dispatch may silently swallow unrecognized error codes\",\n      \"body\": \"A new 168-line BigModel error dispatch module classifies errors for retry decisions. If the upstream API adds or changes error codes not present in the dispatch table, the default/fallback path determines whether the error is retried or surfaced. A silent fallback to 'retry' causes cost amplification on unknown errors; a fallback to 'fail' causes user-visible errors that should have been retried. Neither path should be implicit.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.58,\n      \"recommendation\": \"Verify the default/fallback branch in the error classifier logs the unrecognized error code at WARN level and has a documented policy (retry or fail). Check tests/bigmodel-errors.test.mjs (189 lines) for an explicit test case covering an unrecognized error code.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `grep -rn 'process\\\\.mjs\\\\|from.*process' scripts/` and verify zero hits. If any remain, this is a ship-blocker.\",\n    \"Inspect retry.mjs for: max retry count, jitter in backoff, idempotency key usage, and total wall-clock timeout ceiling.\",\n    \"Trace a --background review job through submit→track→retry→cleanup to verify no state divergence between state.mjs and tracked-jobs.mjs under concurrent access.\",\n    \"Verify bigmodel-errors.mjs default branch logs and has a test for unrecognized error codes.\",\n    \"Run the full test suite (`npm test` or equivalent) and confirm zero failures before merge.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T21:21:55.993Z"
+}

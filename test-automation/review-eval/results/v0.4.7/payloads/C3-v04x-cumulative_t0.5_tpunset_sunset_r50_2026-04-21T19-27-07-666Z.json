@@ -1,0 +1,81 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 50
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 41925,
+    "error_code": ""
+  },
+  "parsed": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces significant new surface area (retry logic, BigModel error dispatch, job tracking, state management) with several material risks: retry.mjs has no concurrency guard making it unsafe for parallel invocations, bigmodel-errors.mjs pattern matching can silently misclassify upstream API changes, and glm-client.mjs error propagation chains through multiple layers where any gap causes silent failure. The lack of integration tests connecting retry→bigmodel-errors→glm-client means error-handling regressions will only surface in production.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs lacks concurrency/cancellation guard — retries can stack on overlapping failures",
+        "body": "The retry module (203 new lines) implements exponential backoff with jitter but has no cancellation token, abort signal, or deduplication key. If glm-client.mjs calls retry for an API request that is also being retried by another concurrent call (e.g., two tracked jobs hitting the same endpoint), both retry loops run independently. Under sustained upstream errors, this creates an unbounded number of concurrent retry attempts that amplify load on the already-failing dependency. The retry.test.mjs (352 lines) tests single-call retry semantics but has no test for concurrent/overlapping retry scenarios. The `MAX_RETRIES` cap limits each individual retry chain, but N concurrent chains each doing MAX_RETRIES is N× the amplification.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Add an AbortSignal parameter to the retry function and pass it through to any async work. In glm-client.mjs, create one AbortController per logical operation (not per retry) and wire it through. Add a test case where two concurrent retry loops are triggered and verify that aborting the outer controller cancels both."
+      },
+      {
+        "severity": "high",
+        "title": "bigmodel-errors.mjs pattern matching silently defaults to generic error on unrecognized upstream responses",
+        "body": "The BigModel error dispatch (168 new lines) classifies errors by matching against known error code patterns. If the upstream API introduces a new error code or changes error response format (e.g., nesting `error.code` inside a wrapper), the classify function falls through to a generic/default case. This generic case may not trigger retry logic that should apply, or worse, may trigger incorrect retry logic (e.g., retrying a non-retryable auth error). The tests (189 lines) cover known error codes but there is no test for a completely novel/unrecognized error structure, and no warning/log emission when classification falls through to default — making this a silent failure path.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.78,
+        "recommendation": "When the error classifier cannot match a known pattern, emit a structured warning (not just a fallback return) that includes the raw error payload. Add a test for a completely unrecognized error structure verifying the warning is emitted and the returned classification is explicitly 'unknown' rather than a potentially misleading default. Consider adding a schema version check or canary field to detect upstream format changes early."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs state corruption risk — no atomicity between read and write of job tracking state",
+        "body": "The tracked-jobs module (78 new/changed lines) manages job state that is presumably persisted (via state.mjs). If two concurrent operations read the current job list, both see the same state, both add their job, and both write — the second write overwrites the first's addition, silently losing a tracked job. This is a classic TOCTOU race. The state.mjs changes (32 lines) don't show any file-locking or atomic write mechanism. Lost tracked jobs mean: jobs that appear to never complete, no status updates, and potential resource leaks if jobs are long-running.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.68,
+        "recommendation": "Use atomic file write (write to temp file, then rename) in state.mjs for all state mutations. In tracked-jobs.mjs, add a read-modify-write that holds an advisory lock (flock or lockfile) during the critical section. At minimum, add a test that simulates concurrent addJob calls and verifies no jobs are lost."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs error propagation chain has a gap where non-Error throws (strings, numbers) bypass bigmodel-errors classification",
+        "body": "glm-client.mjs (155 changed lines) catches errors from HTTP calls and presumably feeds them through bigmodel-errors.mjs for classification. However, JavaScript allows throwing any value (not just Error instances). If the HTTP layer or any intermediate library throws a non-Error value (e.g., a string error message or a plain object), the classification logic in bigmodel-errors.mjs may fail or produce incorrect results because it likely assumes `.message`, `.code`, or `.status` properties exist. This creates a path where errors escape classification entirely and propagate as unclassified exceptions to the caller, bypassing retry logic.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.65,
+        "recommendation": "At the entry point of the error classification function in bigmodel-errors.mjs, normalize the thrown value: if it's not an Error instance, wrap it in one (preserving the original value as a property). Add a test that throws a string, a number, null, and undefined at the classification function and verifies each is handled without throwing."
+      }
+    ],
+    "next_steps": [
+      "Read scripts/lib/retry.mjs and trace how it is called from glm-client.mjs — verify there is any mechanism to cancel in-flight retries when the caller gives up or a new request supersedes an old one",
+      "Read scripts/lib/bigmodel-errors.mjs classify function — confirm the default/fallthrough branch logs a warning and is tested for unrecognized inputs",
+      "Read scripts/lib/tracked-jobs.mjs and scripts/lib/state.mjs together — verify state mutations are atomic and test for concurrent access",
+      "Read scripts/lib/glm-client.mjs catch blocks — verify all thrown values are normalized to Error instances before classification",
+      "Confirm whether the v0.4.7 tag exists or if this review is against unreleased code on the cumulative branch"
+    ]
+  },
+  "rawOutputHead": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 diff introduces significant new surface area (retry logic, BigModel error dispatch, job tracking, state management) with several material risks: retry.mjs has no concurrency guard making it unsafe for parallel invocations, bigmodel-errors.mjs pattern matching can silently misclassify upstream API changes, and glm-client.mjs error propagation chains through multiple layers where any gap causes silent failure. The lack of integration tests connecting retry→bigmodel-errors→glm-client means error-handling regressions will only surface in production.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs lacks concurrency/cancellation guard — retries can stack on overlapping failures\",\"body\":\"The retry module (203 new lines) implements exponential backoff with jitter but has no cancellation token, abort signal, or deduplication key. If glm-client.mjs calls retry for an API request that is also being retried by another concurrent call (e.g., two tracked jobs hitting the same endpoint), both retry loops run independently. Under sustained upstream errors, this creates an unbounded number of concurrent retry attempts that amplify load on the already-failing dependency. The retry.test.mjs (352 lines) tests single-call retry semantics but has no test for concurrent/overlapping retry scenarios. The `MAX_RETRIES` cap limits each individual retry chain, but N concurrent chains each doing MAX_RETRIES is N× the amplification.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.72,\"recommendation\":\"Add an AbortSignal parameter to the retry function and pass it through to any async work. In glm-client.mjs, create one AbortController per logical operation (not per retry) and wire it through. Add a test case where two concurrent retry loops are triggered and verify that aborting the outer controller cancels both.\"},{\"severity\":\"high\",\"title\":\"bigmodel-errors.mjs pattern matching silently defaults to generic error on unrecognized upstream responses\",\"body\":\"The BigModel error dispatch (168 new lines) classifies errors by matching against known error code patterns. If the upstream API introduces a new error code or changes error response format (e.g., nesting `error.code` inside a wrapper), the classify function falls through to a generic/default case. This generic case may not trigger retry logic that should apply, or worse, may trigger incorrect retry logic (e.g., retrying a non-retryable auth error). The tests (189 lines) cover known error codes but there is no test for a completely novel/unrecognized error structure, and no warning/log emission when classification falls through to default — making this a silent failure path.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.78,\"recommendation\":\"When the error classifier cannot match a known pattern, emit a structured warning (not just a fallback return) that includes the raw error payload. Add a test for a completely unrecognized error structure verifying the warning is emitted and the returned classification is explicitly 'unknown' rather than a potentially misleading default. Consider adding a schema version check or canary field to detect upstream format changes early.\"},{\"severity\":\"medium\",\"title\":\"tracked-jobs.mjs state corruption risk — no atomicity between read and write of job tracking state\",\"body\":\"The tracked-jobs module (78 new/changed lines) manages job state that is presumably persisted (via state.mjs). If two concurrent operations read the current job list, both see the same state, both add their job, and both write — the second write overwrites the first's addition, silently losing a tracked job. This is a classic TOCTOU race. The state.mjs changes (32 lines) don't show any file-locking or atomic write mechanism. Lost tracked jobs mean: jobs that appear to never complete, no status updates, and potential resource leaks if jobs are long-running.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.68,\"recommendation\":\"Use atomic file write (write to temp file, then rename) in state.mjs for all state mutations. In tracked-jobs.mjs, add a read-modify-write that holds an advisory lock (flock or lockfile) during the critical section. At minimum, add a test that simulates concurrent addJob calls and verifies no jobs are lost.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs error propagation chain has a gap where non-Error throws (strings, numbers) bypass bigmodel-errors classification\",\"body\":\"glm-client.mjs (155 changed lines) catches errors from HTTP calls and presumably feeds them through bigmodel-errors.mjs for classification. However, JavaScript allows throwing any value (not just Error instances). If the HTTP layer or any intermediate library throws a non-Error value (e.g., a string error message or a plain object), the classification logic in bigmodel-errors.mjs may fail or produce incorrect results because it likely assumes `.message`, `.code`, or `.status` properties exist. This creates a path where errors escape classification entirely and propagate as unclassified exceptions to the caller, bypassing retry logic.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.65,\"recommendation\":\"At the entry point of the error classification function in bigmodel-errors.mjs, normalize the thrown value: if it's not an Error instance, wrap it in one (preserving the original value as a property). Add a test that throws a string, a number, null, and undefined at the classification function and verifies each is handled without throwing.\"}],\"next_steps\":[\"Read scripts/lib/retry.mjs and trace how it is called from glm-client.mjs — verify there is any mechanism to cancel in-flight retries when the caller gives up or a new request supersedes an old one\",\"Read scripts/lib/bigmodel-errors.mjs classify function — confirm the default/fallthrough branch logs a warning and is tested for unrecognized inputs\",\"Read scripts/lib/tracked-jobs.mjs and scripts/lib/state.mjs together — verify state mutations are atomic and test for concurrent access\",\"Read scripts/lib/glm-client.mjs catch blocks — verify all thrown values are normalized to Error instances before classification\",\"Confirm whether the v0.4.7 tag exists or if this review is against unreleased code on the cumulative branch\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T19:27:07.693Z"
+}

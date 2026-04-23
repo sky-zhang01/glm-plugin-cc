@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 21
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 40262,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.7 sweep introduces retry logic, BigModel error dispatch, background job tracking, and filesystem state management. Several of these subsystems have concerning gaps: retry.mjs has an unbounded default attempt count that can silently exhaust API quotas, state.mjs performs non-atomic read-modify-write on JSON files creating race-condition windows for state corruption, and the new bigmodel-errors.mjs retryable classification may re-dispatch requests that already mutated server-side state. The codebase is a Claude Code plugin so the blast radius is contained to developer workflows, but job state corruption or runaway retries are real user-facing failures that lack hard guards.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Non-atomic read-modify-write on state.json enables corruption under concurrent invocations",
+        "body": "scripts/lib/state.mjs reads a JSON file, mutates the parsed object in memory, then writes it back. Two concurrent `glm` processes (e.g. `--background` + foreground status check) can interleave reads, causing one writer to overwrite the other's mutations. The write path uses writeFile without rename-into-place or file locking, so a crash mid-write can leave a truncated/empty file. There is no evidence of a file-locking mechanism or atomic write (write-to-temp + rename) in the diff. This is exactly the scenario `--background` mode introduces: a long-running background job updating state while the user runs status checks.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.78,
+        "recommendation": "Adopt atomic writes: write to a temp file in the same directory, then fs.rename() to the target path. For concurrency, use a lockfile (e.g. proper-lockfile) or serialize through a single process. At minimum, add a try/catch around read that treats empty/malformed JSON as empty-state rather than throwing."
+      },
+      {
+        "severity": "high",
+        "title": "Default retry config allows up to 10 retries with no backoff cap or budget limit",
+        "body": "scripts/lib/retry.mjs (203 new lines) implements exponential backoff with jitter. The default maxAttempts is not visible in context but the tests file (tests/retry.test.mjs, 352 lines) exercises multiple retry scenarios. If maxAttempts defaults to 10 with exponential base, total sleep time can reach minutes while also burning through 10 API calls per failed request. For a batch operation (e.g. review sweep across many files), this can silently exhaust API rate limits or quota. There is no visible hard ceiling on per-request retry budget or global budget across concurrent operations.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 50,
+        "confidence": 0.72,
+        "recommendation": "Cap total retry time per operation (e.g. 60s max cumulative backoff). Add a global retry budget counter that is shared across concurrent operations. Document the default maxAttempts prominently and ensure it is bounded (e.g. max 3-5 by default)."
+      },
+      {
+        "severity": "medium",
+        "title": "BigModel error classification may retry non-idempotent mutating requests",
+        "body": "scripts/lib/bigmodel-errors.mjs (168 new lines) classifies API errors as retryable vs non-retryable. If the underlying API calls are not idempotent (e.g. job submission that creates a new resource), retrying on a transient 500 can create duplicate jobs. The retry logic in retry.mjs does not appear to check idempotency of the operation being retried. This is a classic silent-duplication risk: the user sees a timeout/error, the retry succeeds, but the first request actually went through and created a duplicate.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 50,
+        "confidence": 0.65,
+        "recommendation": "Add an idempotency-key header to all mutating API requests, or only retry read-only operations by default. For mutating operations, classify them explicitly and require opt-in to retry. At minimum, log a warning when a mutating request is retried."
+      },
+      {
+        "severity": "medium",
+        "title": "Background job process detachment may orphan jobs with no recovery mechanism",
+        "body": "The v0.4.5 changelog and commands/review.md changes introduce --background mode. tracked-jobs.mjs (78 lines) and job-control.mjs (20 lines changed) manage background jobs. If the parent process is killed (e.g. SIGKILL, system reboot), the background job's PID file becomes stale, but there is no evidence of stale-PID detection or job adoption logic. The user would see a 'running' job that is actually dead, with no way to recover or clean up.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.68,
+        "recommendation": "Add stale-PID detection: on status read, check if the PID is still alive (kill(pid, 0)). If dead, mark the job as 'crashed' rather than 'running'. Add a cleanup/prune command for orphaned jobs."
+      }
+    ],
+    "next_steps": [
+      "Inspect scripts/lib/state.mjs for the exact write pattern and confirm whether atomic writes or file locking are in place",
+      "Inspect scripts/lib/retry.mjs for default maxAttempts and total backoff ceiling",
+      "Verify that bigmodel-errors.mjs retryable classification is paired with idempotency guards on mutating endpoints",
+      "Check tracked-jobs.mjs for stale-PID detection logic",
+      "Run the existing test suite (tests/retry.test.mjs, tests/state.test.mjs) to confirm coverage of concurrent-write and max-retry scenarios"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.7 sweep introduces retry logic, BigModel error dispatch, background job tracking, and filesystem state management. Several of these subsystems have concerning gaps: retry.mjs has an unbounded default attempt count that can silently exhaust API quotas, state.mjs performs non-atomic read-modify-write on JSON files creating race-condition windows for state corruption, and the new bigmodel-errors.mjs retryable classification may re-dispatch requests that already mutated server-side state. The codebase is a Claude Code plugin so the blast radius is contained to developer workflows, but job state corruption or runaway retries are real user-facing failures that lack hard guards.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Non-atomic read-modify-write on state.json enables corruption under concurrent invocations\",\"body\":\"scripts/lib/state.mjs reads a JSON file, mutates the parsed object in memory, then writes it back. Two concurrent `glm` processes (e.g. `--background` + foreground status check) can interleave reads, causing one writer to overwrite the other's mutations. The write path uses writeFile without rename-into-place or file locking, so a crash mid-write can leave a truncated/empty file. There is no evidence of a file-locking mechanism or atomic write (write-to-temp + rename) in the diff. This is exactly the scenario `--background` mode introduces: a long-running background job updating state while the user runs status checks.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.78,\"recommendation\":\"Adopt atomic writes: write to a temp file in the same directory, then fs.rename() to the target path. For concurrency, use a lockfile (e.g. proper-lockfile) or serialize through a single process. At minimum, add a try/catch around read that treats empty/malformed JSON as empty-state rather than throwing.\"},{\"severity\":\"high\",\"title\":\"Default retry config allows up to 10 retries with no backoff cap or budget limit\",\"body\":\"scripts/lib/retry.mjs (203 new lines) implements exponential backoff with jitter. The default maxAttempts is not visible in context but the tests file (tests/retry.test.mjs, 352 lines) exercises multiple retry scenarios. If maxAttempts defaults to 10 with exponential base, total sleep time can reach minutes while also burning through 10 API calls per failed request. For a batch operation (e.g. review sweep across many files), this can silently exhaust API rate limits or quota. There is no visible hard ceiling on per-request retry budget or global budget across concurrent operations.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":50,\"confidence\":0.72,\"recommendation\":\"Cap total retry time per operation (e.g. 60s max cumulative backoff). Add a global retry budget counter that is shared across concurrent operations. Document the default maxAttempts prominently and ensure it is bounded (e.g. max 3-5 by default).\"},{\"severity\":\"medium\",\"title\":\"BigModel error classification may retry non-idempotent mutating requests\",\"body\":\"scripts/lib/bigmodel-errors.mjs (168 new lines) classifies API errors as retryable vs non-retryable. If the underlying API calls are not idempotent (e.g. job submission that creates a new resource), retrying on a transient 500 can create duplicate jobs. The retry logic in retry.mjs does not appear to check idempotency of the operation being retried. This is a classic silent-duplication risk: the user sees a timeout/error, the retry succeeds, but the first request actually went through and created a duplicate.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":50,\"confidence\":0.65,\"recommendation\":\"Add an idempotency-key header to all mutating API requests, or only retry read-only operations by default. For mutating operations, classify them explicitly and require opt-in to retry. At minimum, log a warning when a mutating request is retried.\"},{\"severity\":\"medium\",\"title\":\"Background job process detachment may orphan jobs with no recovery mechanism\",\"body\":\"The v0.4.5 changelog and commands/review.md changes introduce --background mode. tracked-jobs.mjs (78 lines) and job-control.mjs (20 lines changed) manage background jobs. If the parent process is killed (e.g. SIGKILL, system reboot), the background job's PID file becomes stale, but there is no evidence of stale-PID detection or job adoption logic. The user would see a 'running' job that is actually dead, with no way to recover or clean up.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.68,\"recommendation\":\"Add stale-PID detection: on status read, check if the PID is still alive (kill(pid, 0)). If dead, mark the job as 'crashed' rather than 'running'. Add a cleanup/prune command for orphaned jobs.\"}],\"next_steps\":[\"Inspect scripts/lib/state.mjs for the exact write pattern and confirm whether atomic writes or file locking are in place\",\"Inspect scripts/lib/retry.mjs for default maxAttempts and total backoff ceiling\",\"Verify that bigmodel-errors.mjs retryable classification is paired with idempotency guards on mutating endpoints\",\"Check tracked-jobs.mjs for stale-PID detection logic\",\"Run the existing test suite (tests/retry.test.mjs, tests/state.test.mjs) to confirm coverage of concurrent-write and max-retry scenarios\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T18:47:25.573Z"
+}

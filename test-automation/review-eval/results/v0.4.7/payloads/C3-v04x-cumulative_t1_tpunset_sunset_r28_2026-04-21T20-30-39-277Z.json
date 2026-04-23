@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 28
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 81905,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff removes a core library file (process.mjs) with no visible migration guarantee, introduces 203 lines of new retry logic and 168 lines of new error-dispatch logic without end-to-end or integration tests for the client layer that depends on them, and leaves two critical stateful modules (glm-client.mjs, tracked-jobs.mjs) without dedicated unit-test files despite significant rewrites. The surface area (84 files, ~6600 insertions) is large enough that a sampling sweep cannot rule out silent regressions in job lifecycle, retry idempotency, or error-classification completeness.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "process.mjs deleted without visible migration evidence",
+        "body": "scripts/lib/process.mjs (67 lines) was removed entirely in this diff. The file existed in v0.4.0 and provided process-management utilities. Other modules (glm-companion.mjs, job-control.mjs, state.mjs) were modified in the same diff, but the stat does not show a clearly corresponding new file that subsumes process.mjs responsibilities. If any caller still imports from this path, the failure will be a runtime module-not-found error that only triggers on the affected code path — a classic silent regression that passes unit tests if those paths aren't exercised.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.72,
+        "recommendation": "Verify that no remaining file imports from scripts/lib/process.mjs (grep -r \"from.*process.mjs\" or \"require.*process\"). If utilities were inlined elsewhere, add a import-resolution CI check or a test that exercises every import graph entry point to catch stale references before release."
+      },
+      {
+        "severity": "high",
+        "title": "glm-client.mjs heavily rewritten with no dedicated test file",
+        "body": "scripts/lib/glm-client.mjs shows 155 lines changed — it is the primary API client and depends on the new retry.mjs and bigmodel-errors.mjs modules. There is no tests/glm-client.test.mjs in the diff. The retry and error-classification logic it consumes is tested in isolation, but the integration point (client deciding what to retry, how to classify responses, how to surface errors) is untested. This is the most user-facing code path and the most likely place for a subtle regression (e.g., retrying a non-idempotent mutation, swallowing a credential error, misclassifying a rate-limit response).",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.78,
+        "recommendation": "Add tests/glm-client.test.mjs covering at minimum: (1) retry on transient errors with idempotency, (2) no-retry on auth/permission errors, (3) error-classification mapping for all known BigModel error codes, (4) timeout behavior, (5) concurrent request state isolation. Block the release until this coverage exists."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs rewritten without test coverage for lifecycle transitions",
+        "body": "scripts/lib/tracked-jobs.mjs (78 lines changed) manages persistent job state. Concurrent or interrupted operations (e.g., SIGTERM during a write, two processes writing the same job file) could corrupt state. No tests/tracked-jobs.test.mjs exists. The state.mjs tests exist but may not cover the higher-level job-tracking semantics (job creation → running → completion/failure → cleanup) that tracked-jobs.mjs encapsulates.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.71,
+        "recommendation": "Add tests for tracked-jobs.mjs covering: concurrent writes to the same job file, orphaned job cleanup, partial-write resilience (write interrupted mid-JSON), and the full lifecycle state machine. Consider atomic writes (write-to-temp then rename) if not already implemented."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error completeness cannot be verified without upstream API spec",
+        "body": "scripts/lib/bigmodel-errors.mjs (168 new lines) introduces a BigModel-specific error dispatch system. The tests/bigmodel-errors.test.mjs exists (189 lines), but the error classification is only as good as the known error set. If BigModel introduces new error codes or changes response shapes, misclassified errors fall through to generic handling — potentially retrying non-retryable errors or silently swallowing failures. There is no visible guard for unmapped error codes (e.g., a strict-mode warning or metric).",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.62,
+        "recommendation": "Add a catch-all/fallthrough case in the error classifier that logs an explicit 'unmapped error code' warning with the full response payload, and consider a metric or telemetry hook. Add a test that verifies behavior when an unknown error code is received."
+      },
+      {
+        "severity": "medium",
+        "title": "retry.mjs has no visible test for concurrent or reentrant invocations",
+        "body": "scripts/lib/retry.mjs adds 203 lines of retry/backoff logic. tests/retry.test.mjs (352 lines) exists, which is good, but the diff stat alone cannot confirm whether it tests concurrent retry invocations sharing the same backoff state, or reentrant calls where a retry callback itself triggers another retry. If retry state is mutable and shared, concurrent calls could corrupt the backoff counter or jitter calculation.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.55,
+        "recommendation": "Verify that retry.mjs does not share mutable state across invocations. Add an explicit test case for two concurrent retry chains running simultaneously to confirm isolation. If state is per-invocation, this is low risk; if shared, it is a race condition."
+      }
+    ],
+    "next_steps": [
+      "Run `grep -r \"from.*lib/process\" scripts/` (or equivalent) to confirm no dangling imports from the deleted process.mjs — block if any exist.",
+      "Add tests/glm-client.test.mjs with integration-style coverage for retry + error-classification before cutting v0.4.7.",
+      "Add tests for tracked-jobs.mjs covering concurrent writes, partial writes, and lifecycle state transitions.",
+      "Add a fallthrough warning/log in bigmodel-errors.mjs for unmapped error codes to prevent silent misclassification.",
+      "Verify retry.mjs state isolation across concurrent calls and add a regression test if not already present."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff removes a core library file (process.mjs) with no visible migration guarantee, introduces 203 lines of new retry logic and 168 lines of new error-dispatch logic without end-to-end or integration tests for the client layer that depends on them, and leaves two critical stateful modules (glm-client.mjs, tracked-jobs.mjs) without dedicated unit-test files despite significant rewrites. The surface area (84 files, ~6600 insertions) is large enough that a sampling sweep cannot rule out silent regressions in job lifecycle, retry idempotency, or error-classification completeness.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"process.mjs deleted without visible migration evidence\",\n      \"body\": \"scripts/lib/process.mjs (67 lines) was removed entirely in this diff. The file existed in v0.4.0 and provided process-management utilities. Other modules (glm-companion.mjs, job-control.mjs, state.mjs) were modified in the same diff, but the stat does not show a clearly corresponding new file that subsumes process.mjs responsibilities. If any caller still imports from this path, the failure will be a runtime module-not-found error that only triggers on the affected code path — a classic silent regression that passes unit tests if those paths aren't exercised.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Verify that no remaining file imports from scripts/lib/process.mjs (grep -r \\\"from.*process.mjs\\\" or \\\"require.*process\\\"). If utilities were inlined elsewhere, add a import-resolution CI check or a test that exercises every import graph entry point to catch stale references before release.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"glm-client.mjs heavily rewritten with no dedicated test file\",\n      \"body\": \"scripts/lib/glm-client.mjs shows 155 lines changed — it is the primary API client and depends on the new retry.mjs and bigmodel-errors.mjs modules. There is no tests/glm-client.test.mjs in the diff. The retry and error-classification logic it consumes is tested in isolation, but the integration point (client deciding what to retry, how to classify responses, how to surface errors) is untested. This is the most user-facing code path and the most likely place for a subtle regression (e.g., retrying a non-idempotent mutation, swallowing a credential error, misclassifying a rate-limit response).\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Add tests/glm-client.test.mjs covering at minimum: (1) retry on transient errors with idempotency, (2) no-retry on auth/permission errors, (3) error-classification mapping for all known BigModel error codes, (4) timeout behavior, (5) concurrent request state isolation. Block the release until this coverage exists.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"tracked-jobs.mjs rewritten without test coverage for lifecycle transitions\",\n      \"body\": \"scripts/lib/tracked-jobs.mjs (78 lines changed) manages persistent job state. Concurrent or interrupted operations (e.g., SIGTERM during a write, two processes writing the same job file) could corrupt state. No tests/tracked-jobs.test.mjs exists. The state.mjs tests exist but may not cover the higher-level job-tracking semantics (job creation → running → completion/failure → cleanup) that tracked-jobs.mjs encapsulates.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.71,\n      \"recommendation\": \"Add tests for tracked-jobs.mjs covering: concurrent writes to the same job file, orphaned job cleanup, partial-write resilience (write interrupted mid-JSON), and the full lifecycle state machine. Consider atomic writes (write-to-temp then rename) if not already implemented.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"bigmodel-errors.mjs error completeness cannot be verified without upstream API spec\",\n      \"body\": \"scripts/lib/bigmodel-errors.mjs (168 new lines) introduces a BigModel-specific error dispatch system. The tests/bigmodel-errors.test.mjs exists (189 lines), but the error classification is only as good as the known error set. If BigModel introduces new error codes or changes response shapes, misclassified errors fall through to generic handling — potentially retrying non-retryable errors or silently swallowing failures. There is no visible guard for unmapped error codes (e.g., a strict-mode warning or metric).\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.62,\n      \"recommendation\": \"Add a catch-all/fallthrough case in the error classifier that logs an explicit 'unmapped error code' warning with the full response payload, and consider a metric or telemetry hook. Add a test that verifies behavior when an unknown error code is received.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"retry.mjs has no visible test for concurrent or reentrant invocations\",\n      \"body\": \"scripts/lib/retry.mjs adds 203 lines of retry/backoff logic. tests/retry.test.mjs (352 lines) exists, which is good, but the diff stat alone cannot confirm whether it tests concurrent retry invocations sharing the same backoff state, or reentrant calls where a retry callback itself triggers another retry. If retry state is mutable and shared, concurrent calls could corrupt the backoff counter or jitter calculation.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Verify that retry.mjs does not share mutable state across invocations. Add an explicit test case for two concurrent retry chains running simultaneously to confirm isolation. If state is per-invocation, this is low risk; if shared, it is a race condition.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `grep -r \\\"from.*lib/process\\\" scripts/` (or equivalent) to confirm no dangling imports from the deleted process.mjs — block if any exist.\",\n    \"Add tests/glm-client.test.mjs with integration-style coverage for retry + error-classification before cutting v0.4.7.\",\n    \"Add tests for tracked-jobs.mjs covering concurrent writes, partial writes, and lifecycle state transitions.\",\n    \"Add a fallthrough warning/log in bigmodel-errors.mjs for unmapped error codes to prevent silent misclassification.\",\n    \"Verify retry.mjs state isolation across concurrent calls and add a regression test if not already present.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T20:30:39.311Z"
+}

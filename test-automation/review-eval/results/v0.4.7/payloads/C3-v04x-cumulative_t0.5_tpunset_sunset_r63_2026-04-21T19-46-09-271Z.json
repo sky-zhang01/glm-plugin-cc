@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 63
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 105675,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff spans 84 files and +6623/-480 lines, introducing a new retry subsystem, BigModel error dispatch, and deleting a core module (process.mjs). The structural scope alone is alarming, but the concrete risk is a deleted module that may still be imported at runtime, and an untested integration path between the new retry/error-dispatch layer and the modified glm-client. Unit test coverage exists for individual modules but no integration or adversarial test validates the full retry→error-classify→client path under concurrent or partial-failure conditions.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "scripts/lib/process.mjs deleted — risk of dangling imports causing runtime crash",
+        "body": "The diff stat shows scripts/lib/process.mjs was entirely removed (67 lines deleted). While scripts/check-imports.mjs was also modified (5 lines changed), the deletion of a library module that other scripts may import creates a risk of ERR_MODULE_NOT_FOUND at runtime. The check-imports script may not cover all dynamic import paths or entry points. A single missed reference in glm-companion.mjs, glm-client.mjs, or any command handler will crash the tool at invocation time with no graceful fallback.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.72,
+        "recommendation": "Run `grep -r \"from.*['\\\"].*process\\.mjs\" scripts/ commands/` and `grep -r \"import.*process\" scripts/` against the full tree to confirm zero references remain. Add a CI check that grepping for the deleted module path returns empty, or add the check to check-imports.mjs with an explicit denylist of removed paths."
+      },
+      {
+        "severity": "high",
+        "title": "Retry + error-dispatch + client integration path has no adversarial or integration test",
+        "body": "Three deeply coupled modules were changed together: retry.mjs (203 lines, new), bigmodel-errors.mjs (168 lines, new), and glm-client.mjs (155 lines changed). The commit message confirms this is 'BigModel error dispatch + auto retry/backoff.' Unit tests exist for retry.test.mjs (352 lines) and bigmodel-errors.test.mjs (189 lines), but there is no test file exercising the full chain: client request → error thrown → bigmodel-errors classifies → retry decides → client retries. Misclassification at any boundary (e.g., a 429 treated as fatal, or a 403 retried indefinitely) would be invisible until production. The test/ directory has no file matching *integration* or *client-retry* or *e2e*.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.78,
+        "recommendation": "Add an integration test that exercises glm-client through a mock server returning each BigModel error code, verifying that retry.mjs is invoked with correct parameters and that non-retriable errors propagate immediately without retry. At minimum, test the boundary: a mock returning HTTP 429 with Retry-After, HTTP 429 without Retry-After, HTTP 403, HTTP 500, and a network timeout."
+      },
+      {
+        "severity": "medium",
+        "title": "Job state management modules modified concurrently — race and corruption risk",
+        "body": "state.mjs (32 lines changed), job-control.mjs (20 lines changed), and tracked-jobs.mjs (78 lines changed) were all modified in this cumulative diff. These modules manage persisted job state. Concurrent modifications to interrelated state files can introduce TOCTOU races, partial writes, or state corruption — especially if retry.mjs causes the same job to be processed multiple times. The tests (state.test.mjs, result-propagation.test.mjs) are 81 and 69 lines respectively, which is thin for state management that could lose user job results under concurrent invocation.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.58,
+        "recommendation": "Add a concurrent-state test: two processes writing to the same state file simultaneously, and verify no data loss or corruption. Ensure state.mjs uses atomic writes (write-to-temp then rename) and that tracked-jobs.mjs handles the case where a job ID already exists in the tracking store due to a retry."
+      },
+      {
+        "severity": "medium",
+        "title": "render.mjs rewrite (79 lines changed) may swallow or misformat job output on error",
+        "body": "scripts/lib/render.mjs had 79 lines changed. This module is responsible for presenting job results to users. If the retry/error-dispatch layer mutates or wraps errors in a way render.mjs doesn't expect, the user could see empty output, a raw stack trace, or — worse — a stale result from a previous successful run presented as the current result. The render.test.mjs is 193 lines which is reasonable, but job-render.test.mjs (144 lines) should be checked for coverage of the error-path rendering specifically when retry exhausts attempts.",
+        "file": "scripts/lib/render.mjs",
+        "line_start": 1,
+        "line_end": 79,
+        "confidence": 0.52,
+        "recommendation": "Verify render.mjs handles the specific error shapes produced by retry.mjs after max-retries-exhausted, and that it does not render stale/partial results. Add a test case where a job fails after all retries and confirm the rendered output clearly indicates total failure rather than showing partial or misleading data."
+      }
+    ],
+    "next_steps": [
+      "Run `grep -rn 'process\\.mjs\\|from.*process' scripts/ commands/` to confirm the deleted module has zero references before merge.",
+      "Add an integration test covering glm-client → bigmodel-errors → retry under mock HTTP failures (429, 403, 500, timeout) before promoting beyond develop.",
+      "Verify state.mjs uses atomic file writes (write-to-temp + rename) and test concurrent access to the same state file.",
+      "Audit render.mjs error-path rendering against the new error shapes from retry.mjs max-retries-exhausted.",
+      "Given the 6600+ line diff scope, consider a staged rollout: land retry/error-dispatch in a feature branch with a burn-in period before merging to develop."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff spans 84 files and +6623/-480 lines, introducing a new retry subsystem, BigModel error dispatch, and deleting a core module (process.mjs). The structural scope alone is alarming, but the concrete risk is a deleted module that may still be imported at runtime, and an untested integration path between the new retry/error-dispatch layer and the modified glm-client. Unit test coverage exists for individual modules but no integration or adversarial test validates the full retry→error-classify→client path under concurrent or partial-failure conditions.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"scripts/lib/process.mjs deleted — risk of dangling imports causing runtime crash\",\n      \"body\": \"The diff stat shows scripts/lib/process.mjs was entirely removed (67 lines deleted). While scripts/check-imports.mjs was also modified (5 lines changed), the deletion of a library module that other scripts may import creates a risk of ERR_MODULE_NOT_FOUND at runtime. The check-imports script may not cover all dynamic import paths or entry points. A single missed reference in glm-companion.mjs, glm-client.mjs, or any command handler will crash the tool at invocation time with no graceful fallback.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Run `grep -r \\\"from.*['\\\\\\\"].*process\\\\.mjs\\\" scripts/ commands/` and `grep -r \\\"import.*process\\\" scripts/` against the full tree to confirm zero references remain. Add a CI check that grepping for the deleted module path returns empty, or add the check to check-imports.mjs with an explicit denylist of removed paths.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"Retry + error-dispatch + client integration path has no adversarial or integration test\",\n      \"body\": \"Three deeply coupled modules were changed together: retry.mjs (203 lines, new), bigmodel-errors.mjs (168 lines, new), and glm-client.mjs (155 lines changed). The commit message confirms this is 'BigModel error dispatch + auto retry/backoff.' Unit tests exist for retry.test.mjs (352 lines) and bigmodel-errors.test.mjs (189 lines), but there is no test file exercising the full chain: client request → error thrown → bigmodel-errors classifies → retry decides → client retries. Misclassification at any boundary (e.g., a 429 treated as fatal, or a 403 retried indefinitely) would be invisible until production. The test/ directory has no file matching *integration* or *client-retry* or *e2e*.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Add an integration test that exercises glm-client through a mock server returning each BigModel error code, verifying that retry.mjs is invoked with correct parameters and that non-retriable errors propagate immediately without retry. At minimum, test the boundary: a mock returning HTTP 429 with Retry-After, HTTP 429 without Retry-After, HTTP 403, HTTP 500, and a network timeout.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Job state management modules modified concurrently — race and corruption risk\",\n      \"body\": \"state.mjs (32 lines changed), job-control.mjs (20 lines changed), and tracked-jobs.mjs (78 lines changed) were all modified in this cumulative diff. These modules manage persisted job state. Concurrent modifications to interrelated state files can introduce TOCTOU races, partial writes, or state corruption — especially if retry.mjs causes the same job to be processed multiple times. The tests (state.test.mjs, result-propagation.test.mjs) are 81 and 69 lines respectively, which is thin for state management that could lose user job results under concurrent invocation.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.58,\n      \"recommendation\": \"Add a concurrent-state test: two processes writing to the same state file simultaneously, and verify no data loss or corruption. Ensure state.mjs uses atomic writes (write-to-temp then rename) and that tracked-jobs.mjs handles the case where a job ID already exists in the tracking store due to a retry.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"render.mjs rewrite (79 lines changed) may swallow or misformat job output on error\",\n      \"body\": \"scripts/lib/render.mjs had 79 lines changed. This module is responsible for presenting job results to users. If the retry/error-dispatch layer mutates or wraps errors in a way render.mjs doesn't expect, the user could see empty output, a raw stack trace, or — worse — a stale result from a previous successful run presented as the current result. The render.test.mjs is 193 lines which is reasonable, but job-render.test.mjs (144 lines) should be checked for coverage of the error-path rendering specifically when retry exhausts attempts.\",\n      \"file\": \"scripts/lib/render.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 79,\n      \"confidence\": 0.52,\n      \"recommendation\": \"Verify render.mjs handles the specific error shapes produced by retry.mjs after max-retries-exhausted, and that it does not render stale/partial results. Add a test case where a job fails after all retries and confirm the rendered output clearly indicates total failure rather than showing partial or misleading data.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `grep -rn 'process\\\\.mjs\\\\|from.*process' scripts/ commands/` to confirm the deleted module has zero references before merge.\",\n    \"Add an integration test covering glm-client → bigmodel-errors → retry under mock HTTP failures (429, 403, 500, timeout) before promoting beyond develop.\",\n    \"Verify state.mjs uses atomic file writes (write-to-temp + rename) and test concurrent access to the same state file.\",\n    \"Audit render.mjs error-path rendering against the new error shapes from retry.mjs max-retries-exhausted.\",\n    \"Given the 6600+ line diff scope, consider a staged rollout: land retry/error-dispatch in a feature branch with a burn-in period before merging to develop.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T19:46:09.301Z"
+}

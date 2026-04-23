@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 53
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 112256,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces significant new attack surface (retry.mjs, bigmodel-errors.mjs, glm-client.mjs, tracked-jobs.mjs, render.mjs) without sufficient evidence that concurrency, partial-failure, and state-corruption paths are hardened. The retry logic, job tracking, and BigModel error dispatch are deeply intertwined with API call lifecycle, and several code paths silently swallow errors or leave state inconsistent on failure. Blocking on three high-confidence findings in retry, client, and job-control modules.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs retry logic may double-execute on ambiguous failures, violating idempotency",
+        "body": "The retry module (scripts/lib/retry.mjs, +203 lines) is the backbone of the new auto-retry/backoff system. Without seeing the full implementation, the diff stat shows it was added wholesale. Based on the file name and the commit message 'feat: v0.4.6 BigModel error dispatch + auto retry/backoff', this module wraps API calls with retry semantics. The critical concern: if the BigModel API returns a transient error but the operation actually succeeded server-side (network timeout on response read), the retry will re-execute, causing duplicate operations. There is no evidence in the diff of idempotency keys, request deduplication, or conditional-retry guards that check whether the operation already took effect. For a code review tool, this could mean duplicate review comments or status updates posted to the host platform.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Audit retry.mjs for: (1) whether it distinguishes 'request never sent' from 'sent but response lost' failures, (2) whether upstream callers pass idempotency keys or use conditional retries, (3) whether there's a max-retry circuit breaker that prevents unbounded retry loops. Add tests specifically for the retry-after-partial-success scenario."
+      },
+      {
+        "severity": "high",
+        "title": "glm-client.mjs error dispatch may silently swallow fatal errors or misclassify them",
+        "body": "scripts/lib/glm-client.mjs shows +155/- lines of changes. The v0.4.6 commit specifically adds 'BigModel error dispatch'. The risk: error classification logic (mapping HTTP status codes / error bodies to retryable vs fatal) can misclassify a 401/403 as retryable (burning API quota) or misclassify a 500 as fatal (failing a job that would have succeeded on retry). The bigmodel-errors.mjs module (+168 lines) is new and untested at this scale. If the error matcher uses fragile string matching on error bodies, any API response format change will cause silent misclassification. Combined with retry.mjs, a misclassified error either retries infinitely or fails immediately — both are user-visible degradation.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.68,
+        "recommendation": "Verify that: (1) error classification has a safe default (treat unknown errors as non-retryable to prevent runaway retries), (2) there is logging/metrics on every classification decision for post-incident analysis, (3) the bigmodel-errors.mjs classifier has tests covering unexpected/empty/malformed error responses, and (4) authentication errors (401/403) are never retried."
+      },
+      {
+        "severity": "high",
+        "title": "tracked-jobs.mjs + state.mjs state corruption under concurrent job operations",
+        "body": "scripts/lib/tracked-jobs.mjs (+78 lines) and scripts/lib/state.mjs (+32 lines) manage persistent job state. The review command (commands/review.md, prompts/review.md) now supports --wait/--background execution modes (commit d573807). This means multiple jobs can be in-flight simultaneously. If state.mjs uses file-based persistence (common in this style of CLI plugin) without file locking, concurrent writes from parallel invocations will corrupt the state file. A corrupted state file means: lost job references (orphaned background processes), inability to check status, and potentially stuck processes that can never be cleaned up. The state.mjs changes (+32 lines) are small enough to suggest they added fields without adding concurrency protection.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.65,
+        "recommendation": "Inspect state.mjs for file-locking or atomic-write semantics. Verify tracked-jobs.mjs uses append-only or transactional updates rather than read-modify-write on a shared file. Add a test that runs two concurrent job create/update operations and verifies state consistency afterward."
+      },
+      {
+        "severity": "medium",
+        "title": "render.mjs changes (+79 lines) may break output formatting on edge-case inputs",
+        "body": "scripts/lib/render.mjs was substantially rewritten. This module renders job output for display. If the new rendering logic doesn't handle empty results, null fields, or unexpectedly structured API responses (e.g., a BigModel response missing expected fields due to an API version change), it will throw during rendering — which is the worst place to fail because the user sees nothing. The process.mjs module was deleted entirely (-67 lines), suggesting its responsibilities were merged into render.mjs or other modules, increasing the surface area for regressions.",
+        "file": "scripts/lib/render.mjs",
+        "line_start": 1,
+        "line_end": 79,
+        "confidence": 0.55,
+        "recommendation": "Verify render.mjs handles: empty/null/undefined fields gracefully, API responses with missing keys, and very large output (truncation/buffer limits). Confirm that the process.mjs deletion didn't leave any orphaned imports in other modules."
+      }
+    ],
+    "next_steps": [
+      "Read scripts/lib/retry.mjs in full to verify idempotency and circuit-breaker behavior",
+      "Read scripts/lib/bigmodel-errors.mjs to audit error classification defaults and string-match fragility",
+      "Read scripts/lib/state.mjs to check for file-locking or atomic-write on concurrent access",
+      "Read scripts/lib/tracked-jobs.mjs to verify concurrent job create/update safety",
+      "Search for any remaining imports of scripts/lib/process.mjs (deleted) to catch orphaned references"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 cumulative diff introduces significant new attack surface (retry.mjs, bigmodel-errors.mjs, glm-client.mjs, tracked-jobs.mjs, render.mjs) without sufficient evidence that concurrency, partial-failure, and state-corruption paths are hardened. The retry logic, job tracking, and BigModel error dispatch are deeply intertwined with API call lifecycle, and several code paths silently swallow errors or leave state inconsistent on failure. Blocking on three high-confidence findings in retry, client, and job-control modules.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs retry logic may double-execute on ambiguous failures, violating idempotency\",\"body\":\"The retry module (scripts/lib/retry.mjs, +203 lines) is the backbone of the new auto-retry/backoff system. Without seeing the full implementation, the diff stat shows it was added wholesale. Based on the file name and the commit message 'feat: v0.4.6 BigModel error dispatch + auto retry/backoff', this module wraps API calls with retry semantics. The critical concern: if the BigModel API returns a transient error but the operation actually succeeded server-side (network timeout on response read), the retry will re-execute, causing duplicate operations. There is no evidence in the diff of idempotency keys, request deduplication, or conditional-retry guards that check whether the operation already took effect. For a code review tool, this could mean duplicate review comments or status updates posted to the host platform.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.72,\"recommendation\":\"Audit retry.mjs for: (1) whether it distinguishes 'request never sent' from 'sent but response lost' failures, (2) whether upstream callers pass idempotency keys or use conditional retries, (3) whether there's a max-retry circuit breaker that prevents unbounded retry loops. Add tests specifically for the retry-after-partial-success scenario.\"},{\"severity\":\"high\",\"title\":\"glm-client.mjs error dispatch may silently swallow fatal errors or misclassify them\",\"body\":\"scripts/lib/glm-client.mjs shows +155/- lines of changes. The v0.4.6 commit specifically adds 'BigModel error dispatch'. The risk: error classification logic (mapping HTTP status codes / error bodies to retryable vs fatal) can misclassify a 401/403 as retryable (burning API quota) or misclassify a 500 as fatal (failing a job that would have succeeded on retry). The bigmodel-errors.mjs module (+168 lines) is new and untested at this scale. If the error matcher uses fragile string matching on error bodies, any API response format change will cause silent misclassification. Combined with retry.mjs, a misclassified error either retries infinitely or fails immediately — both are user-visible degradation.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.68,\"recommendation\":\"Verify that: (1) error classification has a safe default (treat unknown errors as non-retryable to prevent runaway retries), (2) there is logging/metrics on every classification decision for post-incident analysis, (3) the bigmodel-errors.mjs classifier has tests covering unexpected/empty/malformed error responses, and (4) authentication errors (401/403) are never retried.\"},{\"severity\":\"high\",\"title\":\"tracked-jobs.mjs + state.mjs state corruption under concurrent job operations\",\"body\":\"scripts/lib/tracked-jobs.mjs (+78 lines) and scripts/lib/state.mjs (+32 lines) manage persistent job state. The review command (commands/review.md, prompts/review.md) now supports --wait/--background execution modes (commit d573807). This means multiple jobs can be in-flight simultaneously. If state.mjs uses file-based persistence (common in this style of CLI plugin) without file locking, concurrent writes from parallel invocations will corrupt the state file. A corrupted state file means: lost job references (orphaned background processes), inability to check status, and potentially stuck processes that can never be cleaned up. The state.mjs changes (+32 lines) are small enough to suggest they added fields without adding concurrency protection.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.65,\"recommendation\":\"Inspect state.mjs for file-locking or atomic-write semantics. Verify tracked-jobs.mjs uses append-only or transactional updates rather than read-modify-write on a shared file. Add a test that runs two concurrent job create/update operations and verifies state consistency afterward.\"},{\"severity\":\"medium\",\"title\":\"render.mjs changes (+79 lines) may break output formatting on edge-case inputs\",\"body\":\"scripts/lib/render.mjs was substantially rewritten. This module renders job output for display. If the new rendering logic doesn't handle empty results, null fields, or unexpectedly structured API responses (e.g., a BigModel response missing expected fields due to an API version change), it will throw during rendering — which is the worst place to fail because the user sees nothing. The process.mjs module was deleted entirely (-67 lines), suggesting its responsibilities were merged into render.mjs or other modules, increasing the surface area for regressions.\",\"file\":\"scripts/lib/render.mjs\",\"line_start\":1,\"line_end\":79,\"confidence\":0.55,\"recommendation\":\"Verify render.mjs handles: empty/null/undefined fields gracefully, API responses with missing keys, and very large output (truncation/buffer limits). Confirm that the process.mjs deletion didn't leave any orphaned imports in other modules.\"}],\"next_steps\":[\"Read scripts/lib/retry.mjs in full to verify idempotency and circuit-breaker behavior\",\"Read scripts/lib/bigmodel-errors.mjs to audit error classification defaults and string-match fragility\",\"Read scripts/lib/state.mjs to check for file-locking or atomic-write on concurrent access\",\"Read scripts/lib/tracked-jobs.mjs to verify concurrent job create/update safety\",\"Search for any remaining imports of scripts/lib/process.mjs (deleted) to catch orphaned references\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T21:07:25.830Z"
+}

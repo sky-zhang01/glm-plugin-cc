@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 18
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 57556,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit bundles an npm scope rename with a functional change to the setup command. The scope rename is a silent breaking change for any existing consumer referencing the old package name — scripts, lockfiles, plugin registries, or pinned installs will fail to resolve. These two concerns should have been separate commits at minimum. The setup command change introduces interactive prompting with no documented escape hatch for non-interactive or scripted invocations, risking hangs in CI/CD or automated workflows.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "NPM scope rename is an undeclared breaking change for existing installs",
+        "body": "The package scope is renamed across package.json, .claude-plugin/marketplace.json, and .claude-plugin/plugin.json. Any existing user or automation referencing the old scoped package name (e.g. in install scripts, CI pipelines, lockfiles, or plugin manifests) will silently fail to resolve. The CHANGELOG entry at v0.4.7 does not call this out as a breaking change, and there is no evidence of a deprecation path, alias, or migration guide for the old scope name. This is a version-skip / compatibility regression that will be invisible until someone tries to install or update.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.88,
+        "recommendation": "Either revert the scope rename to a dedicated major-version bump with a migration guide, or publish a transitional package under the old scope that redirects/warns to the new one. Update CHANGELOG.md to explicitly call out the scope change as a breaking change with before/after install instructions."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive setup menu may hang or misbehave in non-interactive contexts",
+        "body": "commands/setup.md adds an interactive menu when the tool is already configured. If the setup command is invoked in a non-TTY environment (CI, scripted provisioning, Docker builds), the interactive prompt has no stdin to read from and will either hang indefinitely or error with an unhelpful message. There is no visible flag or environment-variable guard to skip interactivity, and no timeout or fallback behavior documented.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.72,
+        "recommendation": "Add a non-interactive / headless mode to the setup command (e.g. a flag like --non-interactive or --reconfigure that accepts structured input). Document the expected behavior when stdin is absent or closed. Ensure the command exits with a clear error code rather than hanging."
+      },
+      {
+        "severity": "low",
+        "title": "Single commit bundles breaking refactor with feature addition, complicating rollback",
+        "body": "The npm scope rename and the interactive menu feature are landed in the same commit. If the interactive menu introduces a regression that requires a revert, the scope rename — which may already have downstream consumers — gets reverted with it, or vice versa. This creates a partial-failure rollback hazard.",
+        "file": "CHANGELOG.md",
+        "line_start": 1,
+        "line_end": 21,
+        "confidence": 0.8,
+        "recommendation": "Split the scope rename and the setup-menu change into separate commits so each can be independently reverted or cherry-picked. At minimum, document the coupling in the CHANGELOG so that anyone performing a partial rollback is aware of the risk."
+      }
+    ],
+    "next_steps": [
+      "Verify whether the old npm scope name still resolves or whether it is now a dead reference; if dead, assess blast radius across known consumers.",
+      "Read the full diff of commands/setup.md to confirm whether there is any non-interactive fallback or TTY detection logic; if absent, add one before shipping.",
+      "Confirm that .claude-plugin/marketplace.json and plugin.json references to the new scope are consistent and that the plugin registry has been updated to serve the new name.",
+      "Consider bumping to v0.5.0 or adding a BREAKING header in the CHANGELOG if the scope rename is intentional and irreversible."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"This commit bundles an npm scope rename with a functional change to the setup command. The scope rename is a silent breaking change for any existing consumer referencing the old package name — scripts, lockfiles, plugin registries, or pinned installs will fail to resolve. These two concerns should have been separate commits at minimum. The setup command change introduces interactive prompting with no documented escape hatch for non-interactive or scripted invocations, risking hangs in CI/CD or automated workflows.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"NPM scope rename is an undeclared breaking change for existing installs\",\n      \"body\": \"The package scope is renamed across package.json, .claude-plugin/marketplace.json, and .claude-plugin/plugin.json. Any existing user or automation referencing the old scoped package name (e.g. in install scripts, CI pipelines, lockfiles, or plugin manifests) will silently fail to resolve. The CHANGELOG entry at v0.4.7 does not call this out as a breaking change, and there is no evidence of a deprecation path, alias, or migration guide for the old scope name. This is a version-skip / compatibility regression that will be invisible until someone tries to install or update.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.88,\n      \"recommendation\": \"Either revert the scope rename to a dedicated major-version bump with a migration guide, or publish a transitional package under the old scope that redirects/warns to the new one. Update CHANGELOG.md to explicitly call out the scope change as a breaking change with before/after install instructions.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Interactive setup menu may hang or misbehave in non-interactive contexts\",\n      \"body\": \"commands/setup.md adds an interactive menu when the tool is already configured. If the setup command is invoked in a non-TTY environment (CI, scripted provisioning, Docker builds), the interactive prompt has no stdin to read from and will either hang indefinitely or error with an unhelpful message. There is no visible flag or environment-variable guard to skip interactivity, and no timeout or fallback behavior documented.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Add a non-interactive / headless mode to the setup command (e.g. a flag like --non-interactive or --reconfigure that accepts structured input). Document the expected behavior when stdin is absent or closed. Ensure the command exits with a clear error code rather than hanging.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"Single commit bundles breaking refactor with feature addition, complicating rollback\",\n      \"body\": \"The npm scope rename and the interactive menu feature are landed in the same commit. If the interactive menu introduces a regression that requires a revert, the scope rename — which may already have downstream consumers — gets reverted with it, or vice versa. This creates a partial-failure rollback hazard.\",\n      \"file\": \"CHANGELOG.md\",\n      \"line_start\": 1,\n      \"line_end\": 21,\n      \"confidence\": 0.8,\n      \"recommendation\": \"Split the scope rename and the setup-menu change into separate commits so each can be independently reverted or cherry-picked. At minimum, document the coupling in the CHANGELOG so that anyone performing a partial rollback is aware of the risk.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Verify whether the old npm scope name still resolves or whether it is now a dead reference; if dead, assess blast radius across known consumers.\",\n    \"Read the full diff of commands/setup.md to confirm whether there is any non-interactive fallback or TTY detection logic; if absent, add one before shipping.\",\n    \"Confirm that .claude-plugin/marketplace.json and plugin.json references to the new scope are consistent and that the plugin registry has been updated to serve the new name.\",\n    \"Consider bumping to v0.5.0 or adding a BREAKING header in the CHANGELOG if the scope rename is intentional and irreversible.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T17:10:25.236Z"
+}

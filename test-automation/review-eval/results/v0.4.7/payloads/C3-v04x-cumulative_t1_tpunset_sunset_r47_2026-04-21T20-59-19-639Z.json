@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 47
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.5,
+    "citation_false_file_hits": 0,
+    "latency_ms": 130249,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces three materially risky changes: (1) complete deletion of process.mjs with no guarantee all import sites were updated, (2) a 155-line refactor of glm-client.mjs with no dedicated test file, and (3) a new coupled retry+error-dispatch system (retry.mjs 203 lines + bigmodel-errors.mjs 168 lines) where a misclassification in one module silently corrupts retry behavior in the other. Any one of these is plausible cause for a user-visible failure under the sampling-sweep scenario. Blocking until import-safety and client-level test coverage are confirmed.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "process.mjs deleted — surviving imports will throw at runtime",
+        "body": "The diff stat shows scripts/lib/process.mjs had all 67 lines removed (file deleted). The companion script check-imports.mjs was modified (5 lines changed), suggesting import-site migration was attempted. However, static import checking cannot guarantee safety for: (a) dynamic import() calls constructed at runtime, (b) test files or UAT scripts that import from process.mjs, or (c) any downstream consumer not covered by the import checker's scope. A single surviving import causes an immediate MODULE_NOT_FOUND crash at runtime — an error that is invisible until the code path is exercised. This is exactly the kind of failure that passes smoke tests but breaks in production when an uncommon command or edge-case path is hit.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.78,
+        "recommendation": "Before merge: (1) grep the entire repository for 'process' import references including dynamic imports, test files, and UAT scripts. (2) Confirm check-imports.mjs covers dynamic import patterns. (3) Add an explicit CI check that no file in the repo resolves an import to 'process.mjs'. Consider re-exporting a stub from a new process.mjs that throws a helpful deprecation message rather than allowing MODULE_NOT_FOUND."
+      },
+      {
+        "severity": "high",
+        "title": "glm-client.mjs significantly refactored with no dedicated test file",
+        "body": "scripts/lib/glm-client.mjs shows 155 lines changed — the largest single-file change to a core module — yet there is no tests/glm-client.test.mjs in the diff. The tests/ directory gains 14 new test files covering args, bigmodel-errors, fs, job-render, preset-config, render, retry, schema-load, setup-resilience, state, status-resilience, target-label, template-contract, and result-propagation — but NOT the client itself. glm-client.mjs is the integration point with the external API: it handles authentication, request construction, response parsing, and error propagation. Changes here are the most likely source of silent failures (auth header malformation, response field name drift, status code mishandling) that only manifest against a live backend under real request patterns. The sampling-sweep focus area makes this especially relevant.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.85,
+        "recommendation": "Add a tests/glm-client.test.mjs that covers: (1) request construction including auth headers, (2) response parsing for success, error, and edge-case status codes, (3) interaction with the new bigmodel-errors.mjs dispatch, (4) retry delegation to retry.mjs. At minimum, add contract tests that verify the client's public API shape hasn't changed. This is the single highest-risk untested module in the diff."
+      },
+      {
+        "severity": "medium",
+        "title": "Coupled retry + error-dispatch: misclassification causes silent wrong behavior",
+        "body": "The diff introduces two tightly coupled new modules: scripts/lib/retry.mjs (203 lines) and scripts/lib/bigmodel-errors.mjs (168 lines). The retry module presumably delegates error-type decisions to bigmodel-errors. If bigmodel-errors classifies a transient error as non-retryable (or vice versa), the retry module will silently skip retries or retry indefinitely. The test files (retry.test.mjs 352 lines, bigmodel-errors.test.mjs 189 lines) suggest good isolated coverage, but there is no visible integration test for the coupled behavior — specifically, no test that verifies 'when bigmodel-errors classifies X as retryable, retry.mjs actually retries X with the correct backoff'. Under the sampling-sweep scenario, novel error responses from the API could fall into unclassified categories, causing either retry storms or silent drops.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.7,
+        "recommendation": "Add an integration test that exercises the full retry+error-dispatch pipeline with a mock client returning various error responses. Specifically test: (1) unclassified/unknown error codes default to a safe behavior (fail-fast, not retry), (2) the retry budget/maxAttempts cap is enforced regardless of error classification, (3) jitter is applied to backoff to prevent thundering herd. Also verify that bigmodel-errors has a catch-all/default classification that is explicitly logged rather than silently dropped."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs and job-control.mjs changed without test coverage for partial-failure state",
+        "body": "scripts/lib/tracked-jobs.mjs (78 lines changed) and scripts/lib/job-control.mjs (20 lines changed) manage job lifecycle state. Changes to state persistence logic in these modules risk leaving job state in an inconsistent intermediate if a write fails partway through (e.g., disk full, process killed mid-write). There is no tests/tracked-jobs.test.mjs or tests/job-control.test.mjs in the diff. Under concurrent or interrupted execution — exactly the scenario suggested by the --wait/--background execution-mode flags added in v0.4.5 — corrupted job state could cause jobs to be lost, duplicated, or reported with incorrect status.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.65,
+        "recommendation": "Add tests for tracked-jobs.mjs covering: (1) write-then-crash-then-recover scenario (state file partially written), (2) concurrent job registration/deregistration, (3) state file corruption handling (malformed JSON). Ensure state writes are atomic (write-to-temp-then-rename pattern)."
+      }
+    ],
+    "next_steps": [
+      "Run: grep -rn 'process\\.mjs\\|from.*process' scripts/ tests/ commands/ — confirm zero surviving imports to deleted module",
+      "Create tests/glm-client.test.mjs covering auth header construction, response parsing, error dispatch integration, and retry delegation",
+      "Add integration test coupling retry.mjs + bigmodel-errors.mjs: verify unknown/unclassified errors are fail-fast, not silently retried",
+      "Verify tracked-jobs.mjs uses atomic writes (write-to-temp + rename) and add corruption-recovery tests",
+      "Run the full UAT suite against a live backend before tagging v0.4.7"
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff introduces three materially risky changes: (1) complete deletion of process.mjs with no guarantee all import sites were updated, (2) a 155-line refactor of glm-client.mjs with no dedicated test file, and (3) a new coupled retry+error-dispatch system (retry.mjs 203 lines + bigmodel-errors.mjs 168 lines) where a misclassification in one module silently corrupts retry behavior in the other. Any one of these is plausible cause for a user-visible failure under the sampling-sweep scenario. Blocking until import-safety and client-level test coverage are confirmed.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"process.mjs deleted — surviving imports will throw at runtime\",\n      \"body\": \"The diff stat shows scripts/lib/process.mjs had all 67 lines removed (file deleted). The companion script check-imports.mjs was modified (5 lines changed), suggesting import-site migration was attempted. However, static import checking cannot guarantee safety for: (a) dynamic import() calls constructed at runtime, (b) test files or UAT scripts that import from process.mjs, or (c) any downstream consumer not covered by the import checker's scope. A single surviving import causes an immediate MODULE_NOT_FOUND crash at runtime — an error that is invisible until the code path is exercised. This is exactly the kind of failure that passes smoke tests but breaks in production when an uncommon command or edge-case path is hit.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Before merge: (1) grep the entire repository for 'process' import references including dynamic imports, test files, and UAT scripts. (2) Confirm check-imports.mjs covers dynamic import patterns. (3) Add an explicit CI check that no file in the repo resolves an import to 'process.mjs'. Consider re-exporting a stub from a new process.mjs that throws a helpful deprecation message rather than allowing MODULE_NOT_FOUND.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"glm-client.mjs significantly refactored with no dedicated test file\",\n      \"body\": \"scripts/lib/glm-client.mjs shows 155 lines changed — the largest single-file change to a core module — yet there is no tests/glm-client.test.mjs in the diff. The tests/ directory gains 14 new test files covering args, bigmodel-errors, fs, job-render, preset-config, render, retry, schema-load, setup-resilience, state, status-resilience, target-label, template-contract, and result-propagation — but NOT the client itself. glm-client.mjs is the integration point with the external API: it handles authentication, request construction, response parsing, and error propagation. Changes here are the most likely source of silent failures (auth header malformation, response field name drift, status code mishandling) that only manifest against a live backend under real request patterns. The sampling-sweep focus area makes this especially relevant.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.85,\n      \"recommendation\": \"Add a tests/glm-client.test.mjs that covers: (1) request construction including auth headers, (2) response parsing for success, error, and edge-case status codes, (3) interaction with the new bigmodel-errors.mjs dispatch, (4) retry delegation to retry.mjs. At minimum, add contract tests that verify the client's public API shape hasn't changed. This is the single highest-risk untested module in the diff.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Coupled retry + error-dispatch: misclassification causes silent wrong behavior\",\n      \"body\": \"The diff introduces two tightly coupled new modules: scripts/lib/retry.mjs (203 lines) and scripts/lib/bigmodel-errors.mjs (168 lines). The retry module presumably delegates error-type decisions to bigmodel-errors. If bigmodel-errors classifies a transient error as non-retryable (or vice versa), the retry module will silently skip retries or retry indefinitely. The test files (retry.test.mjs 352 lines, bigmodel-errors.test.mjs 189 lines) suggest good isolated coverage, but there is no visible integration test for the coupled behavior — specifically, no test that verifies 'when bigmodel-errors classifies X as retryable, retry.mjs actually retries X with the correct backoff'. Under the sampling-sweep scenario, novel error responses from the API could fall into unclassified categories, causing either retry storms or silent drops.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Add an integration test that exercises the full retry+error-dispatch pipeline with a mock client returning various error responses. Specifically test: (1) unclassified/unknown error codes default to a safe behavior (fail-fast, not retry), (2) the retry budget/maxAttempts cap is enforced regardless of error classification, (3) jitter is applied to backoff to prevent thundering herd. Also verify that bigmodel-errors has a catch-all/default classification that is explicitly logged rather than silently dropped.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"tracked-jobs.mjs and job-control.mjs changed without test coverage for partial-failure state\",\n      \"body\": \"scripts/lib/tracked-jobs.mjs (78 lines changed) and scripts/lib/job-control.mjs (20 lines changed) manage job lifecycle state. Changes to state persistence logic in these modules risk leaving job state in an inconsistent intermediate if a write fails partway through (e.g., disk full, process killed mid-write). There is no tests/tracked-jobs.test.mjs or tests/job-control.test.mjs in the diff. Under concurrent or interrupted execution — exactly the scenario suggested by the --wait/--background execution-mode flags added in v0.4.5 — corrupted job state could cause jobs to be lost, duplicated, or reported with incorrect status.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Add tests for tracked-jobs.mjs covering: (1) write-then-crash-then-recover scenario (state file partially written), (2) concurrent job registration/deregistration, (3) state file corruption handling (malformed JSON). Ensure state writes are atomic (write-to-temp-then-rename pattern).\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run: grep -rn 'process\\\\.mjs\\\\|from.*process' scripts/ tests/ commands/ — confirm zero surviving imports to deleted module\",\n    \"Create tests/glm-client.test.mjs covering auth header construction, response parsing, error dispatch integration, and retry delegation\",\n    \"Add integration test coupling retry.mjs + bigmodel-errors.mjs: verify unknown/unclassified errors are fail-fast, not silently retried\",\n    \"Verify tracked-jobs.mjs uses atomic writes (write-to-temp + rename) and add corruption-recovery tests\",\n    \"Run the full UAT suite against a live backend before tagging v0.4.7\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T20:59:19.662Z"
+}

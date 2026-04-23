@@ -1,0 +1,101 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 6,
+    "citation_accuracy": 0.833,
+    "citation_false_file_hits": 0,
+    "latency_ms": 39702,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "Cumulative v0.4.0→v0.4.7 sweep reveals several material concerns: retry logic with unbounded or poorly guarded behavior, BigModel error dispatch that could silently swallow errors, job tracking state management with potential race/corruption paths, and process.mjs deletion that may leave dangling imports. The breadth of changes (84 files, +6623/-480 lines) with heavy new machinery (retry, bigmodel-errors, tracked-jobs, render rewrite) warrants targeted inspection before shipping.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs exponential backoff may lack effective ceiling guard",
+        "body": "The retry module (203 lines added) implements backoff/retry logic. Based on the file name and size, this is likely a general-purpose retry utility. If the max retry count or max delay ceiling is misconfigured or missing, callers could spin indefinitely or accumulate unbounded delays. Combined with BigModel error dispatch (also new), a persistent transient failure could stall the entire job pipeline with no visibility. Need to confirm: is there a hard max-attempts cap, a max-total-delay cap, and a jitter to prevent thundering herd?",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.7,
+        "recommendation": "Verify the retry module has hard upper bounds on both attempt count and total elapsed time, plus jitter. If missing, add them and add tests for the ceiling behavior (the 352-line test file should already cover this — confirm it does)."
+      },
+      {
+        "severity": "high",
+        "title": "process.mjs deleted — potential dangling imports across codebase",
+        "body": "scripts/lib/process.mjs (67 lines) was entirely removed in this diff. Any file that previously imported from it will throw at runtime if not updated. This is the kind of change that passes static analysis if no test exercises the import path, but fails in production when a rarely-used code path is hit. Need to confirm every former consumer has been updated or that the removal is safe.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.8,
+        "recommendation": "Grep the entire codebase for any remaining import/references to 'process.mjs' or its exported symbols. Run the full test suite and confirm zero missing-module errors. If any command path lazily imports this module, add an integration test that exercises it."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error dispatch could mask failures silently",
+        "body": "scripts/lib/bigmodel-errors.mjs (168 lines added) is a new module for error classification and dispatch. The risk: if the error classifier falls through without matching any known error type, it may return a generic/empty result that callers treat as non-fatal, silently swallowing real errors. Error dispatch tables are notorious for missing edge cases (network timeouts, malformed responses, new API error codes).",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.65,
+        "recommendation": "Confirm the error dispatcher has a catch-all/default case that either re-throws or returns a clearly flagged unknown-error result. Verify the 189-line test file covers the default/fallthrough path with an unrecognized error shape."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs state mutation without atomicity guarantees",
+        "body": "scripts/lib/tracked-jobs.mjs (78 lines changed) manages job tracking state. If two concurrent processes or async operations read-modify-write the same job state file, interleaving could corrupt the tracked state (lost jobs, duplicate entries, partial writes). The underlying state.mjs (32 lines changed) likely uses filesystem writes which are not atomic without explicit care (write-to-temp-then-rename).",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.6,
+        "recommendation": "Verify that state writes use atomic filesystem operations (write to temp file, then rename). If multiple glm-companion processes can run concurrently, add a file lock or confirm the design prohibits concurrent writers. Add a test that simulates concurrent state mutations."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs rewrite touches core I/O without clear rollback path",
+        "body": "scripts/lib/glm-client.mjs shows 155 lines changed — a substantial rewrite of the core client. If a network call partially fails mid-transaction (e.g., job submitted but response lost), the client may have no way to determine whether the job was accepted, leading to either duplicate submissions or lost jobs on retry. This is the most expensive failure mode: silent data loss or duplication.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.6,
+        "recommendation": "Trace the submit/request path end-to-end. Confirm that every remote call has idempotency protection (e.g., client-generated request IDs) or that the retry layer correctly distinguishes retryable from non-retryable failures. Verify tests cover mid-flight network failure scenarios."
+      },
+      {
+        "severity": "low",
+        "title": "render.mjs rewrite may alter output formatting in user-visible ways",
+        "body": "scripts/lib/render.mjs shows 79 lines changed with corresponding test file (193 lines). A render rewrite risks subtle output format regressions that UAT may not catch if scenarios don't cover edge cases (empty inputs, very long strings, unicode, null values in template contexts).",
+        "file": "scripts/lib/render.mjs",
+        "line_start": 1,
+        "line_end": 79,
+        "confidence": 0.5,
+        "recommendation": "Confirm the render test suite covers empty/null/unicode edge cases. If render output is consumed by downstream tooling (CI parsers, status checks), verify the output contract is documented and tested."
+      }
+    ],
+    "next_steps": [
+      "Inspect scripts/lib/retry.mjs for hard caps on attempts and total delay, confirm tests cover ceiling behavior",
+      "Grep entire codebase for any remaining imports of the deleted scripts/lib/process.mjs",
+      "Verify bigmodel-errors.mjs has a catch-all error classification path with test coverage",
+      "Check state.mjs and tracked-jobs.mjs for atomic write semantics (temp+rename pattern)",
+      "Trace glm-client.mjs request path for idempotency and partial-failure handling",
+      "Run the full test suite and confirm zero failures before merging"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"Cumulative v0.4.0→v0.4.7 sweep reveals several material concerns: retry logic with unbounded or poorly guarded behavior, BigModel error dispatch that could silently swallow errors, job tracking state management with potential race/corruption paths, and process.mjs deletion that may leave dangling imports. The breadth of changes (84 files, +6623/-480 lines) with heavy new machinery (retry, bigmodel-errors, tracked-jobs, render rewrite) warrants targeted inspection before shipping.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs exponential backoff may lack effective ceiling guard\",\"body\":\"The retry module (203 lines added) implements backoff/retry logic. Based on the file name and size, this is likely a general-purpose retry utility. If the max retry count or max delay ceiling is misconfigured or missing, callers could spin indefinitely or accumulate unbounded delays. Combined with BigModel error dispatch (also new), a persistent transient failure could stall the entire job pipeline with no visibility. Need to confirm: is there a hard max-attempts cap, a max-total-delay cap, and a jitter to prevent thundering herd?\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.7,\"recommendation\":\"Verify the retry module has hard upper bounds on both attempt count and total elapsed time, plus jitter. If missing, add them and add tests for the ceiling behavior (the 352-line test file should already cover this — confirm it does).\"},{\"severity\":\"high\",\"title\":\"process.mjs deleted — potential dangling imports across codebase\",\"body\":\"scripts/lib/process.mjs (67 lines) was entirely removed in this diff. Any file that previously imported from it will throw at runtime if not updated. This is the kind of change that passes static analysis if no test exercises the import path, but fails in production when a rarely-used code path is hit. Need to confirm every former consumer has been updated or that the removal is safe.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":67,\"confidence\":0.8,\"recommendation\":\"Grep the entire codebase for any remaining import/references to 'process.mjs' or its exported symbols. Run the full test suite and confirm zero missing-module errors. If any command path lazily imports this module, add an integration test that exercises it.\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors.mjs error dispatch could mask failures silently\",\"body\":\"scripts/lib/bigmodel-errors.mjs (168 lines added) is a new module for error classification and dispatch. The risk: if the error classifier falls through without matching any known error type, it may return a generic/empty result that callers treat as non-fatal, silently swallowing real errors. Error dispatch tables are notorious for missing edge cases (network timeouts, malformed responses, new API error codes).\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.65,\"recommendation\":\"Confirm the error dispatcher has a catch-all/default case that either re-throws or returns a clearly flagged unknown-error result. Verify the 189-line test file covers the default/fallthrough path with an unrecognized error shape.\"},{\"severity\":\"medium\",\"title\":\"tracked-jobs.mjs state mutation without atomicity guarantees\",\"body\":\"scripts/lib/tracked-jobs.mjs (78 lines changed) manages job tracking state. If two concurrent processes or async operations read-modify-write the same job state file, interleaving could corrupt the tracked state (lost jobs, duplicate entries, partial writes). The underlying state.mjs (32 lines changed) likely uses filesystem writes which are not atomic without explicit care (write-to-temp-then-rename).\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.6,\"recommendation\":\"Verify that state writes use atomic filesystem operations (write to temp file, then rename). If multiple glm-companion processes can run concurrently, add a file lock or confirm the design prohibits concurrent writers. Add a test that simulates concurrent state mutations.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs rewrite touches core I/O without clear rollback path\",\"body\":\"scripts/lib/glm-client.mjs shows 155 lines changed — a substantial rewrite of the core client. If a network call partially fails mid-transaction (e.g., job submitted but response lost), the client may have no way to determine whether the job was accepted, leading to either duplicate submissions or lost jobs on retry. This is the most expensive failure mode: silent data loss or duplication.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.6,\"recommendation\":\"Trace the submit/request path end-to-end. Confirm that every remote call has idempotency protection (e.g., client-generated request IDs) or that the retry layer correctly distinguishes retryable from non-retryable failures. Verify tests cover mid-flight network failure scenarios.\"},{\"severity\":\"low\",\"title\":\"render.mjs rewrite may alter output formatting in user-visible ways\",\"body\":\"scripts/lib/render.mjs shows 79 lines changed with corresponding test file (193 lines). A render rewrite risks subtle output format regressions that UAT may not catch if scenarios don't cover edge cases (empty inputs, very long strings, unicode, null values in template contexts).\",\"file\":\"scripts/lib/render.mjs\",\"line_start\":1,\"line_end\":79,\"confidence\":0.5,\"recommendation\":\"Confirm the render test suite covers empty/null/unicode edge cases. If render output is consumed by downstream tooling (CI parsers, status checks), verify the output contract is documented and tested.\"}],\"next_steps\":[\"Inspect scripts/lib/retry.mjs for hard caps on attempts and total delay, confirm tests cover ceiling behavior\",\"Grep entire codebase for any remaining imports of the deleted scripts/lib/process.mjs\",\"Verify bigmodel-errors.mjs has a catch-all error classification path with test coverage\",\"Check state.mjs and tracked-jobs.mjs for atomic write semantics (temp+rename pattern)\",\"Trace glm-client.mjs request path for idempotency and partial-failure handling\",\"Run the full test suite and confirm zero failures before merging\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T19:55:40.295Z"
+}

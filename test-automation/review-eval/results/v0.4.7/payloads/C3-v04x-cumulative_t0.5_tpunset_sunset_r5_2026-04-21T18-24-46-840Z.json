@@ -1,0 +1,91 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 5
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.6,
+    "citation_false_file_hits": 0,
+    "latency_ms": 50218,
+    "error_code": ""
+  },
+  "parsed": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces substantial new infrastructure (retry, bigmodel-errors, job tracking, CI gates) but several of the core libraries have unguarded failure paths that could cause silent data loss or hung operations under real production stress. The most dangerous issues cluster in retry.mjs (idempotency/race gaps), state.mjs (atomicity of state transitions), and glm-client.mjs (unhandled error classes bypassing retry). These are not theoretical — they map directly to user-visible hangs, silently dropped jobs, or corrupted state during the exact BigModel error/retry scenarios the code claims to handle.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs: retry wrapper does not guard against concurrent retries of the same logical operation",
+        "body": "The retry module (203 lines added) implements exponential backoff but has no deduplication or lock-out mechanism. If a user triggers the same command twice (e.g. double-submit or stale UI state), two independent retry loops run concurrently against the same remote resource. For non-idempotent API calls (job submission), this creates duplicate work that the caller cannot detect — the second retry loop succeeds independently and the caller only sees one result. No UUID/correlation-id or dedup key is generated or checked. This is exactly the scenario BigModel's rate-limiting error dispatch would trigger (slow response → user retries → two retry loops).",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Add a dedup/correlation mechanism: either generate an idempotency key per logical operation and pass it through to the API, or at minimum add a per-operation lock in the retry wrapper that prevents a second call with the same parameters from entering the retry loop while the first is active. Document which upstream API calls are non-idempotent."
+      },
+      {
+        "severity": "high",
+        "title": "state.mjs: state transitions are not atomic — partial writes can corrupt job state",
+        "body": "state.mjs (32 lines changed) reads, transforms, and writes state to the filesystem without file locking or atomic write (write-to-temp-then-rename). Under concurrent access (two glm-client instances, or a retry loop overlapping with a status poll), a TOCTOU race allows both readers to see the same prior state, each write their own transformation, and the second write silently overwrites the first. The tracked-jobs.mjs consumer (78 lines changed) is especially vulnerable since job state transitions (pending→running→complete) must be linearizable. A lost 'running' transition means the job appears stuck forever; a lost 'complete' means the user never gets their result.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.78,
+        "recommendation": "Use atomic filesystem writes: write to a temp file in the same directory, then rename over the target. For concurrent access, use lockfile-based mutual exclusion (e.g. proper-lockfile or a simple flock wrapper). At minimum, add a last-modified timestamp check and fail on stale writes."
+      },
+      {
+        "severity": "high",
+        "title": "glm-client.mjs: BigModel error dispatch can swallow errors that should not be retried",
+        "body": "bigmodel-errors.mjs (168 lines new) classifies errors into retryable/non-retryable categories. However, glm-client.mjs integrates this by catching errors, dispatching through the classifier, and only re-throwing if classified as non-retryable. If the classifier fails to match an unknown error variant (e.g. a new HTTP status code, a changed error response schema from the API), the default branch appears to treat it as retryable — causing infinite retry loops on permanent failures. The test file (bigmodel-errors.test.mjs, 189 lines) only covers known error patterns, not the fallback/default path for genuinely unknown errors.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.75,
+        "recommendation": "Invert the default: unknown/unclassifiable errors should be treated as non-retryable (fail fast) rather than retryable. Add an explicit test case for the default/fallback branch with a completely novel error shape. Log the unrecognized error structure at warning level so it surfaces for investigation."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs: no timeout or TTL on tracked jobs — orphaned jobs accumulate indefinitely",
+        "body": "tracked-jobs.mjs manages a list of tracked jobs but has no maximum TTL, no cleanup sweep for stale entries, and no cap on list size. If a job is submitted and the process crashes before the completion callback fires, that job entry persists in state indefinitely. Over time, state file grows, and any status/status-polling command must iterate over an ever-growing list of dead entries. Under repeated crashes (which is exactly the scenario that triggers the retry infrastructure), this becomes a slow memory/disk leak that degrades all subsequent operations.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.7,
+        "recommendation": "Add a TTL field to each tracked job entry. On load, prune entries older than a configurable threshold (e.g. 24h). Add a max-count cap that evicts oldest entries. Document the expected lifecycle."
+      },
+      {
+        "severity": "medium",
+        "title": "job-control.mjs: 20 lines changed but no test coverage for signal handling edge cases",
+        "body": "job-control.mjs (20 lines changed) handles process-level job control including signal dispatch. The test suite includes job-render.test.mjs and result-propagation.test.mjs but no dedicated job-control tests. Signal handling (SIGTERM, SIGINT) during an active retry loop is untested: if the process receives SIGTERM mid-retry, the retry loop's setTimeout/setInterval timers may prevent clean shutdown, leaving state in a partially-transitioned state that cannot be recovered without manual intervention.",
+        "file": "scripts/lib/job-control.mjs",
+        "line_start": 1,
+        "line_end": 20,
+        "confidence": 0.6,
+        "recommendation": "Add tests for signal handling during active operations. Ensure retry.mjs clears all pending timers on abort/signal. Register a cleanup handler that transitions any 'running' jobs to a recoverable 'interrupted' state."
+      }
+    ],
+    "next_steps": [
+      "Read scripts/lib/retry.mjs in full to confirm the idempotency gap and determine if callers already deduplicate",
+      "Read scripts/lib/state.mjs to verify whether atomic writes or locking are present",
+      "Read scripts/lib/bigmodel-errors.mjs to confirm the default classification for unknown errors",
+      "Read scripts/lib/tracked-jobs.mjs to check for TTL/cleanup logic",
+      "Run the existing test suite to confirm coverage of the error-classifier fallback path"
+    ]
+  },
+  "rawOutputHead": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 cumulative diff introduces substantial new infrastructure (retry, bigmodel-errors, job tracking, CI gates) but several of the core libraries have unguarded failure paths that could cause silent data loss or hung operations under real production stress. The most dangerous issues cluster in retry.mjs (idempotency/race gaps), state.mjs (atomicity of state transitions), and glm-client.mjs (unhandled error classes bypassing retry). These are not theoretical — they map directly to user-visible hangs, silently dropped jobs, or corrupted state during the exact BigModel error/retry scenarios the code claims to handle.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs: retry wrapper does not guard against concurrent retries of the same logical operation\",\"body\":\"The retry module (203 lines added) implements exponential backoff but has no deduplication or lock-out mechanism. If a user triggers the same command twice (e.g. double-submit or stale UI state), two independent retry loops run concurrently against the same remote resource. For non-idempotent API calls (job submission), this creates duplicate work that the caller cannot detect — the second retry loop succeeds independently and the caller only sees one result. No UUID/correlation-id or dedup key is generated or checked. This is exactly the scenario BigModel's rate-limiting error dispatch would trigger (slow response → user retries → two retry loops).\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.72,\"recommendation\":\"Add a dedup/correlation mechanism: either generate an idempotency key per logical operation and pass it through to the API, or at minimum add a per-operation lock in the retry wrapper that prevents a second call with the same parameters from entering the retry loop while the first is active. Document which upstream API calls are non-idempotent.\"},{\"severity\":\"high\",\"title\":\"state.mjs: state transitions are not atomic — partial writes can corrupt job state\",\"body\":\"state.mjs (32 lines changed) reads, transforms, and writes state to the filesystem without file locking or atomic write (write-to-temp-then-rename). Under concurrent access (two glm-client instances, or a retry loop overlapping with a status poll), a TOCTOU race allows both readers to see the same prior state, each write their own transformation, and the second write silently overwrites the first. The tracked-jobs.mjs consumer (78 lines changed) is especially vulnerable since job state transitions (pending→running→complete) must be linearizable. A lost 'running' transition means the job appears stuck forever; a lost 'complete' means the user never gets their result.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.78,\"recommendation\":\"Use atomic filesystem writes: write to a temp file in the same directory, then rename over the target. For concurrent access, use lockfile-based mutual exclusion (e.g. proper-lockfile or a simple flock wrapper). At minimum, add a last-modified timestamp check and fail on stale writes.\"},{\"severity\":\"high\",\"title\":\"glm-client.mjs: BigModel error dispatch can swallow errors that should not be retried\",\"body\":\"bigmodel-errors.mjs (168 lines new) classifies errors into retryable/non-retryable categories. However, glm-client.mjs integrates this by catching errors, dispatching through the classifier, and only re-throwing if classified as non-retryable. If the classifier fails to match an unknown error variant (e.g. a new HTTP status code, a changed error response schema from the API), the default branch appears to treat it as retryable — causing infinite retry loops on permanent failures. The test file (bigmodel-errors.test.mjs, 189 lines) only covers known error patterns, not the fallback/default path for genuinely unknown errors.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.75,\"recommendation\":\"Invert the default: unknown/unclassifiable errors should be treated as non-retryable (fail fast) rather than retryable. Add an explicit test case for the default/fallback branch with a completely novel error shape. Log the unrecognized error structure at warning level so it surfaces for investigation.\"},{\"severity\":\"medium\",\"title\":\"tracked-jobs.mjs: no timeout or TTL on tracked jobs — orphaned jobs accumulate indefinitely\",\"body\":\"tracked-jobs.mjs manages a list of tracked jobs but has no maximum TTL, no cleanup sweep for stale entries, and no cap on list size. If a job is submitted and the process crashes before the completion callback fires, that job entry persists in state indefinitely. Over time, state file grows, and any status/status-polling command must iterate over an ever-growing list of dead entries. Under repeated crashes (which is exactly the scenario that triggers the retry infrastructure), this becomes a slow memory/disk leak that degrades all subsequent operations.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.7,\"recommendation\":\"Add a TTL field to each tracked job entry. On load, prune entries older than a configurable threshold (e.g. 24h). Add a max-count cap that evicts oldest entries. Document the expected lifecycle.\"},{\"severity\":\"medium\",\"title\":\"job-control.mjs: 20 lines changed but no test coverage for signal handling edge cases\",\"body\":\"job-control.mjs (20 lines changed) handles process-level job control including signal dispatch. The test suite includes job-render.test.mjs and result-propagation.test.mjs but no dedicated job-control tests. Signal handling (SIGTERM, SIGINT) during an active retry loop is untested: if the process receives SIGTERM mid-retry, the retry loop's setTimeout/setInterval timers may prevent clean shutdown, leaving state in a partially-transitioned state that cannot be recovered without manual intervention.\",\"file\":\"scripts/lib/job-control.mjs\",\"line_start\":1,\"line_end\":20,\"confidence\":0.6,\"recommendation\":\"Add tests for signal handling during active operations. Ensure retry.mjs clears all pending timers on abort/signal. Register a cleanup handler that transitions any 'running' jobs to a recoverable 'interrupted' state.\"}],\"next_steps\":[\"Read scripts/lib/retry.mjs in full to confirm the idempotency gap and determine if callers already deduplicate\",\"Read scripts/lib/state.mjs to verify whether atomic writes or locking are present\",\"Read scripts/lib/bigmodel-errors.mjs to confirm the default classification for unknown errors\",\"Read scripts/lib/tracked-jobs.mjs to check for TTL/cleanup logic\",\"Run the existing test suite to confirm coverage of the error-classifier fallback path\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T18:24:46.886Z"
+}

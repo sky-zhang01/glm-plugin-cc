@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 47
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 226074,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.7 cumulative diff introduces significant attack surface: a retry/backoff system, BigModel error dispatch, job tracking, and state mutations across multiple modules. While test coverage exists, several high-severity concerns remain around retry exhaustion with unbounded副作用, state file corruption under concurrent access, and silent failure paths in the GLM client that could leave users with hung or silently-dropped operations.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry system may silently swallow fatal errors after exhausting retries",
+        "body": "The retry module (scripts/lib/retry.mjs) implements exponential backoff with jitter, but if all retries exhaust on what should be a fatal/non-retryable error (e.g. 401 auth failure misclassified as retryable by bigmodel-errors.mjs), the caller receives a generic timeout/exhaustion error that obscures the root cause. This makes auth failures or permission errors appear as transient network issues in logs, wasting user debugging time. The bigmodel-errors.mjs classification layer is the sole arbiter of retryability — any misclassification there cascades into silent wrong behavior.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.75,
+        "recommendation": "Audit the error classification in bigmodel-errors.mjs to ensure 4xx errors (especially 401, 403, 422) are NEVER marked retryable. Add a guard in the retry loop that short-circuits on explicitly non-retryable errors rather than only checking retry count. Ensure the final error thrown on exhaustion preserves the original error's status code and classification."
+      },
+      {
+        "severity": "high",
+        "title": "State file writes lack atomicity — concurrent operations can corrupt state",
+        "body": "scripts/lib/state.mjs and scripts/lib/tracked-jobs.mjs write JSON state files without atomic write patterns (write-to-temp-then-rename). If two GLM processes or subcommands run concurrently (e.g. user invokes review while a background job is still running), interleaved reads and writes can produce partial/corrupt JSON state. This is especially likely on the tracked-jobs file which is read and mutated on every job status check.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.8,
+        "recommendation": "Use an atomic write pattern: write to a temporary file in the same directory, then fs.rename() to the target path. For tracked-jobs.mjs, consider adding a file-level lock (lockfile or mkdir-based mutex) before read-modify-write cycles."
+      },
+      {
+        "severity": "medium",
+        "title": "GLM client error path may resolve with undefined instead of throwing",
+        "body": "scripts/lib/glm-client.mjs has expanded significantly (155 lines changed). In error dispatch paths where BigModel returns an unexpected response shape (no error code, no message), the error classification in bigmodel-errors.mjs may return an object with undefined fields. If the retry layer checks a field like .retryable on this undefined-ish result, it could proceed with retries on what should be a hard stop, or conversely drop the error entirely if the caller only checks truthiness of a nested property.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.65,
+        "recommendation": "Add explicit defensive guards in glm-client.mjs: after BigModel response parsing, validate that the result has expected shape before passing to error classification. In bigmodel-errors.mjs, ensure classify() always returns a well-typed result with retryable: false as default, never undefined."
+      },
+      {
+        "severity": "medium",
+        "title": "Job control background/foreground mode lacks cleanup on process interruption",
+        "body": "The --background/--wait execution mode flags introduced in review.md and handled in job-control.mjs (20 lines changed) spawn or track background processes. If the user sends SIGINT (Ctrl+C) or the parent process is killed, there is no signal handler to clean up orphaned background jobs or update the tracked-jobs state file. This leaves stale job entries that future status checks will report as 'running' indefinitely.",
+        "file": "scripts/lib/job-control.mjs",
+        "line_start": 1,
+        "line_end": 20,
+        "confidence": 0.7,
+        "recommendation": "Register process signal handlers (SIGINT, SIGTERM, SIGHUP) in the job-control module that mark any running jobs as 'interrupted' in the state file before exit. Add a cleanup/reap command or make the status command detect and report stale jobs (e.g. jobs running longer than a configurable timeout)."
+      },
+      {
+        "severity": "medium",
+        "title": "No idempotency protection on repeated review/rescue invocations with same target",
+        "body": "The review command with --background mode writes job state but does not check whether a review for the same target is already in progress. Repeated invocations create duplicate tracked jobs, potentially sending duplicate requests to BigModel API (cost implications) and creating confusing status output. The state layer has no uniqueness constraint on target identifier.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.6,
+        "recommendation": "Before creating a new tracked job, check if an active (non-terminal) job already exists for the same target. Either reject the duplicate with a clear message or offer to attach to the existing job's output."
+      }
+    ],
+    "next_steps": [
+      "Inspect scripts/lib/retry.mjs and scripts/lib/bigmodel-errors.mjs in full to confirm the error classification and retry exhaustion behavior — specifically whether 4xx auth/permission errors can enter the retry loop.",
+      "Inspect scripts/lib/state.mjs write patterns to confirm whether atomic writes are used; if not, this is a ship-blocker for any multi-process usage.",
+      "Inspect scripts/lib/job-control.mjs signal handling to confirm background job cleanup on interrupt.",
+      "Inspect scripts/lib/tracked-jobs.mjs for duplicate-job guards before approving background mode.",
+      "Verify that tests in tests/retry.test.mjs cover the non-retryable-error short-circuit path and exhaustion-with-original-error propagation."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.7 cumulative diff introduces significant attack surface: a retry/backoff system, BigModel error dispatch, job tracking, and state mutations across multiple modules. While test coverage exists, several high-severity concerns remain around retry exhaustion with unbounded副作用, state file corruption under concurrent access, and silent failure paths in the GLM client that could leave users with hung or silently-dropped operations.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Retry system may silently swallow fatal errors after exhausting retries\",\"body\":\"The retry module (scripts/lib/retry.mjs) implements exponential backoff with jitter, but if all retries exhaust on what should be a fatal/non-retryable error (e.g. 401 auth failure misclassified as retryable by bigmodel-errors.mjs), the caller receives a generic timeout/exhaustion error that obscures the root cause. This makes auth failures or permission errors appear as transient network issues in logs, wasting user debugging time. The bigmodel-errors.mjs classification layer is the sole arbiter of retryability — any misclassification there cascades into silent wrong behavior.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.75,\"recommendation\":\"Audit the error classification in bigmodel-errors.mjs to ensure 4xx errors (especially 401, 403, 422) are NEVER marked retryable. Add a guard in the retry loop that short-circuits on explicitly non-retryable errors rather than only checking retry count. Ensure the final error thrown on exhaustion preserves the original error's status code and classification.\"},{\"severity\":\"high\",\"title\":\"State file writes lack atomicity — concurrent operations can corrupt state\",\"body\":\"scripts/lib/state.mjs and scripts/lib/tracked-jobs.mjs write JSON state files without atomic write patterns (write-to-temp-then-rename). If two GLM processes or subcommands run concurrently (e.g. user invokes review while a background job is still running), interleaved reads and writes can produce partial/corrupt JSON state. This is especially likely on the tracked-jobs file which is read and mutated on every job status check.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.8,\"recommendation\":\"Use an atomic write pattern: write to a temporary file in the same directory, then fs.rename() to the target path. For tracked-jobs.mjs, consider adding a file-level lock (lockfile or mkdir-based mutex) before read-modify-write cycles.\"},{\"severity\":\"medium\",\"title\":\"GLM client error path may resolve with undefined instead of throwing\",\"body\":\"scripts/lib/glm-client.mjs has expanded significantly (155 lines changed). In error dispatch paths where BigModel returns an unexpected response shape (no error code, no message), the error classification in bigmodel-errors.mjs may return an object with undefined fields. If the retry layer checks a field like .retryable on this undefined-ish result, it could proceed with retries on what should be a hard stop, or conversely drop the error entirely if the caller only checks truthiness of a nested property.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.65,\"recommendation\":\"Add explicit defensive guards in glm-client.mjs: after BigModel response parsing, validate that the result has expected shape before passing to error classification. In bigmodel-errors.mjs, ensure classify() always returns a well-typed result with retryable: false as default, never undefined.\"},{\"severity\":\"medium\",\"title\":\"Job control background/foreground mode lacks cleanup on process interruption\",\"body\":\"The --background/--wait execution mode flags introduced in review.md and handled in job-control.mjs (20 lines changed) spawn or track background processes. If the user sends SIGINT (Ctrl+C) or the parent process is killed, there is no signal handler to clean up orphaned background jobs or update the tracked-jobs state file. This leaves stale job entries that future status checks will report as 'running' indefinitely.\",\"file\":\"scripts/lib/job-control.mjs\",\"line_start\":1,\"line_end\":20,\"confidence\":0.7,\"recommendation\":\"Register process signal handlers (SIGINT, SIGTERM, SIGHUP) in the job-control module that mark any running jobs as 'interrupted' in the state file before exit. Add a cleanup/reap command or make the status command detect and report stale jobs (e.g. jobs running longer than a configurable timeout).\"},{\"severity\":\"medium\",\"title\":\"No idempotency protection on repeated review/rescue invocations with same target\",\"body\":\"The review command with --background mode writes job state but does not check whether a review for the same target is already in progress. Repeated invocations create duplicate tracked jobs, potentially sending duplicate requests to BigModel API (cost implications) and creating confusing status output. The state layer has no uniqueness constraint on target identifier.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.6,\"recommendation\":\"Before creating a new tracked job, check if an active (non-terminal) job already exists for the same target. Either reject the duplicate with a clear message or offer to attach to the existing job's output.\"}],\"next_steps\":[\"Inspect scripts/lib/retry.mjs and scripts/lib/bigmodel-errors.mjs in full to confirm the error classification and retry exhaustion behavior — specifically whether 4xx auth/permission errors can enter the retry loop.\",\"Inspect scripts/lib/state.mjs write patterns to confirm whether atomic writes are used; if not, this is a ship-blocker for any multi-process usage.\",\"Inspect scripts/lib/job-control.mjs signal handling to confirm background job cleanup on interrupt.\",\"Inspect scripts/lib/tracked-jobs.mjs for duplicate-job guards before approving background mode.\",\"Verify that tests in tests/retry.test.mjs cover the non-retryable-error short-circuit path and exhaustion-with-original-error propagation.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T17:33:00.308Z"
+}

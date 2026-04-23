@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 48
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 81534,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces critical infrastructure (retry, error dispatch, job tracking) but carries three material risks that should block shipment: (1) `scripts/lib/process.mjs` was deleted entirely (67 lines removed) — if any surviving import references it, the entire companion crashes at module-load time with no recovery; (2) `scripts/lib/glm-client.mjs` absorbed 155 lines of retry/backoff integration yet has zero unit-test coverage, meaning the boundary most exposed to real failures (external API) is validated only on the happy path; (3) `scripts/lib/tracked-jobs.mjs` was rewritten (78 lines) with no corresponding test, risking duplicate or lost job submissions under concurrent or retry scenarios.",
+    "findings": [
+      {
+        "severity": "critical",
+        "title": "Deleted process.mjs may leave dangling imports causing unrecoverable runtime crash",
+        "body": "The diff removes `scripts/lib/process.mjs` entirely (67 lines, no additions). The companion codebase has multiple modules that could still `import` from this path — notably glm-client.mjs, glm-companion.mjs, and session-lifecycle-hook.mjs, all of which were modified in this same diff. If any surviving `import ... from './process.mjs'` or `from './lib/process.mjs'` exists, Node.js will throw `ERR_MODULE_NOT_FOUND` at startup for every invocation. This class of failure is invisible to unit tests if the test runner mocks or stubs the import chain, and it produces zero diagnostic output beyond a stack trace. The `scripts/check-imports.mjs` file was altered by only 5 lines — insufficient confidence that it validates this deletion.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.72,
+        "recommendation": "Grep the entire codebase for any remaining reference to 'process.mjs' or 'lib/process'. Add an explicit CI guard in check-imports.mjs that fails if any source file imports from a deleted module. Consider a smoke test that actually requires glm-companion.mjs and verifies it loads without error."
+      },
+      {
+        "severity": "high",
+        "title": "glm-client.mjs has 155 lines of retry/backoff integration with no unit test",
+        "body": "glm-client.mjs is the sole boundary to the external BigModel API. In this diff it absorbs the new retry.mjs and bigmodel-errors.mjs modules — 155 lines changed. The test directory contains retry.test.mjs and bigmodel-errors.test.mjs, but no `glm-client.test.mjs`. This means the integration point where retry classification meets actual HTTP requests is completely untested. Failure modes that unit tests on retry.mjs alone cannot catch: wrong error shape passed to classify(), retry headers not forwarded, response body consumed before retry can re-read it, or backoff timers stacking on top of the client's own timeout. Any of these would manifest as silent no-ops or hung requests in production.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.88,
+        "recommendation": "Add a `tests/glm-client.test.mjs` that exercises at minimum: (a) a request that triggers a retriable BigModel error and verifies the retry path fires; (b) a request that exhausts retries and verifies the final error propagates to the caller; (c) a concurrent-submission scenario that validates retry state does not leak across in-flight requests."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs rewritten (78 lines) with no test — job duplication or loss risk",
+        "body": "tracked-jobs.mjs manages persistent job state for background and wait-mode execution. It was substantially modified (78 lines in the diff) but has no dedicated test file. Under the --background/--wait execution modes introduced in v0.4.5, a race between job registration, status polling, and retry-driven re-submission could cause either duplicate submissions to the API (wasting tokens, producing duplicate outputs) or a job being marked complete before its result is recorded (silent data loss). The job-render.test.mjs file exists but appears to test rendering, not job lifecycle state transitions.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.76,
+        "recommendation": "Add a `tests/tracked-jobs.test.mjs` covering: (a) idempotent registration — calling register twice with the same job ID does not create duplicates; (b) concurrent status transitions — a job marked complete while a retry is in-flight does not corrupt state; (c) crash-recovery — a job in 'running' state at process exit is correctly handled on next invocation."
+      }
+    ],
+    "next_steps": [
+      "Run `grep -r 'process\\.mjs' scripts/` from repo root and confirm zero hits before merge.",
+      "Create `tests/glm-client.test.mjs` with minimum viable coverage for retry integration (retriable error, exhausted retries, concurrent requests).",
+      "Create `tests/tracked-jobs.test.mjs` with idempotency and crash-recovery scenarios.",
+      "Add a CI-level smoke test that `node -e 'import(\"./scripts/glm-companion.mjs\")'` succeeds without throwing, catching module-load failures early."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff introduces critical infrastructure (retry, error dispatch, job tracking) but carries three material risks that should block shipment: (1) `scripts/lib/process.mjs` was deleted entirely (67 lines removed) — if any surviving import references it, the entire companion crashes at module-load time with no recovery; (2) `scripts/lib/glm-client.mjs` absorbed 155 lines of retry/backoff integration yet has zero unit-test coverage, meaning the boundary most exposed to real failures (external API) is validated only on the happy path; (3) `scripts/lib/tracked-jobs.mjs` was rewritten (78 lines) with no corresponding test, risking duplicate or lost job submissions under concurrent or retry scenarios.\",\n  \"findings\": [\n    {\n      \"severity\": \"critical\",\n      \"title\": \"Deleted process.mjs may leave dangling imports causing unrecoverable runtime crash\",\n      \"body\": \"The diff removes `scripts/lib/process.mjs` entirely (67 lines, no additions). The companion codebase has multiple modules that could still `import` from this path — notably glm-client.mjs, glm-companion.mjs, and session-lifecycle-hook.mjs, all of which were modified in this same diff. If any surviving `import ... from './process.mjs'` or `from './lib/process.mjs'` exists, Node.js will throw `ERR_MODULE_NOT_FOUND` at startup for every invocation. This class of failure is invisible to unit tests if the test runner mocks or stubs the import chain, and it produces zero diagnostic output beyond a stack trace. The `scripts/check-imports.mjs` file was altered by only 5 lines — insufficient confidence that it validates this deletion.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Grep the entire codebase for any remaining reference to 'process.mjs' or 'lib/process'. Add an explicit CI guard in check-imports.mjs that fails if any source file imports from a deleted module. Consider a smoke test that actually requires glm-companion.mjs and verifies it loads without error.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"glm-client.mjs has 155 lines of retry/backoff integration with no unit test\",\n      \"body\": \"glm-client.mjs is the sole boundary to the external BigModel API. In this diff it absorbs the new retry.mjs and bigmodel-errors.mjs modules — 155 lines changed. The test directory contains retry.test.mjs and bigmodel-errors.test.mjs, but no `glm-client.test.mjs`. This means the integration point where retry classification meets actual HTTP requests is completely untested. Failure modes that unit tests on retry.mjs alone cannot catch: wrong error shape passed to classify(), retry headers not forwarded, response body consumed before retry can re-read it, or backoff timers stacking on top of the client's own timeout. Any of these would manifest as silent no-ops or hung requests in production.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.88,\n      \"recommendation\": \"Add a `tests/glm-client.test.mjs` that exercises at minimum: (a) a request that triggers a retriable BigModel error and verifies the retry path fires; (b) a request that exhausts retries and verifies the final error propagates to the caller; (c) a concurrent-submission scenario that validates retry state does not leak across in-flight requests.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"tracked-jobs.mjs rewritten (78 lines) with no test — job duplication or loss risk\",\n      \"body\": \"tracked-jobs.mjs manages persistent job state for background and wait-mode execution. It was substantially modified (78 lines in the diff) but has no dedicated test file. Under the --background/--wait execution modes introduced in v0.4.5, a race between job registration, status polling, and retry-driven re-submission could cause either duplicate submissions to the API (wasting tokens, producing duplicate outputs) or a job being marked complete before its result is recorded (silent data loss). The job-render.test.mjs file exists but appears to test rendering, not job lifecycle state transitions.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.76,\n      \"recommendation\": \"Add a `tests/tracked-jobs.test.mjs` covering: (a) idempotent registration — calling register twice with the same job ID does not create duplicates; (b) concurrent status transitions — a job marked complete while a retry is in-flight does not corrupt state; (c) crash-recovery — a job in 'running' state at process exit is correctly handled on next invocation.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `grep -r 'process\\\\.mjs' scripts/` from repo root and confirm zero hits before merge.\",\n    \"Create `tests/glm-client.test.mjs` with minimum viable coverage for retry integration (retriable error, exhausted retries, concurrent requests).\",\n    \"Create `tests/tracked-jobs.test.mjs` with idempotency and crash-recovery scenarios.\",\n    \"Add a CI-level smoke test that `node -e 'import(\\\"./scripts/glm-companion.mjs\\\")'` succeeds without throwing, catching module-load failures early.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T19:25:34.762Z"
+}

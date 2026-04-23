@@ -1,0 +1,102 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 64
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 6,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 50007,
+    "error_code": ""
+  },
+  "parsed": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces significant new surface area (retry logic, BigModel error dispatch, job tracking, state management) with multiple material risks: the new retry module has no circuit-breaker or budget cap, BigModel error classification could misroute transient failures into permanent retire decisions, and the deleted process.mjs module may leave dangling imports. The absence of v0.4.7-specific changes in the commit history (HEAD is v0.4.6) suggests either the sweep target is mislabeled or the changes haven't landed yet. Several high-severity findings below should block shipment.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs has no budget/circuit-breaker — unbounded retry storms on persistent failures",
+        "body": "The diff adds scripts/lib/retry.mjs (203 lines) with 352 lines of tests, but the retry logic lacks a global retry budget or circuit-breaker. If a downstream API (e.g., BigModel) returns consistently retryable errors, the system will keep retrying until maxAttempts is exhausted per call site. In a batch/sweep context (the user's 'sampling-sweep run 64'), multiple concurrent jobs could each independently exhaust retries, creating a thundering-herd scenario. The tests (retry.test.mjs) verify per-call retry behavior but do not test concurrent or cross-call budget exhaustion.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.8,
+        "recommendation": "Add a shared retry-budget or circuit-breaker that trips after N failures in a time window. At minimum, add jitter to retry backoff intervals and document the maximum wall-clock time a single operation can spend in retries. Add a test for concurrent retry exhaustion."
+      },
+      {
+        "severity": "high",
+        "title": "bigmodel-errors.mjs error classification can silently promote transient errors to non-retryable",
+        "body": "The new bigmodel-errors.mjs (168 lines) classifies BigModel API errors into retryable vs. non-retryable categories. If an error code or message pattern is misclassified as non-retryable (e.g., a new upstream error code not in the dispatch table), the caller will permanently fail the operation without retry. In a sweep context (run 64), this means entire sampling runs could be silently abandoned. The tests (bigmodel-errors.test.mjs, 189 lines) likely cover known error codes but cannot cover unknown future codes the classifier will encounter at runtime.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.75,
+        "recommendation": "Default classification should be retryable (fail-open) rather than non-retryable (fail-closed). Add logging/metrics when an unrecognized error code is encountered so it can be triaged. Add a test that verifies the default/fallback case is retryable."
+      },
+      {
+        "severity": "medium",
+        "title": "process.mjs deleted — potential dangling imports in remaining modules",
+        "body": "The diff deletes scripts/lib/process.mjs (67 lines removed). If any remaining module still imports from it (directly or transitively), those imports will fail at runtime with a module-not-found error. Given the scope of changes (glm-client.mjs, glm-companion.mjs, render.mjs all modified), a stale import path would only surface when that specific code path is exercised — potentially not during basic smoke tests.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.65,
+        "recommendation": "Grep all .mjs files for imports referencing 'process.mjs' or 'lib/process' and confirm none remain. Add a CI check that validates all import targets resolve (the existing check-imports.mjs may cover this, but verify it catches deleted files)."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs and state.mjs mutations lack concurrency guards",
+        "body": "tracked-jobs.mjs (78 lines changed) and state.mjs (32 lines changed) manage job tracking state. In a sweep scenario (run 64 implies parallel or sequential batch execution), concurrent writes to shared state files could cause data loss or corruption. The diff stat shows no file-locking or atomic-write primitives introduced. If two job processes write state simultaneously, last-writer-wins corruption could silently drop job tracking entries.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.7,
+        "recommendation": "Verify that state writes use atomic file operations (write-to-temp-then-rename). If jobs can run concurrently, add file locking or serialize state writes. Add a test that simulates concurrent state mutations."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs expanded with retry/backoff — retry-loop could mask auth failures as transient",
+        "body": "glm-client.mjs shows 155 lines changed, now integrating the new retry.mjs and bigmodel-errors.mjs modules. If an authentication or permission error (e.g., expired API key, wrong scope) returns an HTTP status that's classified as retryable, the system will burn through all retry attempts before failing — wasting API quota and time. Auth failures are typically 401/403 and should be immediately fatal, not retried.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.7,
+        "recommendation": "Verify that 401, 403, and similar auth/permission errors are explicitly classified as non-retryable in bigmodel-errors.mjs. Add integration tests that confirm auth failures fail immediately without retries."
+      },
+      {
+        "severity": "low",
+        "title": "No v0.4.7 tag or commit in history — sweep target may be misconfigured",
+        "body": "The commit log shows HEAD at v0.4.6 (d5fa754). The user's focus is 'v0.4.7 sampling-sweep run 64' but there are no v0.4.7 commits. This could mean: (1) the sweep is testing unreleased code, (2) the branch/tag is missing from the provided context, or (3) the target label is wrong. If the sweep is supposed to validate v0.4.7 changes, the review is incomplete because those changes aren't in the diff.",
+        "file": "CHANGELOG.md",
+        "line_start": 1,
+        "line_end": 521,
+        "confidence": 0.85,
+        "recommendation": "Clarify whether v0.4.7 changes exist on an unmerged branch or if the sweep target should be v0.4.6. If reviewing against v0.4.0, explicitly confirm the target version."
+      }
+    ],
+    "next_steps": [
+      "Audit bigmodel-errors.mjs default error classification — confirm unknown errors default to retryable",
+      "Verify no remaining imports of deleted process.mjs across the codebase",
+      "Add circuit-breaker or retry budget to retry.mjs before enabling batch sweep workloads",
+      "Confirm state.mjs and tracked-jobs.mjs use atomic writes for concurrent safety",
+      "Validate that auth failures (401/403) are never retried in glm-client.mjs",
+      "Clarify the v0.4.7 target — if changes are missing from the diff, re-run the sweep with the correct branch"
+    ]
+  },
+  "rawOutputHead": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 diff introduces significant new surface area (retry logic, BigModel error dispatch, job tracking, state management) with multiple material risks: the new retry module has no circuit-breaker or budget cap, BigModel error classification could misroute transient failures into permanent retire decisions, and the deleted process.mjs module may leave dangling imports. The absence of v0.4.7-specific changes in the commit history (HEAD is v0.4.6) suggests either the sweep target is mislabeled or the changes haven't landed yet. Several high-severity findings below should block shipment.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs has no budget/circuit-breaker — unbounded retry storms on persistent failures\",\"body\":\"The diff adds scripts/lib/retry.mjs (203 lines) with 352 lines of tests, but the retry logic lacks a global retry budget or circuit-breaker. If a downstream API (e.g., BigModel) returns consistently retryable errors, the system will keep retrying until maxAttempts is exhausted per call site. In a batch/sweep context (the user's 'sampling-sweep run 64'), multiple concurrent jobs could each independently exhaust retries, creating a thundering-herd scenario. The tests (retry.test.mjs) verify per-call retry behavior but do not test concurrent or cross-call budget exhaustion.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.8,\"recommendation\":\"Add a shared retry-budget or circuit-breaker that trips after N failures in a time window. At minimum, add jitter to retry backoff intervals and document the maximum wall-clock time a single operation can spend in retries. Add a test for concurrent retry exhaustion.\"},{\"severity\":\"high\",\"title\":\"bigmodel-errors.mjs error classification can silently promote transient errors to non-retryable\",\"body\":\"The new bigmodel-errors.mjs (168 lines) classifies BigModel API errors into retryable vs. non-retryable categories. If an error code or message pattern is misclassified as non-retryable (e.g., a new upstream error code not in the dispatch table), the caller will permanently fail the operation without retry. In a sweep context (run 64), this means entire sampling runs could be silently abandoned. The tests (bigmodel-errors.test.mjs, 189 lines) likely cover known error codes but cannot cover unknown future codes the classifier will encounter at runtime.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.75,\"recommendation\":\"Default classification should be retryable (fail-open) rather than non-retryable (fail-closed). Add logging/metrics when an unrecognized error code is encountered so it can be triaged. Add a test that verifies the default/fallback case is retryable.\"},{\"severity\":\"medium\",\"title\":\"process.mjs deleted — potential dangling imports in remaining modules\",\"body\":\"The diff deletes scripts/lib/process.mjs (67 lines removed). If any remaining module still imports from it (directly or transitively), those imports will fail at runtime with a module-not-found error. Given the scope of changes (glm-client.mjs, glm-companion.mjs, render.mjs all modified), a stale import path would only surface when that specific code path is exercised — potentially not during basic smoke tests.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":67,\"confidence\":0.65,\"recommendation\":\"Grep all .mjs files for imports referencing 'process.mjs' or 'lib/process' and confirm none remain. Add a CI check that validates all import targets resolve (the existing check-imports.mjs may cover this, but verify it catches deleted files).\"},{\"severity\":\"medium\",\"title\":\"tracked-jobs.mjs and state.mjs mutations lack concurrency guards\",\"body\":\"tracked-jobs.mjs (78 lines changed) and state.mjs (32 lines changed) manage job tracking state. In a sweep scenario (run 64 implies parallel or sequential batch execution), concurrent writes to shared state files could cause data loss or corruption. The diff stat shows no file-locking or atomic-write primitives introduced. If two job processes write state simultaneously, last-writer-wins corruption could silently drop job tracking entries.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.7,\"recommendation\":\"Verify that state writes use atomic file operations (write-to-temp-then-rename). If jobs can run concurrently, add file locking or serialize state writes. Add a test that simulates concurrent state mutations.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs expanded with retry/backoff — retry-loop could mask auth failures as transient\",\"body\":\"glm-client.mjs shows 155 lines changed, now integrating the new retry.mjs and bigmodel-errors.mjs modules. If an authentication or permission error (e.g., expired API key, wrong scope) returns an HTTP status that's classified as retryable, the system will burn through all retry attempts before failing — wasting API quota and time. Auth failures are typically 401/403 and should be immediately fatal, not retried.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.7,\"recommendation\":\"Verify that 401, 403, and similar auth/permission errors are explicitly classified as non-retryable in bigmodel-errors.mjs. Add integration tests that confirm auth failures fail immediately without retries.\"},{\"severity\":\"low\",\"title\":\"No v0.4.7 tag or commit in history — sweep target may be misconfigured\",\"body\":\"The commit log shows HEAD at v0.4.6 (d5fa754). The user's focus is 'v0.4.7 sampling-sweep run 64' but there are no v0.4.7 commits. This could mean: (1) the sweep is testing unreleased code, (2) the branch/tag is missing from the provided context, or (3) the target label is wrong. If the sweep is supposed to validate v0.4.7 changes, the review is incomplete because those changes aren't in the diff.\",\"file\":\"CHANGELOG.md\",\"line_start\":1,\"line_end\":521,\"confidence\":0.85,\"recommendation\":\"Clarify whether v0.4.7 changes exist on an unmerged branch or if the sweep target should be v0.4.6. If reviewing against v0.4.0, explicitly confirm the target version.\"}],\"next_steps\":[\"Audit bigmodel-errors.mjs default error classification — confirm unknown errors default to retryable\",\"Verify no remaining imports of deleted process.mjs across the codebase\",\"Add circuit-breaker or retry budget to retry.mjs before enabling batch sweep workloads\",\"Confirm state.mjs and tracked-jobs.mjs use atomic writes for concurrent safety\",\"Validate that auth failures (401/403) are never retried in glm-client.mjs\",\"Clarify the v0.4.7 target — if changes are missing from the diff, re-run the sweep with the correct branch\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T19:46:59.355Z"
+}

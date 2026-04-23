@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 45
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 45737,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces several high-risk subsystems—retry logic, BigModel error dispatch, tracked-jobs lifecycle, and state management—where failure paths can silently corrupt state, lose job tracking, or mask errors. The most concerning patterns involve state-file writes without atomicity, retry logic that may misclassify non-retryable errors, tracked-jobs cleanup that silently swallows failures, and glm-client error propagation that could leave users with orphaned background processes and no feedback. These are exactly the class of bugs that pass UAT on happy paths but surface under load, timeout, or partial-failure conditions.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Non-atomic state-file writes risk corruption on crash/timeout",
+        "body": "scripts/lib/state.mjs (32 lines changed) and scripts/lib/fs.mjs (44 lines changed) handle persistent state. If the process is killed (SIGTERM/SIGINT), times out, or crashes mid-write, the state JSON file can be left truncated or empty. This is especially dangerous for tracked-jobs.mjs which persists job IDs that govern background process lifecycle. A corrupted state file would cause all subsequent commands to fail or lose track of running background jobs, with no recovery path visible to the user.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.75,
+        "recommendation": "Use atomic write pattern: write to a temp file in the same directory, then rename. Add a state integrity check on read—if the file is invalid JSON, attempt recovery from a .bak copy or re-initialize rather than crashing. Document the recovery behavior."
+      },
+      {
+        "severity": "high",
+        "title": "Retry logic may retry non-idempotent or already-committed operations",
+        "body": "scripts/lib/retry.mjs (203 lines added) is a new, substantial module. Without visibility into which call sites use it and whether those operations are idempotent, there is a real risk that a retried API call could duplicate work (e.g., submitting a review twice, creating duplicate jobs). The BigModel error dispatch in scripts/lib/bigmodel-errors.mjs (168 lines) classifies errors for retry decisions—if a rate-limit or server error is returned after the server already processed the request, the retry will duplicate the operation.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.7,
+        "recommendation": "Audit every retry call site for idempotency. Add request-idempotency keys or conditional checks where the underlying API supports them. Ensure the retry module documents which HTTP status codes / error types are safe to retry, and default to NOT retrying on unknown errors."
+      },
+      {
+        "severity": "medium",
+        "title": "Tracked-jobs cleanup silently swallows errors, risks orphaned processes",
+        "body": "scripts/lib/tracked-jobs.mjs (78 lines changed) manages background job lifecycle. If job cleanup (removing a completed/failed job from tracking) fails—e.g., due to a locked or corrupted state file—the error is likely caught and swallowed to keep the CLI responsive. This means background processes could become orphaned with no PID tracking, and the user has no way to discover or kill them. The --background/--wait flags added in review.md make this a user-facing risk.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.7,
+        "recommendation": "Ensure cleanup failures are logged to stderr or a log file, not silently swallowed. On next invocation, scan for orphaned PIDs from previous sessions and warn the user. Consider a 'glm:rescue' style command specifically for orphaned background jobs."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client error dispatch may mask failures as retryable, hiding real issues",
+        "body": "scripts/lib/glm-client.mjs (155 lines changed) now integrates with bigmodel-errors.mjs for error classification. If an error is misclassified as retryable (e.g., an auth failure returning a 403 that the dispatcher reads as a 429-equivalent), the retry loop will exhaust attempts before surfacing the real error, wasting time and potentially hitting rate limits. Conversely, if a genuine transient error is classified as fatal, the user gets no retry and an opaque error message.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.65,
+        "recommendation": "Add integration tests that verify error classification for every known BigModel HTTP status code (401, 403, 429, 500, 502, 503) and error body pattern. Ensure the final error message after retry exhaustion includes the original error details, not just 'max retries exceeded'."
+      },
+      {
+        "severity": "medium",
+        "title": "Background execution mode lacks timeout/resource-bound guardrails",
+        "body": "The --background flag added for review execution (commands/review.md, 62 lines changed) spawns long-running processes. If the underlying API hangs or the job tracking state becomes stale, there is no timeout or heartbeat mechanism to detect and recover from stuck background jobs. Combined with the non-atomic state writes, a stuck job that crashes the tracker could leave the state file corrupted AND the process orphaned.",
+        "file": "commands/review.md",
+        "line_start": 1,
+        "line_end": 62,
+        "confidence": 0.6,
+        "recommendation": "Implement a maximum execution timeout for background jobs (configurable, with a sane default like 30 minutes). Add a heartbeat/timestamp to tracked jobs so stale jobs can be detected and reported on 'glm:status' invocation."
+      }
+    ],
+    "next_steps": [
+      "Read scripts/lib/state.mjs, scripts/lib/fs.mjs, and scripts/lib/tracked-jobs.mjs to confirm whether atomic writes and corruption recovery are implemented. If not, this is a ship blocker.",
+      "Audit scripts/lib/retry.mjs call sites in glm-client.mjs for idempotency—any non-idempotent retried operation is a ship blocker.",
+      "Verify bigmodel-errors.mjs classification logic against actual BigModel API error responses—misclassification here means silent wrong behavior.",
+      "Check whether background job lifecycle (spawn→track→complete→cleanup) has any timeout or staleness detection.",
+      "Confirm that state file corruption on crash is handled gracefully with a recovery path, not an unhandled exception."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 diff introduces several high-risk subsystems—retry logic, BigModel error dispatch, tracked-jobs lifecycle, and state management—where failure paths can silently corrupt state, lose job tracking, or mask errors. The most concerning patterns involve state-file writes without atomicity, retry logic that may misclassify non-retryable errors, tracked-jobs cleanup that silently swallows failures, and glm-client error propagation that could leave users with orphaned background processes and no feedback. These are exactly the class of bugs that pass UAT on happy paths but surface under load, timeout, or partial-failure conditions.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Non-atomic state-file writes risk corruption on crash/timeout\",\"body\":\"scripts/lib/state.mjs (32 lines changed) and scripts/lib/fs.mjs (44 lines changed) handle persistent state. If the process is killed (SIGTERM/SIGINT), times out, or crashes mid-write, the state JSON file can be left truncated or empty. This is especially dangerous for tracked-jobs.mjs which persists job IDs that govern background process lifecycle. A corrupted state file would cause all subsequent commands to fail or lose track of running background jobs, with no recovery path visible to the user.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.75,\"recommendation\":\"Use atomic write pattern: write to a temp file in the same directory, then rename. Add a state integrity check on read—if the file is invalid JSON, attempt recovery from a .bak copy or re-initialize rather than crashing. Document the recovery behavior.\"},{\"severity\":\"high\",\"title\":\"Retry logic may retry non-idempotent or already-committed operations\",\"body\":\"scripts/lib/retry.mjs (203 lines added) is a new, substantial module. Without visibility into which call sites use it and whether those operations are idempotent, there is a real risk that a retried API call could duplicate work (e.g., submitting a review twice, creating duplicate jobs). The BigModel error dispatch in scripts/lib/bigmodel-errors.mjs (168 lines) classifies errors for retry decisions—if a rate-limit or server error is returned after the server already processed the request, the retry will duplicate the operation.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.7,\"recommendation\":\"Audit every retry call site for idempotency. Add request-idempotency keys or conditional checks where the underlying API supports them. Ensure the retry module documents which HTTP status codes / error types are safe to retry, and default to NOT retrying on unknown errors.\"},{\"severity\":\"medium\",\"title\":\"Tracked-jobs cleanup silently swallows errors, risks orphaned processes\",\"body\":\"scripts/lib/tracked-jobs.mjs (78 lines changed) manages background job lifecycle. If job cleanup (removing a completed/failed job from tracking) fails—e.g., due to a locked or corrupted state file—the error is likely caught and swallowed to keep the CLI responsive. This means background processes could become orphaned with no PID tracking, and the user has no way to discover or kill them. The --background/--wait flags added in review.md make this a user-facing risk.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.7,\"recommendation\":\"Ensure cleanup failures are logged to stderr or a log file, not silently swallowed. On next invocation, scan for orphaned PIDs from previous sessions and warn the user. Consider a 'glm:rescue' style command specifically for orphaned background jobs.\"},{\"severity\":\"medium\",\"title\":\"glm-client error dispatch may mask failures as retryable, hiding real issues\",\"body\":\"scripts/lib/glm-client.mjs (155 lines changed) now integrates with bigmodel-errors.mjs for error classification. If an error is misclassified as retryable (e.g., an auth failure returning a 403 that the dispatcher reads as a 429-equivalent), the retry loop will exhaust attempts before surfacing the real error, wasting time and potentially hitting rate limits. Conversely, if a genuine transient error is classified as fatal, the user gets no retry and an opaque error message.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.65,\"recommendation\":\"Add integration tests that verify error classification for every known BigModel HTTP status code (401, 403, 429, 500, 502, 503) and error body pattern. Ensure the final error message after retry exhaustion includes the original error details, not just 'max retries exceeded'.\"},{\"severity\":\"medium\",\"title\":\"Background execution mode lacks timeout/resource-bound guardrails\",\"body\":\"The --background flag added for review execution (commands/review.md, 62 lines changed) spawns long-running processes. If the underlying API hangs or the job tracking state becomes stale, there is no timeout or heartbeat mechanism to detect and recover from stuck background jobs. Combined with the non-atomic state writes, a stuck job that crashes the tracker could leave the state file corrupted AND the process orphaned.\",\"file\":\"commands/review.md\",\"line_start\":1,\"line_end\":62,\"confidence\":0.6,\"recommendation\":\"Implement a maximum execution timeout for background jobs (configurable, with a sane default like 30 minutes). Add a heartbeat/timestamp to tracked jobs so stale jobs can be detected and reported on 'glm:status' invocation.\"}],\"next_steps\":[\"Read scripts/lib/state.mjs, scripts/lib/fs.mjs, and scripts/lib/tracked-jobs.mjs to confirm whether atomic writes and corruption recovery are implemented. If not, this is a ship blocker.\",\"Audit scripts/lib/retry.mjs call sites in glm-client.mjs for idempotency—any non-idempotent retried operation is a ship blocker.\",\"Verify bigmodel-errors.mjs classification logic against actual BigModel API error responses—misclassification here means silent wrong behavior.\",\"Check whether background job lifecycle (spawn→track→complete→cleanup) has any timeout or staleness detection.\",\"Confirm that state file corruption on crash is handled gracefully with a recovery path, not an unhandled exception.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T19:19:49.596Z"
+}

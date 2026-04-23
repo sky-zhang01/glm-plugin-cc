@@ -1,0 +1,70 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 25
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 50705,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit introduces an npm scope rename and adds interactive prompting to the setup command. The scope rename is a breaking change for existing users and downstream references. The interactive menu addition to setup risks hanging in non-interactive/CI contexts. Both changes carry material risk that should be verified before shipping.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a breaking change with no migration path documented",
+        "body": "The commit message explicitly mentions 'rename npm scope' and package.json shows 4 lines changed. An npm scope rename changes the package's identity. Any existing users referencing the old scoped package name will break on update. There is no indication of a deprecation path, compatibility shim, or user communication about the rename. If other files, docs, or downstream consumers still reference the old scope, installations will fail silently or resolve to a stale package.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.75,
+        "recommendation": "Verify all references to the old scope are updated across every file (README, plugin configs, marketplace.json, internal imports). Add a deprecation notice or alias for the old package name if possible. Confirm the new scope is actually published and resolvable."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive menu in setup command may hang in non-interactive environments",
+        "body": "The setup command now adds an 'interactive menu when already configured.' If this prompt uses stdin/stdout for user interaction, any CI pipeline, scripted invocation, or non-TTY environment will hang indefinitely waiting for input. There is no visible guard for non-interactive mode (e.g., --yes flag, TTY detection, or timeout). The commands/setup.md file changed by 19 lines suggests substantive logic was added without apparent consideration for headless execution.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.65,
+        "recommendation": "Add explicit TTY detection and either skip the menu or default to a safe option in non-interactive mode. Provide a --non-interactive or --yes flag to allow scripted usage. Document the expected behavior in both interactive and non-interactive contexts."
+      },
+      {
+        "severity": "medium",
+        "title": "Plugin config files updated with new scope may create version skew for installed users",
+        "body": "Both .claude-plugin/marketplace.json and .claude-plugin/plugin.json were modified (4 and 2 lines respectively). If these configs reference the new package scope but existing installations still have the old scope cached or installed, the plugin may fail to load, update, or resolve correctly. There is no visible version check or compatibility assertion.",
+        "file": ".claude-plugin/plugin.json",
+        "line_start": 1,
+        "line_end": 2,
+        "confidence": 0.6,
+        "recommendation": "Ensure plugin.json and marketplace.json are atomically consistent with the new scope. Add a version field or compatibility check so the plugin loader can detect and reject mismatched old-scope installations gracefully rather than failing opaquely."
+      }
+    ],
+    "next_steps": [
+      "Inspect the full diff of package.json to confirm the old scope is completely removed and no stale references remain.",
+      "Audit commands/setup.md for TTY detection or a non-interactive escape hatch before the interactive menu is presented.",
+      "Search the entire repository for any remaining references to the old npm scope (grep for the old scope string).",
+      "Verify the new scoped package is actually published and installable on the target registry.",
+      "Test the setup command in a non-interactive shell to confirm it does not hang."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"This commit introduces an npm scope rename and adds interactive prompting to the setup command. The scope rename is a breaking change for existing users and downstream references. The interactive menu addition to setup risks hanging in non-interactive/CI contexts. Both changes carry material risk that should be verified before shipping.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename is a breaking change with no migration path documented\",\n      \"body\": \"The commit message explicitly mentions 'rename npm scope' and package.json shows 4 lines changed. An npm scope rename changes the package's identity. Any existing users referencing the old scoped package name will break on update. There is no indication of a deprecation path, compatibility shim, or user communication about the rename. If other files, docs, or downstream consumers still reference the old scope, installations will fail silently or resolve to a stale package.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Verify all references to the old scope are updated across every file (README, plugin configs, marketplace.json, internal imports). Add a deprecation notice or alias for the old package name if possible. Confirm the new scope is actually published and resolvable.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Interactive menu in setup command may hang in non-interactive environments\",\n      \"body\": \"The setup command now adds an 'interactive menu when already configured.' If this prompt uses stdin/stdout for user interaction, any CI pipeline, scripted invocation, or non-TTY environment will hang indefinitely waiting for input. There is no visible guard for non-interactive mode (e.g., --yes flag, TTY detection, or timeout). The commands/setup.md file changed by 19 lines suggests substantive logic was added without apparent consideration for headless execution.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Add explicit TTY detection and either skip the menu or default to a safe option in non-interactive mode. Provide a --non-interactive or --yes flag to allow scripted usage. Document the expected behavior in both interactive and non-interactive contexts.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Plugin config files updated with new scope may create version skew for installed users\",\n      \"body\": \"Both .claude-plugin/marketplace.json and .claude-plugin/plugin.json were modified (4 and 2 lines respectively). If these configs reference the new package scope but existing installations still have the old scope cached or installed, the plugin may fail to load, update, or resolve correctly. There is no visible version check or compatibility assertion.\",\n      \"file\": \".claude-plugin/plugin.json\",\n      \"line_start\": 1,\n      \"line_end\": 2,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Ensure plugin.json and marketplace.json are atomically consistent with the new scope. Add a version field or compatibility check so the plugin loader can detect and reject mismatched old-scope installations gracefully rather than failing opaquely.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect the full diff of package.json to confirm the old scope is completely removed and no stale references remain.\",\n    \"Audit commands/setup.md for TTY detection or a non-interactive escape hatch before the interactive menu is presented.\",\n    \"Search the entire repository for any remaining references to the old npm scope (grep for the old scope string).\",\n    \"Verify the new scoped package is actually published and installable on the target registry.\",\n    \"Test the setup command in a non-interactive shell to confirm it does not hang.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T17:14:31.918Z"
+}

@@ -1,0 +1,79 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 67
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 65358,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces a retry/backoff subsystem (retry.mjs), BigModel error dispatch (bigmodel-errors.mjs), tracked-jobs state management, and significant changes to glm-client.mjs and render.mjs. While there are tests for these modules, several material gaps remain: the retry module's cancellation/interrupt path is undertested, the new job-tracking state machine has concurrency hazards, and the process.mjs deletion (replaced by scattered inline process management) creates a regression surface for signal handling. These are the kinds of silent failures that manifest under production stress rather than happy-path UAT.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs retry loop lacksAbortSignal/cancellation propagation — in-flight retries are uninterruptible",
+        "body": "The retry module (203 lines added) implements exponential backoff with jitter but does not accept or propagate an AbortController signal. If the caller (glm-client.mjs or the companion orchestrator) needs to cancel a running retry loop — e.g., user interrupt, job timeout, or SIGTERM — the pending setTimeout inside the backoff wait will continue to fire and execute the next attempt against a stale or abandoned context. Under concurrent job loads this leaks both timer resources and API calls against a dead session. The test file (retry.test.mjs, 352 lines) validates backoff timing and error classification but has zero coverage for mid-retry cancellation. This is a classic silent-failure path: the operation eventually 'succeeds' on a retry after the caller already moved on, potentially writing state that conflicts with the replacement operation.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.78,
+        "recommendation": "Add an optional AbortSignal parameter to the retry executor. Before each attempt and before each backoff sleep, check signal.aborted and throw an AbortError. In the backoff delay, use setTimeout with a clear-on-abort path so the timer is cleaned up immediately. Add tests that verify mid-retry abort stops further attempts and does not leave dangling timers."
+      },
+      {
+        "severity": "high",
+        "title": "tracked-jobs.mjs state transitions have no concurrency guard — parallel status polls can corrupt state",
+        "body": "The new tracked-jobs.mjs (78 lines) manages job lifecycle state (queued → running → completed/failed). The state transitions are performed via plain reads and writes with no locking or atomic compare-and-swap. If two concurrent invocations of the companion (e.g., a --wait poll and a separate --background status check) read the same job state simultaneously, both can observe 'running' and both can attempt to transition it — one to 'completed' and one to 'failed' — resulting in a final state that depends on write ordering. The state.mjs module (32 lines changed) uses JSON file reads/writes without file locking (no flock, no atomic rename-write pattern visible). This is a data corruption risk under the exact --wait/--background concurrent usage pattern introduced in v0.4.5.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.82,
+        "recommendation": "Use atomic file writes (write to temp file, then rename) for state persistence. Add a version/sequence number to the state file and reject writes where the on-disk version has advanced beyond the in-memory version. Alternatively, use a lockfile (proper-lockfile or similar) around state reads and writes. Add a test that concurrently writes two different terminal states and asserts only one wins deterministically."
+      },
+      {
+        "severity": "medium",
+        "title": "process.mjs deleted without verifying signal handler cleanup migration",
+        "body": "scripts/lib/process.mjs (67 lines deleted) previously centralized process signal handling. The diff shows it was removed and its responsibilities were presumably inlined into other modules. However, reviewing glm-companion.mjs (139 lines changed) and session-lifecycle-hook.mjs (5 lines changed), there is no visible re-registration of SIGTERM/SIGINT handlers that would gracefully clean up tracked jobs, abort in-flight retries, or flush state before exit. If the process is killed mid-operation, tracked job state files remain in 'running' status permanently — a stuck-state orphan that future --wait polls will hang on indefinitely. This is an observability + recovery gap: there is no stale-job detection or TTL-based cleanup visible in the tracked-jobs module.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.71,
+        "recommendation": "Add SIGTERM/SIGINT handlers in the companion entry point that: (1) abort any in-flight retry via AbortController, (2) transition all 'running' tracked jobs to a 'interrupted' terminal state, (3) flush and exit. Add a stale-job TTL check in tracked-jobs read operations so jobs stuck in 'running' for longer than a configurable threshold are treated as failed rather than polled forever. Test the interrupt path end-to-end."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error classification relies on string matching without fallback — unrecognized errors silently pass through unclassified",
+        "body": "The new bigmodel-errors.mjs (168 lines) classifies API errors into retryable/non-retryable categories using string matching on error codes and messages. If BigModel (or any wrapped provider) introduces a new error code or changes error message formatting, the classifier returns a default that may be incorrectly retryable or non-retryable. More critically, the module exports an error→retry-strategy mapping but does not log or emit telemetry when it encounters an unclassified error. This means a new rate-limit or auth error variant will either be retried pointlessly (wasting quota and time) or fail immediately, with no signal in logs to alert operators. The test file (189 lines) covers known error codes but has no coverage for the 'unknown error code' path or for verifying that telemetry is emitted on classification miss.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.68,
+        "recommendation": "Add an explicit 'unclassified' classification result with a warning-level log entry that includes the raw error code, message, and status. In the retry strategy, default unclassified errors to non-retryable (fail-safe) rather than retryable. Add a test that feeds an unrecognized error code and asserts the classification is 'unclassified', a warning is logged, and the retry strategy is non-retryable."
+      }
+    ],
+    "next_steps": [
+      "Read scripts/lib/retry.mjs, scripts/lib/tracked-jobs.mjs, scripts/lib/state.mjs, and scripts/lib/bigmodel-errors.mjs in full to confirm the concurrency, cancellation, and error classification concerns before merging.",
+      "Verify that glm-companion.mjs registers process signal handlers that clean up tracked job state on SIGTERM/SIGINT — if absent, this is a ship-blocker for the --wait/--background feature.",
+      "Add a stale-job TTL mechanism to tracked-jobs so orphaned 'running' jobs from crashed processes don't cause indefinite hangs.",
+      "Request explicit test coverage for: (a) mid-retry abort/cancellation, (b) concurrent state writes to the same job, (c) unknown BigModel error code classification behavior."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 diff introduces a retry/backoff subsystem (retry.mjs), BigModel error dispatch (bigmodel-errors.mjs), tracked-jobs state management, and significant changes to glm-client.mjs and render.mjs. While there are tests for these modules, several material gaps remain: the retry module's cancellation/interrupt path is undertested, the new job-tracking state machine has concurrency hazards, and the process.mjs deletion (replaced by scattered inline process management) creates a regression surface for signal handling. These are the kinds of silent failures that manifest under production stress rather than happy-path UAT.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs retry loop lacksAbortSignal/cancellation propagation — in-flight retries are uninterruptible\",\"body\":\"The retry module (203 lines added) implements exponential backoff with jitter but does not accept or propagate an AbortController signal. If the caller (glm-client.mjs or the companion orchestrator) needs to cancel a running retry loop — e.g., user interrupt, job timeout, or SIGTERM — the pending setTimeout inside the backoff wait will continue to fire and execute the next attempt against a stale or abandoned context. Under concurrent job loads this leaks both timer resources and API calls against a dead session. The test file (retry.test.mjs, 352 lines) validates backoff timing and error classification but has zero coverage for mid-retry cancellation. This is a classic silent-failure path: the operation eventually 'succeeds' on a retry after the caller already moved on, potentially writing state that conflicts with the replacement operation.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.78,\"recommendation\":\"Add an optional AbortSignal parameter to the retry executor. Before each attempt and before each backoff sleep, check signal.aborted and throw an AbortError. In the backoff delay, use setTimeout with a clear-on-abort path so the timer is cleaned up immediately. Add tests that verify mid-retry abort stops further attempts and does not leave dangling timers.\"},{\"severity\":\"high\",\"title\":\"tracked-jobs.mjs state transitions have no concurrency guard — parallel status polls can corrupt state\",\"body\":\"The new tracked-jobs.mjs (78 lines) manages job lifecycle state (queued → running → completed/failed). The state transitions are performed via plain reads and writes with no locking or atomic compare-and-swap. If two concurrent invocations of the companion (e.g., a --wait poll and a separate --background status check) read the same job state simultaneously, both can observe 'running' and both can attempt to transition it — one to 'completed' and one to 'failed' — resulting in a final state that depends on write ordering. The state.mjs module (32 lines changed) uses JSON file reads/writes without file locking (no flock, no atomic rename-write pattern visible). This is a data corruption risk under the exact --wait/--background concurrent usage pattern introduced in v0.4.5.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.82,\"recommendation\":\"Use atomic file writes (write to temp file, then rename) for state persistence. Add a version/sequence number to the state file and reject writes where the on-disk version has advanced beyond the in-memory version. Alternatively, use a lockfile (proper-lockfile or similar) around state reads and writes. Add a test that concurrently writes two different terminal states and asserts only one wins deterministically.\"},{\"severity\":\"medium\",\"title\":\"process.mjs deleted without verifying signal handler cleanup migration\",\"body\":\"scripts/lib/process.mjs (67 lines deleted) previously centralized process signal handling. The diff shows it was removed and its responsibilities were presumably inlined into other modules. However, reviewing glm-companion.mjs (139 lines changed) and session-lifecycle-hook.mjs (5 lines changed), there is no visible re-registration of SIGTERM/SIGINT handlers that would gracefully clean up tracked jobs, abort in-flight retries, or flush state before exit. If the process is killed mid-operation, tracked job state files remain in 'running' status permanently — a stuck-state orphan that future --wait polls will hang on indefinitely. This is an observability + recovery gap: there is no stale-job detection or TTL-based cleanup visible in the tracked-jobs module.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":67,\"confidence\":0.71,\"recommendation\":\"Add SIGTERM/SIGINT handlers in the companion entry point that: (1) abort any in-flight retry via AbortController, (2) transition all 'running' tracked jobs to a 'interrupted' terminal state, (3) flush and exit. Add a stale-job TTL check in tracked-jobs read operations so jobs stuck in 'running' for longer than a configurable threshold are treated as failed rather than polled forever. Test the interrupt path end-to-end.\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors.mjs error classification relies on string matching without fallback — unrecognized errors silently pass through unclassified\",\"body\":\"The new bigmodel-errors.mjs (168 lines) classifies API errors into retryable/non-retryable categories using string matching on error codes and messages. If BigModel (or any wrapped provider) introduces a new error code or changes error message formatting, the classifier returns a default that may be incorrectly retryable or non-retryable. More critically, the module exports an error→retry-strategy mapping but does not log or emit telemetry when it encounters an unclassified error. This means a new rate-limit or auth error variant will either be retried pointlessly (wasting quota and time) or fail immediately, with no signal in logs to alert operators. The test file (189 lines) covers known error codes but has no coverage for the 'unknown error code' path or for verifying that telemetry is emitted on classification miss.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.68,\"recommendation\":\"Add an explicit 'unclassified' classification result with a warning-level log entry that includes the raw error code, message, and status. In the retry strategy, default unclassified errors to non-retryable (fail-safe) rather than retryable. Add a test that feeds an unrecognized error code and asserts the classification is 'unclassified', a warning is logged, and the retry strategy is non-retryable.\"}],\"next_steps\":[\"Read scripts/lib/retry.mjs, scripts/lib/tracked-jobs.mjs, scripts/lib/state.mjs, and scripts/lib/bigmodel-errors.mjs in full to confirm the concurrency, cancellation, and error classification concerns before merging.\",\"Verify that glm-companion.mjs registers process signal handlers that clean up tracked job state on SIGTERM/SIGINT — if absent, this is a ship-blocker for the --wait/--background feature.\",\"Add a stale-job TTL mechanism to tracked-jobs so orphaned 'running' jobs from crashed processes don't cause indefinite hangs.\",\"Request explicit test coverage for: (a) mid-retry abort/cancellation, (b) concurrent state writes to the same job, (c) unknown BigModel error code classification behavior.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T19:50:02.963Z"
+}

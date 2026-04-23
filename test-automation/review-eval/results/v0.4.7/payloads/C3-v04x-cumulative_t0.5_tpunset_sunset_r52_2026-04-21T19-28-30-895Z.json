@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 52
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 75692,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "Cannot complete a meaningful adversarial review. The provided context includes only the diff stat (file names and line counts) and commit log — no actual file contents were supplied, and no read-only git command outputs were provided. The diff spans 84 files with 6,623 additions, including critical infrastructure (new retry.mjs at 203 lines, new bigmodel-errors.mjs at 168 lines, rewritten glm-client.mjs at 155 lines changed, and fully deleted process.mjs at 67 lines removed). Refusing to bless a change of this scope without inspecting the actual code.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "process.mjs deleted with no visible migration path",
+        "body": "scripts/lib/process.mjs (67 lines) was deleted entirely. The diff stat shows no obvious replacement file. If any remaining module imports from './process.mjs' or './process', the import will fail at runtime with MODULE_NOT_FOUND. Even if callers were updated, any dynamic import, cached reference, or downstream consumer not in this diff would break silently. The deletion is not called out in any commit message, which suggests it may not have received focused review.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.65,
+        "recommendation": "Provide the actual file contents or git diff output for scripts/lib/process.mjs deletion and grep all .mjs files for imports of 'process' to confirm no orphaned references. If callers were migrated, document where each exported function moved."
+      },
+      {
+        "severity": "high",
+        "title": "New retry.mjs (203 lines) — retry logic correctness cannot be verified from context",
+        "body": "A new 203-line retry module was added (scripts/lib/retry.mjs). Retry logic around external API calls is a top-tier risk area: non-idempotent operations retried on partial success can cause duplicate submissions; incorrect error classification can retry non-retryable errors (e.g., 401/403) or silently swallow retryable ones; missing jitter in backoff can cause thundering-herd behavior; retry budgets without caps can hang the process. No test failures are visible but the test file (tests/retry.test.mjs, 352 lines) scope cannot be assessed without content.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.55,
+        "recommendation": "Provide the full contents of scripts/lib/retry.mjs and tests/retry.test.mjs. Specifically verify: (1) are retries limited to idempotent operations or does the caller ensure idempotency keys? (2) are 4xx errors excluded from retry except 429? (3) is there a max-retry cap and total-timeout ceiling? (4) is jitter applied to backoff intervals?"
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs heavily rewritten — caller contract may have silently changed",
+        "body": "scripts/lib/glm-client.mjs shows 155 lines changed (significant rewrite given it was not a new file). This is the core API client. Rewrites of client modules frequently introduce subtle contract changes: different error shapes, changed return types, altered promise rejection behavior, or missing error branches that callers still expect. The companion script (glm-companion.mjs, 139 lines changed) and render.mjs (79 lines changed) are the likely callers, but without seeing the actual code, broken assumptions cannot be ruled out.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.5,
+        "recommendation": "Provide the full diff for glm-client.mjs. Verify that every exported function signature, return type, and error rejection shape is backward-compatible with all callers (glm-companion.mjs, render.mjs, tracked-jobs.mjs, job-control.mjs)."
+      },
+      {
+        "severity": "medium",
+        "title": "Insufficient context to perform adversarial review — findings are speculative",
+        "body": "The review context includes only file names, line counts, and commit messages. No actual source code, git diff output, or test results were provided. For a change spanning 6,623 lines across 84 files (including new retry infrastructure, error dispatch, job tracking, and state management), this is insufficient to defend any ship/no-ship decision. The confidence scores on all findings in this review are capped by this limitation.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.95,
+        "recommendation": "Re-run this review with actual file contents or `git diff v0.4.0..HEAD` output included in the context. The review target (v0.4.7 sampling-sweep run 52) also does not match any tag in the commit log (latest is v0.4.6), suggesting either the wrong branch was targeted or the context is stale."
+      }
+    ],
+    "next_steps": [
+      "Provide the full `git diff v0.4.0..HEAD` output so actual code can be reviewed.",
+      "Confirm the target: the commit log shows v0.4.6 as the latest tag, but the review target references v0.4.7 — clarify whether the correct branch/tag is being reviewed.",
+      "Run `grep -r \"from.*process\" scripts/ --include='*.mjs'` to verify no orphaned imports of the deleted process.mjs.",
+      "Provide the contents of scripts/lib/retry.mjs and scripts/lib/bigmodel-errors.mjs for focused review of the new retry and error-dispatch infrastructure.",
+      "Run the test suite (`node --test tests/`) against the target ref and include the output."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"Cannot complete a meaningful adversarial review. The provided context includes only the diff stat (file names and line counts) and commit log — no actual file contents were supplied, and no read-only git command outputs were provided. The diff spans 84 files with 6,623 additions, including critical infrastructure (new retry.mjs at 203 lines, new bigmodel-errors.mjs at 168 lines, rewritten glm-client.mjs at 155 lines changed, and fully deleted process.mjs at 67 lines removed). Refusing to bless a change of this scope without inspecting the actual code.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"process.mjs deleted with no visible migration path\",\n      \"body\": \"scripts/lib/process.mjs (67 lines) was deleted entirely. The diff stat shows no obvious replacement file. If any remaining module imports from './process.mjs' or './process', the import will fail at runtime with MODULE_NOT_FOUND. Even if callers were updated, any dynamic import, cached reference, or downstream consumer not in this diff would break silently. The deletion is not called out in any commit message, which suggests it may not have received focused review.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Provide the actual file contents or git diff output for scripts/lib/process.mjs deletion and grep all .mjs files for imports of 'process' to confirm no orphaned references. If callers were migrated, document where each exported function moved.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"New retry.mjs (203 lines) — retry logic correctness cannot be verified from context\",\n      \"body\": \"A new 203-line retry module was added (scripts/lib/retry.mjs). Retry logic around external API calls is a top-tier risk area: non-idempotent operations retried on partial success can cause duplicate submissions; incorrect error classification can retry non-retryable errors (e.g., 401/403) or silently swallow retryable ones; missing jitter in backoff can cause thundering-herd behavior; retry budgets without caps can hang the process. No test failures are visible but the test file (tests/retry.test.mjs, 352 lines) scope cannot be assessed without content.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Provide the full contents of scripts/lib/retry.mjs and tests/retry.test.mjs. Specifically verify: (1) are retries limited to idempotent operations or does the caller ensure idempotency keys? (2) are 4xx errors excluded from retry except 429? (3) is there a max-retry cap and total-timeout ceiling? (4) is jitter applied to backoff intervals?\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client.mjs heavily rewritten — caller contract may have silently changed\",\n      \"body\": \"scripts/lib/glm-client.mjs shows 155 lines changed (significant rewrite given it was not a new file). This is the core API client. Rewrites of client modules frequently introduce subtle contract changes: different error shapes, changed return types, altered promise rejection behavior, or missing error branches that callers still expect. The companion script (glm-companion.mjs, 139 lines changed) and render.mjs (79 lines changed) are the likely callers, but without seeing the actual code, broken assumptions cannot be ruled out.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.5,\n      \"recommendation\": \"Provide the full diff for glm-client.mjs. Verify that every exported function signature, return type, and error rejection shape is backward-compatible with all callers (glm-companion.mjs, render.mjs, tracked-jobs.mjs, job-control.mjs).\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Insufficient context to perform adversarial review — findings are speculative\",\n      \"body\": \"The review context includes only file names, line counts, and commit messages. No actual source code, git diff output, or test results were provided. For a change spanning 6,623 lines across 84 files (including new retry infrastructure, error dispatch, job tracking, and state management), this is insufficient to defend any ship/no-ship decision. The confidence scores on all findings in this review are capped by this limitation.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.95,\n      \"recommendation\": \"Re-run this review with actual file contents or `git diff v0.4.0..HEAD` output included in the context. The review target (v0.4.7 sampling-sweep run 52) also does not match any tag in the commit log (latest is v0.4.6), suggesting either the wrong branch was targeted or the context is stale.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Provide the full `git diff v0.4.0..HEAD` output so actual code can be reviewed.\",\n    \"Confirm the target: the commit log shows v0.4.6 as the latest tag, but the review target references v0.4.7 — clarify whether the correct branch/tag is being reviewed.\",\n    \"Run `grep -r \\\"from.*process\\\" scripts/ --include='*.mjs'` to verify no orphaned imports of the deleted process.mjs.\",\n    \"Provide the contents of scripts/lib/retry.mjs and scripts/lib/bigmodel-errors.mjs for focused review of the new retry and error-dispatch infrastructure.\",\n    \"Run the test suite (`node --test tests/`) against the target ref and include the output.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T19:28:30.921Z"
+}

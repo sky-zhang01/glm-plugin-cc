@@ -1,0 +1,110 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 32
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 7,
+    "citation_accuracy": 0.714,
+    "citation_false_file_hits": 0,
+    "latency_ms": 226978,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces retry/backoff, BigModel error dispatch, background job execution, and substantial state management changes. Multiple high-severity concerns found in retry.mjs (silent swallowing of non-retryable errors, potential infinite retry loops via config), glm-client.mjs (error-classification before response-status checks), and tracked-jobs.mjs (race conditions in file-based job tracking). The code has good test coverage surface area but key failure paths — partial writes, concurrent job state corruption, and misclassified HTTP errors — are not adequately guarded.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs may silently swallow fatal errors when shouldRetry unconditionally returns true",
+        "body": "The retry module retries on exceptions but if the caller's shouldRetry function returns true for all errors (including non-retryable ones like 401/403/400), the loop will burn through all retry attempts and then return the last error as if it were a transient failure. The default shouldRetry in the module does not distinguish error types. This means a permanent auth failure or bad request could silently exhaust retries and return an ambiguous error to the caller, hiding the real cause. The caller in glm-client.mjs classifies errors AFTER retry, but retry itself may discard intermediate context.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.82,
+        "recommendation": "Add an explicit classification step inside the retry loop that inspects the error before deciding to retry. If the error is a permanent client error (4xx excluding 429), break immediately with a clear 'non-retryable' signal. Ensure the final error returned preserves the original error type and any classification metadata."
+      },
+      {
+        "severity": "high",
+        "title": "glm-client.mjs classifies BigModel errors from response body AFTER retry exhaustion, losing early-exit diagnostics",
+        "body": "In glm-client.mjs, the BigModel error classification (bigmodel-errors.mjs) is applied to the error thrown by the retry wrapper. However, the retry wrapper may have already retried a non-retryable error multiple times (see finding above), and the original HTTP status/body may be lost or wrapped. If a 401 or 403 is returned, the retry logic fires multiple times before the error reaches classification, wasting API calls and producing confusing logs. The error classification should happen BEFORE the retry decision, not after.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.78,
+        "recommendation": "Restructure so that BigModel error classification happens on each HTTP response, and the classified error type feeds into shouldRetry. Non-retryable classified errors (auth failures, bad requests) should cause immediate rejection without consuming retry budget."
+      },
+      {
+        "severity": "high",
+        "title": "tracked-jobs.mjs uses file-based locking without atomic write, risking corruption under concurrency",
+        "body": "The tracked-jobs module appears to manage job state via filesystem reads and writes. If two concurrent processes (e.g., two background review jobs) read the same job state file, modify it, and write it back, the last writer wins and the first writer's changes are silently lost. There is no evidence of atomic write (write-to-temp + rename) or file-locking mechanism in the diff stat's changes to this file. This can cause job tracking to become inconsistent — jobs may appear stuck, duplicated, or lost.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.75,
+        "recommendation": "Implement atomic writes using write-to-temp-file + fs.rename() pattern. Consider adding a PID-based lock file or using file-handle locks (fs.open with exclusive flags) to prevent concurrent modification. Add a test that verifies correct behavior under concurrent writes."
+      },
+      {
+        "severity": "medium",
+        "title": "retry.mjs backoff calculation may produce zero-delay or negative-delay sleeps under edge-case config",
+        "body": "If the base delay is configured to 0 or a very small number, or if jitter computation produces a value <= 0, the retry delay could be zero or negative, causing a tight spin loop that hammers the API. The backoff formula should enforce a minimum positive delay. Without this guard, a misconfigured deployment could trigger rate limiting or API bans.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.7,
+        "recommendation": "Add a floor to the computed delay (e.g., Math.max(delay, MIN_DELAY_MS)) and validate that configuration values produce sane backoff curves. Add a unit test for zero/negative base delay."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs file operations lack crash-safety — partial writes can corrupt persistent state",
+        "body": "State management (state.mjs) writes to persistent storage. If the process crashes mid-write (OOM, SIGKILL, disk full), the state file may be left in a partial/corrupt state. On next startup, the state file may fail to parse (JSON.parse throws), leaving the plugin in an unrecoverable state. There is no evidence of write-ahead logging, temp-file-rename, or state recovery logic.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.72,
+        "recommendation": "Use atomic write (write to .tmp file, then rename) for all state mutations. Add a startup recovery path: if state file fails to parse, attempt to load from a backup or reset to empty state with a warning rather than crashing."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error classification may misclassify unknown error formats as retryable",
+        "body": "The BigModel error dispatch module classifies API errors into retryable/non-retryable categories. If the API returns an undocumented error format or an unexpected HTTP status, the default/fallback classification appears to treat it as retryable. This means any new or changed error response from the upstream API will be retried aggressively until exhaustion, rather than failing fast with a clear 'unknown error' signal.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.68,
+        "recommendation": "Default unknown/unrecognized error formats to NON-retryable. Add logging when an unrecognized error format is encountered so it can be triaged. Add a test case for completely unknown error shapes."
+      },
+      {
+        "severity": "low",
+        "title": "No test coverage for concurrent job tracking scenarios",
+        "body": "The test suite includes tests for retry, render, state, etc., but there is no evidence of tests that simulate concurrent access to tracked-jobs.mjs or state.mjs. These are the highest-risk modules for race conditions and silent data corruption. The absence of concurrency tests is a reviewer blind spot.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.8,
+        "recommendation": "Add integration tests that spawn multiple concurrent processes writing to the same job state file and verify consistency. At minimum, add a test for overlapping write timing."
+      }
+    ],
+    "next_steps": [
+      "Restructure glm-client.mjs to classify BigModel errors BEFORE retry decisions are made, not after.",
+      "Add atomic writes (temp+rename) to state.mjs and tracked-jobs.mjs to prevent corruption on crash or concurrent access.",
+      "Enforce a minimum positive delay floor in retry.mjs backoff calculation.",
+      "Default unknown error formats in bigmodel-errors.mjs to non-retryable with logging.",
+      "Add concurrency tests for tracked-jobs.mjs before shipping."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 diff introduces retry/backoff, BigModel error dispatch, background job execution, and substantial state management changes. Multiple high-severity concerns found in retry.mjs (silent swallowing of non-retryable errors, potential infinite retry loops via config), glm-client.mjs (error-classification before response-status checks), and tracked-jobs.mjs (race conditions in file-based job tracking). The code has good test coverage surface area but key failure paths — partial writes, concurrent job state corruption, and misclassified HTTP errors — are not adequately guarded.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"retry.mjs may silently swallow fatal errors when shouldRetry unconditionally returns true\",\n      \"body\": \"The retry module retries on exceptions but if the caller's shouldRetry function returns true for all errors (including non-retryable ones like 401/403/400), the loop will burn through all retry attempts and then return the last error as if it were a transient failure. The default shouldRetry in the module does not distinguish error types. This means a permanent auth failure or bad request could silently exhaust retries and return an ambiguous error to the caller, hiding the real cause. The caller in glm-client.mjs classifies errors AFTER retry, but retry itself may discard intermediate context.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.82,\n      \"recommendation\": \"Add an explicit classification step inside the retry loop that inspects the error before deciding to retry. If the error is a permanent client error (4xx excluding 429), break immediately with a clear 'non-retryable' signal. Ensure the final error returned preserves the original error type and any classification metadata.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"glm-client.mjs classifies BigModel errors from response body AFTER retry exhaustion, losing early-exit diagnostics\",\n      \"body\": \"In glm-client.mjs, the BigModel error classification (bigmodel-errors.mjs) is applied to the error thrown by the retry wrapper. However, the retry wrapper may have already retried a non-retryable error multiple times (see finding above), and the original HTTP status/body may be lost or wrapped. If a 401 or 403 is returned, the retry logic fires multiple times before the error reaches classification, wasting API calls and producing confusing logs. The error classification should happen BEFORE the retry decision, not after.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Restructure so that BigModel error classification happens on each HTTP response, and the classified error type feeds into shouldRetry. Non-retryable classified errors (auth failures, bad requests) should cause immediate rejection without consuming retry budget.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"tracked-jobs.mjs uses file-based locking without atomic write, risking corruption under concurrency\",\n      \"body\": \"The tracked-jobs module appears to manage job state via filesystem reads and writes. If two concurrent processes (e.g., two background review jobs) read the same job state file, modify it, and write it back, the last writer wins and the first writer's changes are silently lost. There is no evidence of atomic write (write-to-temp + rename) or file-locking mechanism in the diff stat's changes to this file. This can cause job tracking to become inconsistent — jobs may appear stuck, duplicated, or lost.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Implement atomic writes using write-to-temp-file + fs.rename() pattern. Consider adding a PID-based lock file or using file-handle locks (fs.open with exclusive flags) to prevent concurrent modification. Add a test that verifies correct behavior under concurrent writes.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"retry.mjs backoff calculation may produce zero-delay or negative-delay sleeps under edge-case config\",\n      \"body\": \"If the base delay is configured to 0 or a very small number, or if jitter computation produces a value <= 0, the retry delay could be zero or negative, causing a tight spin loop that hammers the API. The backoff formula should enforce a minimum positive delay. Without this guard, a misconfigured deployment could trigger rate limiting or API bans.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.70,\n      \"recommendation\": \"Add a floor to the computed delay (e.g., Math.max(delay, MIN_DELAY_MS)) and validate that configuration values produce sane backoff curves. Add a unit test for zero/negative base delay.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"state.mjs file operations lack crash-safety — partial writes can corrupt persistent state\",\n      \"body\": \"State management (state.mjs) writes to persistent storage. If the process crashes mid-write (OOM, SIGKILL, disk full), the state file may be left in a partial/corrupt state. On next startup, the state file may fail to parse (JSON.parse throws), leaving the plugin in an unrecoverable state. There is no evidence of write-ahead logging, temp-file-rename, or state recovery logic.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Use atomic write (write to .tmp file, then rename) for all state mutations. Add a startup recovery path: if state file fails to parse, attempt to load from a backup or reset to empty state with a warning rather than crashing.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"bigmodel-errors.mjs error classification may misclassify unknown error formats as retryable\",\n      \"body\": \"The BigModel error dispatch module classifies API errors into retryable/non-retryable categories. If the API returns an undocumented error format or an unexpected HTTP status, the default/fallback classification appears to treat it as retryable. This means any new or changed error response from the upstream API will be retried aggressively until exhaustion, rather than failing fast with a clear 'unknown error' signal.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Default unknown/unrecognized error formats to NON-retryable. Add logging when an unrecognized error format is encountered so it can be triaged. Add a test case for completely unknown error shapes.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"No test coverage for concurrent job tracking scenarios\",\n      \"body\": \"The test suite includes tests for retry, render, state, etc., but there is no evidence of tests that simulate concurrent access to tracked-jobs.mjs or state.mjs. These are the highest-risk modules for race conditions and silent data corruption. The absence of concurrency tests is a reviewer blind spot.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.80,\n      \"recommendation\": \"Add integration tests that spawn multiple concurrent processes writing to the same job state file and verify consistency. At minimum, add a test for overlapping write timing.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Restructure glm-client.mjs to classify BigModel errors BEFORE retry decisions are made, not after.\",\n    \"Add atomic writes (temp+rename) to state.mjs and tracked-jobs.mjs to prevent corruption on crash or concurrent access.\",\n    \"Enforce a minimum positive delay floor in retry.mjs backoff calculation.\",\n    \"Default unknown error formats in bigmodel-errors.mjs to non-retryable with logging.\",\n    \"Add concurrency tests for tracked-jobs.mjs before shipping.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T19:04:32.167Z"
+}

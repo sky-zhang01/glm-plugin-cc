@@ -1,0 +1,79 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 24
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 90654,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces ~6,600 lines across 84 files including a brand-new retry/backoff subsystem (retry.mjs, 203 lines), BigModel error dispatch (bigmodel-errors.mjs, 168 lines), and a completely deleted process.mjs module. Two material concerns block confidence: (1) process.mjs was deleted outright but may still be imported by surviving modules, creating a latent runtime crash; (2) the v0.4.6 retry/backoff feature—the single riskiest addition in this sweep—has zero UAT evidence (only v0.4.4 and v0.4.5 UAT directories exist), meaning the new error-dispatch→retry→client path has no end-to-end validation against a live API.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Deleted process.mjs may leave dangling imports causing runtime crash",
+        "body": "scripts/lib/process.mjs shows a net removal of 67 lines—it was deleted entirely. Concurrently, glm-companion.mjs (139 lines changed), render.mjs (79 lines changed), and job-control.mjs (20 lines changed) were all modified. If any surviving module still contains an `import ... from './process.mjs'` or `from './lib/process.mjs'`, the application will throw MODULE_NOT_FOUND at runtime. The diff stat alone cannot confirm all import paths were updated because we only see line counts, not content. This is exactly the class of bug that passes unit tests (which mock imports) but fails in production.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.72,
+        "recommendation": "Run `grep -r \"process\\.mjs\" scripts/ tests/` across the tree. If any hits remain outside process.mjs itself, those imports are broken. Also add a unit test that imports every module entry point to catch dangling references at CI time."
+      },
+      {
+        "severity": "high",
+        "title": "v0.4.6 retry/backoff feature ships with no UAT evidence",
+        "body": "Commit e0a9ba8 introduces 'BigModel error dispatch + auto retry/backoff'—the riskiest single change in the cumulative diff because it touches every API call path. However, test-automation/uat-reports/ contains only v0.4.4/ and v0.4.5/ subdirectories. There is no v0.4.6/ directory with scenario coverage for retry behavior (e.g., 429 handling, exponential backoff timing, retry budget exhaustion, retry on transient 5xx). The new retry.mjs (203 lines) and bigmodel-errors.mjs (168 lines) are covered only by unit tests (retry.test.mjs, bigmodel-errors.test.mjs), which cannot validate actual HTTP retry behavior against a live or simulated BigModel endpoint.",
+        "file": "test-automation/uat-reports/v0.4.5/report.md",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.93,
+        "recommendation": "Create test-automation/uat-reports/v0.4.6/ with at minimum: (A) a scenario that triggers a simulated 429 and validates backoff timing and eventual success, (B) a scenario that exhausts the retry budget and confirms a clean user-facing error (not a raw exception), (C) a scenario that verifies non-retryable errors (401, 403) are not retried. Do not ship without this."
+      },
+      {
+        "severity": "medium",
+        "title": "Retries on non-idempotent BigModel calls risk duplicate side effects",
+        "body": "glm-client.mjs (155 lines changed) presumably now delegates to retry.mjs for automatic retry on API failures. If any BigModel API calls are POST requests with side effects (e.g., submitting a review, creating a job, writing state), a retry after a timeout or 5xx could duplicate that operation. The attack surface (data duplication, irreversible state changes) is explicitly flagged. Without seeing the code, the concern is inferred from the combination of a new retry module + client changes, and confidence is adjusted accordingly.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.58,
+        "recommendation": "Audit every BigModel API call in glm-client.mjs. For any POST/PUT/PATCH that is not provably idempotent: (1) add an idempotency key header, or (2) wrap the retry logic so that only GET and HEAD requests are auto-retried, or (3) document explicitly why the endpoint is safe to retry. Add a code comment or guard visible at the retry call site."
+      },
+      {
+        "severity": "medium",
+        "title": "Error dispatch misclassification could suppress real failures silently",
+        "body": "bigmodel-errors.mjs (168 new lines) is responsible for classifying BigModel API errors into retryable vs. non-retryable categories. If an error is misclassified as non-retryable (e.g., a transient 502 classified as permanent), the user gets a false failure with no recovery. If classified as retryable when it shouldn't be (e.g., a 401 due to expired credentials), the system will hammer the API with doomed retries before eventually failing anyway—wasting time and potentially triggering rate limits. The only safety net is bigmodel-errors.test.mjs, but unit tests reflect the developer's mental model, not the actual API behavior under edge cases.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.55,
+        "recommendation": "Add integration-level logging that records the HTTP status code, the classification decision, and the retry outcome. This creates an audit trail for misclassifications. Also consider a fallback: if a 'non-retryable' error occurs on what should be a read operation, retry once anyway as a safety net against classification bugs."
+      }
+    ],
+    "next_steps": [
+      "Run `grep -rn 'process\\.mjs' scripts/ tests/ commands/` to confirm no dangling imports from the deleted module.",
+      "Create v0.4.6 UAT scenarios covering retry/429/backoff-budget before declaring the cumulative sweep complete.",
+      "Audit glm-client.mjs for non-idempotent POST calls that would be unsafe to retry automatically.",
+      "Add observability (structured logging) to the retry→error-dispatch→client path so misclassifications are detectable in production."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff introduces ~6,600 lines across 84 files including a brand-new retry/backoff subsystem (retry.mjs, 203 lines), BigModel error dispatch (bigmodel-errors.mjs, 168 lines), and a completely deleted process.mjs module. Two material concerns block confidence: (1) process.mjs was deleted outright but may still be imported by surviving modules, creating a latent runtime crash; (2) the v0.4.6 retry/backoff feature—the single riskiest addition in this sweep—has zero UAT evidence (only v0.4.4 and v0.4.5 UAT directories exist), meaning the new error-dispatch→retry→client path has no end-to-end validation against a live API.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"Deleted process.mjs may leave dangling imports causing runtime crash\",\n      \"body\": \"scripts/lib/process.mjs shows a net removal of 67 lines—it was deleted entirely. Concurrently, glm-companion.mjs (139 lines changed), render.mjs (79 lines changed), and job-control.mjs (20 lines changed) were all modified. If any surviving module still contains an `import ... from './process.mjs'` or `from './lib/process.mjs'`, the application will throw MODULE_NOT_FOUND at runtime. The diff stat alone cannot confirm all import paths were updated because we only see line counts, not content. This is exactly the class of bug that passes unit tests (which mock imports) but fails in production.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Run `grep -r \\\"process\\\\.mjs\\\" scripts/ tests/` across the tree. If any hits remain outside process.mjs itself, those imports are broken. Also add a unit test that imports every module entry point to catch dangling references at CI time.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"v0.4.6 retry/backoff feature ships with no UAT evidence\",\n      \"body\": \"Commit e0a9ba8 introduces 'BigModel error dispatch + auto retry/backoff'—the riskiest single change in the cumulative diff because it touches every API call path. However, test-automation/uat-reports/ contains only v0.4.4/ and v0.4.5/ subdirectories. There is no v0.4.6/ directory with scenario coverage for retry behavior (e.g., 429 handling, exponential backoff timing, retry budget exhaustion, retry on transient 5xx). The new retry.mjs (203 lines) and bigmodel-errors.mjs (168 lines) are covered only by unit tests (retry.test.mjs, bigmodel-errors.test.mjs), which cannot validate actual HTTP retry behavior against a live or simulated BigModel endpoint.\",\n      \"file\": \"test-automation/uat-reports/v0.4.5/report.md\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.93,\n      \"recommendation\": \"Create test-automation/uat-reports/v0.4.6/ with at minimum: (A) a scenario that triggers a simulated 429 and validates backoff timing and eventual success, (B) a scenario that exhausts the retry budget and confirms a clean user-facing error (not a raw exception), (C) a scenario that verifies non-retryable errors (401, 403) are not retried. Do not ship without this.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Retries on non-idempotent BigModel calls risk duplicate side effects\",\n      \"body\": \"glm-client.mjs (155 lines changed) presumably now delegates to retry.mjs for automatic retry on API failures. If any BigModel API calls are POST requests with side effects (e.g., submitting a review, creating a job, writing state), a retry after a timeout or 5xx could duplicate that operation. The attack surface (data duplication, irreversible state changes) is explicitly flagged. Without seeing the code, the concern is inferred from the combination of a new retry module + client changes, and confidence is adjusted accordingly.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.58,\n      \"recommendation\": \"Audit every BigModel API call in glm-client.mjs. For any POST/PUT/PATCH that is not provably idempotent: (1) add an idempotency key header, or (2) wrap the retry logic so that only GET and HEAD requests are auto-retried, or (3) document explicitly why the endpoint is safe to retry. Add a code comment or guard visible at the retry call site.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Error dispatch misclassification could suppress real failures silently\",\n      \"body\": \"bigmodel-errors.mjs (168 new lines) is responsible for classifying BigModel API errors into retryable vs. non-retryable categories. If an error is misclassified as non-retryable (e.g., a transient 502 classified as permanent), the user gets a false failure with no recovery. If classified as retryable when it shouldn't be (e.g., a 401 due to expired credentials), the system will hammer the API with doomed retries before eventually failing anyway—wasting time and potentially triggering rate limits. The only safety net is bigmodel-errors.test.mjs, but unit tests reflect the developer's mental model, not the actual API behavior under edge cases.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Add integration-level logging that records the HTTP status code, the classification decision, and the retry outcome. This creates an audit trail for misclassifications. Also consider a fallback: if a 'non-retryable' error occurs on what should be a read operation, retry once anyway as a safety net against classification bugs.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `grep -rn 'process\\\\.mjs' scripts/ tests/ commands/` to confirm no dangling imports from the deleted module.\",\n    \"Create v0.4.6 UAT scenarios covering retry/429/backoff-budget before declaring the cumulative sweep complete.\",\n    \"Audit glm-client.mjs for non-idempotent POST calls that would be unsafe to retry automatically.\",\n    \"Add observability (structured logging) to the retry→error-dispatch→client path so misclassifications are detectable in production.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T18:51:48.663Z"
+}

@@ -1,0 +1,28 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 29
+  },
+  "metrics": {
+    "schema_compliance": 0,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 21463,
+    "error_code": "PARSE_FAILURE"
+  },
+  "parsed": null,
+  "rawOutputHead": "I need to examine the actual code content of the most critical changed files to identify material defects. Let me start by reading the key new and modified files.",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "PARSE_FAILURE",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T18:56:48.495Z"
+}

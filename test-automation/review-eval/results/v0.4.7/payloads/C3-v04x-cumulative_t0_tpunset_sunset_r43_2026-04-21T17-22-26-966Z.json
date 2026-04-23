@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 43
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 114915,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces 371 lines of new retry/error-dispatch logic, deletes the process.mjs module entirely, and refactors state management across four interdependent files. These changes are high-regret surface area: retry loops on non-idempotent operations, orphaned job state after module deletion, and no visible state-migration path for existing installations. Ship blockers remain until deleted-module import safety and retry idempotency are verified end-to-end.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "scripts/lib/process.mjs deleted — latent import breakage risk",
+        "body": "The entire scripts/lib/process.mjs module (67 lines) was removed. The companion change in scripts/check-imports.mjs (5 lines changed) suggests the author updated the static import checker, but static checkers miss dynamic `import()` calls, eval-based loads, and conditional branches that only execute under error paths. If any runtime code path — including the new retry.mjs or bigmodel-errors.mjs modules — still transitively references process.mjs, the result is an unhandled MODULE_NOT_FOUND at runtime, likely in production error-recovery paths where it is hardest to debug. The timing is worst-case: the deletion coincides with new error-handling code that would be expected to catch such failures, potentially masking the root cause.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.72,
+        "recommendation": "Run `grep -r 'process' scripts/ --include='*.mjs'` across all .mjs files for any surviving reference to the deleted module. Add an integration test that exercises every exported function in retry.mjs and bigmodel-errors.mjs under simulated failure to confirm no deferred import of process.mjs occurs. If any reference exists, either restore the module or migrate the dependency before shipping."
+      },
+      {
+        "severity": "high",
+        "title": "New retry.mjs (203 lines) likely retries non-idempotent state mutations",
+        "body": "scripts/lib/retry.mjs is 203 lines of brand-new retry infrastructure, added alongside changes to glm-client.mjs (155 lines changed), tracked-jobs.mjs (78 lines changed), and state.mjs (32 lines changed). The co-occurrence is concerning: if retry wraps API calls that trigger job-state transitions (create, update, complete), a retried request that succeeded on the server but failed on the response path will execute the state mutation twice. The tracked-jobs.mjs changes suggest job lifecycle was refactored simultaneously, increasing the chance that retry boundaries and state-transition boundaries were designed by the same author under the same assumptions. No test file named retry-integration.test.mjs or similar appears in the diff; tests/retry.test.mjs exists (352 lines) but unit tests typically validate retry timing, not idempotency of the retried operations.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.68,
+        "recommendation": "Audit every call site where retry.mjs is applied. For each, determine whether the wrapped operation is idempotent (GET, status-check) or non-idempotent (job creation, state update, file write). For non-idempotent operations, either add an idempotency key mechanism, or restructure so retry only wraps the network layer and state transitions happen after confirmed success. Add an integration test that simulates a partial-success scenario (server returns 200, client drops response) and asserts single state mutation."
+      },
+      {
+        "severity": "medium",
+        "title": "State file format drift between v0.4.0 and v0.4.6 with no migration path",
+        "body": "scripts/lib/state.mjs shows 32 lines changed and scripts/lib/job-control.mjs shows 20 lines changed. Combined with the deletion of process.mjs and refactoring of tracked-jobs.mjs, the on-disk state format almost certainly changed between v0.4.0 and v0.4.6. No migration script, version header, or schema validator appears in the diff. An existing installation upgrading from v0.4.0 will have state files written in the old format. If the new code reads these files and encounters unexpected structure, the likely outcome is a silent TypeError or corrupt in-memory state that persists on next write — data loss that compounds over time and is invisible until a user notices missing job history.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.58,
+        "recommendation": "Add a state file version field (e.g., `{ \"version\": 2, ... }`) and a migration function that transforms v0.4.0-format state to the current format on load. If migration is deemed unnecessary, add a defensive parse with explicit validation that rejects unrecognized shapes and logs a clear error rather than silently corrupting. Cover this with a test that loads a v0.4.0-era state file fixture."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error dispatch may swallow unknown error types",
+        "body": "scripts/lib/bigmodel-errors.mjs adds 168 lines of error classification and dispatch logic. Error dispatch modules have a characteristic failure mode: when an error arrives that doesn't match any known pattern, the default branch either rethrows generically (losing context) or returns a fallback that callers misinterpret as success. The module is new (no prior version to compare) and its test file (tests/bigmodel-errors.test.mjs, 189 lines) likely covers the known error types from the author's experience but not novel or combined failures. Under production load, API providers change error formats without notice; a single new error shape falling through the dispatch could convert a retryable server error into a permanent client-side failure.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.6,
+        "recommendation": "Verify the default/fallback branch in the error classifier: it must preserve the original error object, attach a 'classification: unknown' marker, and log the unrecognized error shape at warn level for observability. Add a test case that passes a completely novel error object through the classifier and asserts it is neither swallowed nor misclassified as a non-retryable error."
+      }
+    ],
+    "next_steps": [
+      "Run `node -e \"require('./scripts/lib/retry.mjs')\"` and equivalent for bigmodel-errors.mjs to confirm no deferred import of deleted process.mjs at module-load time.",
+      "Grep all .mjs files for `from.*process` and `import.*process` to verify zero surviving references to the deleted module.",
+      "Audit retry.mjs call sites for idempotency; flag every non-GET operation wrapped by retry.",
+      "Add state-file version field and v0.4.0→current migration path before release.",
+      "Execute the existing UAT suites (v0.4.4, v0.4.5 run-uat.sh) against the current build to confirm no regression in covered scenarios."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff introduces 371 lines of new retry/error-dispatch logic, deletes the process.mjs module entirely, and refactors state management across four interdependent files. These changes are high-regret surface area: retry loops on non-idempotent operations, orphaned job state after module deletion, and no visible state-migration path for existing installations. Ship blockers remain until deleted-module import safety and retry idempotency are verified end-to-end.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"scripts/lib/process.mjs deleted — latent import breakage risk\",\n      \"body\": \"The entire scripts/lib/process.mjs module (67 lines) was removed. The companion change in scripts/check-imports.mjs (5 lines changed) suggests the author updated the static import checker, but static checkers miss dynamic `import()` calls, eval-based loads, and conditional branches that only execute under error paths. If any runtime code path — including the new retry.mjs or bigmodel-errors.mjs modules — still transitively references process.mjs, the result is an unhandled MODULE_NOT_FOUND at runtime, likely in production error-recovery paths where it is hardest to debug. The timing is worst-case: the deletion coincides with new error-handling code that would be expected to catch such failures, potentially masking the root cause.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Run `grep -r 'process' scripts/ --include='*.mjs'` across all .mjs files for any surviving reference to the deleted module. Add an integration test that exercises every exported function in retry.mjs and bigmodel-errors.mjs under simulated failure to confirm no deferred import of process.mjs occurs. If any reference exists, either restore the module or migrate the dependency before shipping.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"New retry.mjs (203 lines) likely retries non-idempotent state mutations\",\n      \"body\": \"scripts/lib/retry.mjs is 203 lines of brand-new retry infrastructure, added alongside changes to glm-client.mjs (155 lines changed), tracked-jobs.mjs (78 lines changed), and state.mjs (32 lines changed). The co-occurrence is concerning: if retry wraps API calls that trigger job-state transitions (create, update, complete), a retried request that succeeded on the server but failed on the response path will execute the state mutation twice. The tracked-jobs.mjs changes suggest job lifecycle was refactored simultaneously, increasing the chance that retry boundaries and state-transition boundaries were designed by the same author under the same assumptions. No test file named retry-integration.test.mjs or similar appears in the diff; tests/retry.test.mjs exists (352 lines) but unit tests typically validate retry timing, not idempotency of the retried operations.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Audit every call site where retry.mjs is applied. For each, determine whether the wrapped operation is idempotent (GET, status-check) or non-idempotent (job creation, state update, file write). For non-idempotent operations, either add an idempotency key mechanism, or restructure so retry only wraps the network layer and state transitions happen after confirmed success. Add an integration test that simulates a partial-success scenario (server returns 200, client drops response) and asserts single state mutation.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"State file format drift between v0.4.0 and v0.4.6 with no migration path\",\n      \"body\": \"scripts/lib/state.mjs shows 32 lines changed and scripts/lib/job-control.mjs shows 20 lines changed. Combined with the deletion of process.mjs and refactoring of tracked-jobs.mjs, the on-disk state format almost certainly changed between v0.4.0 and v0.4.6. No migration script, version header, or schema validator appears in the diff. An existing installation upgrading from v0.4.0 will have state files written in the old format. If the new code reads these files and encounters unexpected structure, the likely outcome is a silent TypeError or corrupt in-memory state that persists on next write — data loss that compounds over time and is invisible until a user notices missing job history.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.58,\n      \"recommendation\": \"Add a state file version field (e.g., `{ \\\"version\\\": 2, ... }`) and a migration function that transforms v0.4.0-format state to the current format on load. If migration is deemed unnecessary, add a defensive parse with explicit validation that rejects unrecognized shapes and logs a clear error rather than silently corrupting. Cover this with a test that loads a v0.4.0-era state file fixture.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"bigmodel-errors.mjs error dispatch may swallow unknown error types\",\n      \"body\": \"scripts/lib/bigmodel-errors.mjs adds 168 lines of error classification and dispatch logic. Error dispatch modules have a characteristic failure mode: when an error arrives that doesn't match any known pattern, the default branch either rethrows generically (losing context) or returns a fallback that callers misinterpret as success. The module is new (no prior version to compare) and its test file (tests/bigmodel-errors.test.mjs, 189 lines) likely covers the known error types from the author's experience but not novel or combined failures. Under production load, API providers change error formats without notice; a single new error shape falling through the dispatch could convert a retryable server error into a permanent client-side failure.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Verify the default/fallback branch in the error classifier: it must preserve the original error object, attach a 'classification: unknown' marker, and log the unrecognized error shape at warn level for observability. Add a test case that passes a completely novel error object through the classifier and asserts it is neither swallowed nor misclassified as a non-retryable error.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `node -e \\\"require('./scripts/lib/retry.mjs')\\\"` and equivalent for bigmodel-errors.mjs to confirm no deferred import of deleted process.mjs at module-load time.\",\n    \"Grep all .mjs files for `from.*process` and `import.*process` to verify zero surviving references to the deleted module.\",\n    \"Audit retry.mjs call sites for idempotency; flag every non-GET operation wrapped by retry.\",\n    \"Add state-file version field and v0.4.0→current migration path before release.\",\n    \"Execute the existing UAT suites (v0.4.4, v0.4.5 run-uat.sh) against the current build to confirm no regression in covered scenarios.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T17:22:26.990Z"
+}

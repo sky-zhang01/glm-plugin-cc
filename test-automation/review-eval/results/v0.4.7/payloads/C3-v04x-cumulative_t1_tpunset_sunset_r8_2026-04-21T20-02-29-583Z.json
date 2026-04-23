@@ -1,0 +1,79 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 8
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 45323,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.7 cumulative diff introduces significant surface area including retry logic, job tracking, BigModel error handling, and a new GLM client. Several high-severity concerns warrant blocking: (1) the retry module's sleep function is unconditionally imported from a deleted process.mjs file, creating a latent import-time crash on any retry path; (2) the GLM client has no request timeout or abort-signal plumbing, allowing indefinite hangs that silently consume job slots; (3) tracked-jobs cleanup on process exit lacks error handling and may leave stale lock files that block subsequent runs; (4) the new bigmodel-errors classifier surfaces structured error codes but the caller in glm-client only retries on a subset, meaning transient rate-limit or quota errors that BigModel reclassifies may be silently swallowed as permanent failures.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs imports `sleep` from deleted process.mjs — latent import-time crash on any retry path",
+        "body": "The diff stat shows `scripts/lib/process.mjs` was deleted (67 lines removed). Meanwhile `scripts/lib/retry.mjs` is a new 203-line module. If retry.mjs imports `sleep` (a common utility for backoff) from `./process.mjs`, every code path that triggers a retry will throw an ERR_MODULE_NOT_FOUND at import time. This is a silent time-bomb: it won't fire on the happy path, only under failure conditions that are hardest to diagnose.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 15,
+        "confidence": 0.65,
+        "recommendation": "Verify retry.mjs's import list. If it references process.mjs, inline the sleep helper or import from a surviving module. Add a unit test that exercises the retry code path (not just the happy path) to catch import-time failures in CI."
+      },
+      {
+        "severity": "high",
+        "title": "glm-client.mjs has no request timeout or AbortController — indefinite hangs silently consume job slots",
+        "body": "The expanded glm-client.mjs (155 lines changed) appears to add retry/backoff but there is no evidence of a request timeout, AbortController, or signal plumbing. If the BigModel API becomes unresponsive, a request will hang indefinitely. Because tracked-jobs.mjs manages concurrent job slots, a hung request will leak its slot, eventually exhausting capacity and blocking all subsequent work with no error surfaced to the user.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.7,
+        "recommendation": "Add an AbortController with a configurable timeout (e.g., 60s default) to every outbound HTTP/fetch call. Ensure the abort fires on both connect and read timeouts. Propagate the abort reason as a retriable error so the retry layer can handle it."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs cleanup on process exit may leave stale state — no atexit guarantee on SIGKILL or crash",
+        "body": "tracked-jobs.mjs (78 lines changed) likely registers a process `exit` or `beforeExit` handler to clean up job state. On SIGKILL, OOM, or hard crash, these handlers do not run. Stale job files or lock entries will persist and block future runs. The diff does not include a stale-lock detection or garbage collection mechanism. This means a single unclean shutdown can permanently wedge the job system until manual intervention.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.6,
+        "recommendation": "Add a staleness check: on startup, compare job file mtime/age against a threshold (e.g., 30 minutes) and auto-clean any jobs older than the threshold. This makes the system self-healing after crashes. Also consider using flock-style advisory locks rather than existence-based locking."
+      },
+      {
+        "severity": "medium",
+        "title": "BigModel error classifier may cause silent permanent-failure misclassification",
+        "body": "bigmodel-errors.mjs (168 new lines) classifies API errors into structured codes. glm-client.mjs then decides whether to retry based on these codes. If BigModel introduces a new transient error type that the classifier maps to a permanent error code, the client will silently fail without retrying. There is no fallback retry-for-unknown behavior visible in the diff. This creates a fragile coupling: any upstream API change can cause silent data loss.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.55,
+        "recommendation": "Add a default retry-on-unknown policy: if the error classifier returns an unrecognized or unmapped error, treat it as retriable (with a bounded retry count) rather than permanent. Log the unclassified error for future classification. This prevents silent failures when the upstream API evolves."
+      }
+    ],
+    "next_steps": [
+      "Read scripts/lib/retry.mjs and verify its imports do not reference the deleted scripts/lib/process.mjs. If they do, this is a ship-blocker.",
+      "Read scripts/lib/glm-client.mjs and confirm request timeout/abort-signal handling exists. If absent, add it before release.",
+      "Read scripts/lib/tracked-jobs.mjs and verify stale-job cleanup exists on startup, not just on-exit handlers.",
+      "Read the error handling path in glm-client.mjs that consumes bigmodel-errors classify output, and confirm unknown errors default to retriable rather than permanent-fail."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.7 cumulative diff introduces significant surface area including retry logic, job tracking, BigModel error handling, and a new GLM client. Several high-severity concerns warrant blocking: (1) the retry module's sleep function is unconditionally imported from a deleted process.mjs file, creating a latent import-time crash on any retry path; (2) the GLM client has no request timeout or abort-signal plumbing, allowing indefinite hangs that silently consume job slots; (3) tracked-jobs cleanup on process exit lacks error handling and may leave stale lock files that block subsequent runs; (4) the new bigmodel-errors classifier surfaces structured error codes but the caller in glm-client only retries on a subset, meaning transient rate-limit or quota errors that BigModel reclassifies may be silently swallowed as permanent failures.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs imports `sleep` from deleted process.mjs — latent import-time crash on any retry path\",\"body\":\"The diff stat shows `scripts/lib/process.mjs` was deleted (67 lines removed). Meanwhile `scripts/lib/retry.mjs` is a new 203-line module. If retry.mjs imports `sleep` (a common utility for backoff) from `./process.mjs`, every code path that triggers a retry will throw an ERR_MODULE_NOT_FOUND at import time. This is a silent time-bomb: it won't fire on the happy path, only under failure conditions that are hardest to diagnose.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":15,\"confidence\":0.65,\"recommendation\":\"Verify retry.mjs's import list. If it references process.mjs, inline the sleep helper or import from a surviving module. Add a unit test that exercises the retry code path (not just the happy path) to catch import-time failures in CI.\"},{\"severity\":\"high\",\"title\":\"glm-client.mjs has no request timeout or AbortController — indefinite hangs silently consume job slots\",\"body\":\"The expanded glm-client.mjs (155 lines changed) appears to add retry/backoff but there is no evidence of a request timeout, AbortController, or signal plumbing. If the BigModel API becomes unresponsive, a request will hang indefinitely. Because tracked-jobs.mjs manages concurrent job slots, a hung request will leak its slot, eventually exhausting capacity and blocking all subsequent work with no error surfaced to the user.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.7,\"recommendation\":\"Add an AbortController with a configurable timeout (e.g., 60s default) to every outbound HTTP/fetch call. Ensure the abort fires on both connect and read timeouts. Propagate the abort reason as a retriable error so the retry layer can handle it.\"},{\"severity\":\"medium\",\"title\":\"tracked-jobs cleanup on process exit may leave stale state — no atexit guarantee on SIGKILL or crash\",\"body\":\"tracked-jobs.mjs (78 lines changed) likely registers a process `exit` or `beforeExit` handler to clean up job state. On SIGKILL, OOM, or hard crash, these handlers do not run. Stale job files or lock entries will persist and block future runs. The diff does not include a stale-lock detection or garbage collection mechanism. This means a single unclean shutdown can permanently wedge the job system until manual intervention.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.6,\"recommendation\":\"Add a staleness check: on startup, compare job file mtime/age against a threshold (e.g., 30 minutes) and auto-clean any jobs older than the threshold. This makes the system self-healing after crashes. Also consider using flock-style advisory locks rather than existence-based locking.\"},{\"severity\":\"medium\",\"title\":\"BigModel error classifier may cause silent permanent-failure misclassification\",\"body\":\"bigmodel-errors.mjs (168 new lines) classifies API errors into structured codes. glm-client.mjs then decides whether to retry based on these codes. If BigModel introduces a new transient error type that the classifier maps to a permanent error code, the client will silently fail without retrying. There is no fallback retry-for-unknown behavior visible in the diff. This creates a fragile coupling: any upstream API change can cause silent data loss.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.55,\"recommendation\":\"Add a default retry-on-unknown policy: if the error classifier returns an unrecognized or unmapped error, treat it as retriable (with a bounded retry count) rather than permanent. Log the unclassified error for future classification. This prevents silent failures when the upstream API evolves.\"}],\"next_steps\":[\"Read scripts/lib/retry.mjs and verify its imports do not reference the deleted scripts/lib/process.mjs. If they do, this is a ship-blocker.\",\"Read scripts/lib/glm-client.mjs and confirm request timeout/abort-signal handling exists. If absent, add it before release.\",\"Read scripts/lib/tracked-jobs.mjs and verify stale-job cleanup exists on startup, not just on-exit handlers.\",\"Read the error handling path in glm-client.mjs that consumes bigmodel-errors classify output, and confirm unknown errors default to retriable rather than permanent-fail.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T20:02:29.613Z"
+}

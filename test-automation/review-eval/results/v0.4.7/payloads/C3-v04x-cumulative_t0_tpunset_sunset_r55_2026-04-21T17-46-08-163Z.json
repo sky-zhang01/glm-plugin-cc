@@ -1,0 +1,79 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 55
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 115185,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff touches 84 files with 6,623 additions—a disproportionate blast radius for a patch-series. Two structural risks stand out: (1) glm-client.mjs, the core API transport, received ~155 lines of changes integrating retry and BigModel error dispatch but has no dedicated test file, meaning misclassified errors or broken retry integration would only surface in production; (2) process.mjs was deleted (67 lines purged) with a commit message referencing a prior ReferenceError, and any surviving dynamic import or conditional path referencing it will crash at runtime. Both are the kind of silent-gap failures that pass UAT on happy paths and break under edge-case load.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "No dedicated test coverage for glm-client.mjs despite major retry/error-handling integration",
+        "body": "scripts/lib/glm-client.mjs shows ~155 lines of changes (diff stat). It now integrates retry.mjs (203 new lines) and bigmodel-errors.mjs (168 new lines) for auto-retry with backoff and BigModel error dispatch. The test directory contains 14 test files—retry.test.mjs, bigmodel-errors.test.mjs, result-propagation.test.mjs, etc.—but no glm-client.test.mjs. Unit tests for the helper modules cannot cover integration defects: an error misclassified by bigmodel-errors.mjs could cause the client to retry a non-idempotent mutation, or conversely fail to retry a transient 429/500. The result-propagation.test.mjs at only 69 lines is too thin to serve as a proxy integration test. This is the highest-value untested code path in the release.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.88,
+        "recommendation": "Add tests/glm-client.test.mjs that exercises the full retry→error-classification→client call pipeline with mocked HTTP responses covering: transient 429/500 with retry, permanent 4xx with no retry, malformed response bodies, and timeout scenarios. At minimum, validate that non-idempotent HTTP methods (POST mutations) are not retried on ambiguous responses."
+      },
+      {
+        "severity": "high",
+        "title": "Deleted process.mjs may leave dangling import references that crash at runtime",
+        "body": "scripts/lib/process.mjs was deleted entirely (67 lines removed) per commit 225401a ('ReferenceError + full thread/resume scaffolding purge'). If any file dynamically imports from './lib/process.mjs' or './process.mjs' under a conditional code path (e.g., a feature flag, error-recovery branch, or background execution mode added in d573807), the import will throw ERR_MODULE_NOT_FOUND at runtime. Static import analysis may not catch dynamic imports or string-concatenated import paths. The UAT runs (v0.4.4, v0.4.5) cover documented scenarios but background execution (--background flag) is newer and less exercised.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.72,
+        "recommendation": "Grep the entire codebase for all references to 'process.mjs' (including dynamic imports, string concatenation, and eval patterns). Verify that the --wait/--background execution-mode paths added in d573807 do not transitively reach any code that formerly depended on process.mjs. Add a CI check that validates no import resolves to the deleted path (e.g., node --check or a static import resolver)."
+      },
+      {
+        "severity": "medium",
+        "title": "Retry module may re-execute non-idempotent API operations on ambiguous failures",
+        "body": "scripts/lib/retry.mjs (203 new lines) provides generic retry with backoff. If the caller (glm-client.mjs) applies retry to HTTP POST requests that create or mutate server-side state—such as job submission—and the server returns a late timeout or a 500 after the mutation was persisted, the retry will produce duplicate side effects. The bigmodel-errors.mjs classifier (168 new lines) would need to distinguish 'safe to retry' from 'already committed' errors, but without glm-client integration tests, there is no evidence this distinction is implemented or correct.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.65,
+        "recommendation": "Verify that retry.mjs exposes a mechanism for callers to declare idempotency (e.g., a retryable predicate or method-level flag). Ensure glm-client.mjs marks POST mutations as non-retryable unless an explicit idempotency key is provided. Document the contract in retry.mjs header comments."
+      },
+      {
+        "severity": "medium",
+        "title": "Massive cumulative diff for a minor version series risks undetected regressions",
+        "body": "v0.4.0→v0.4.6 adds 6,623 lines across 84 files. This is an extraordinary scope for six patch-level releases. Critical infrastructure (API client, retry, error handling, state management, job tracking, filesystem utilities) was all modified. UAT exists for v0.4.4 and v0.4.5 scenarios but there is no v0.4.6 UAT report in the repo, and no evidence of integration testing across the full retry→error→client→state pipeline under concurrent or failure conditions.",
+        "file": "release_card.md",
+        "line_start": 1,
+        "line_end": 193,
+        "confidence": 0.7,
+        "recommendation": "Before tagging v0.4.7, run a cumulative integration test that exercises the complete pipeline: submit a job → trigger a transient API error → verify retry fires → verify error is classified correctly → verify final state is consistent. Consider adding a v0.4.6 UAT report to match the pattern established for v0.4.4 and v0.4.5."
+      }
+    ],
+    "next_steps": [
+      "Add tests/glm-client.test.mjs covering retry+error-classification integration with mocked HTTP before proceeding to v0.4.7.",
+      "Run a full-codebase grep for 'process.mjs' references (including dynamic imports) and confirm zero hits; add a CI guard.",
+      "Verify that retry.mjs does not retry POST/PUT mutations without an explicit idempotency safeguard.",
+      "Produce a v0.4.6 UAT report consistent with the v0.4.4/v0.4.5 evidence pattern before release."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff touches 84 files with 6,623 additions—a disproportionate blast radius for a patch-series. Two structural risks stand out: (1) glm-client.mjs, the core API transport, received ~155 lines of changes integrating retry and BigModel error dispatch but has no dedicated test file, meaning misclassified errors or broken retry integration would only surface in production; (2) process.mjs was deleted (67 lines purged) with a commit message referencing a prior ReferenceError, and any surviving dynamic import or conditional path referencing it will crash at runtime. Both are the kind of silent-gap failures that pass UAT on happy paths and break under edge-case load.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"No dedicated test coverage for glm-client.mjs despite major retry/error-handling integration\",\n      \"body\": \"scripts/lib/glm-client.mjs shows ~155 lines of changes (diff stat). It now integrates retry.mjs (203 new lines) and bigmodel-errors.mjs (168 new lines) for auto-retry with backoff and BigModel error dispatch. The test directory contains 14 test files—retry.test.mjs, bigmodel-errors.test.mjs, result-propagation.test.mjs, etc.—but no glm-client.test.mjs. Unit tests for the helper modules cannot cover integration defects: an error misclassified by bigmodel-errors.mjs could cause the client to retry a non-idempotent mutation, or conversely fail to retry a transient 429/500. The result-propagation.test.mjs at only 69 lines is too thin to serve as a proxy integration test. This is the highest-value untested code path in the release.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.88,\n      \"recommendation\": \"Add tests/glm-client.test.mjs that exercises the full retry→error-classification→client call pipeline with mocked HTTP responses covering: transient 429/500 with retry, permanent 4xx with no retry, malformed response bodies, and timeout scenarios. At minimum, validate that non-idempotent HTTP methods (POST mutations) are not retried on ambiguous responses.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"Deleted process.mjs may leave dangling import references that crash at runtime\",\n      \"body\": \"scripts/lib/process.mjs was deleted entirely (67 lines removed) per commit 225401a ('ReferenceError + full thread/resume scaffolding purge'). If any file dynamically imports from './lib/process.mjs' or './process.mjs' under a conditional code path (e.g., a feature flag, error-recovery branch, or background execution mode added in d573807), the import will throw ERR_MODULE_NOT_FOUND at runtime. Static import analysis may not catch dynamic imports or string-concatenated import paths. The UAT runs (v0.4.4, v0.4.5) cover documented scenarios but background execution (--background flag) is newer and less exercised.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Grep the entire codebase for all references to 'process.mjs' (including dynamic imports, string concatenation, and eval patterns). Verify that the --wait/--background execution-mode paths added in d573807 do not transitively reach any code that formerly depended on process.mjs. Add a CI check that validates no import resolves to the deleted path (e.g., node --check or a static import resolver).\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Retry module may re-execute non-idempotent API operations on ambiguous failures\",\n      \"body\": \"scripts/lib/retry.mjs (203 new lines) provides generic retry with backoff. If the caller (glm-client.mjs) applies retry to HTTP POST requests that create or mutate server-side state—such as job submission—and the server returns a late timeout or a 500 after the mutation was persisted, the retry will produce duplicate side effects. The bigmodel-errors.mjs classifier (168 new lines) would need to distinguish 'safe to retry' from 'already committed' errors, but without glm-client integration tests, there is no evidence this distinction is implemented or correct.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Verify that retry.mjs exposes a mechanism for callers to declare idempotency (e.g., a retryable predicate or method-level flag). Ensure glm-client.mjs marks POST mutations as non-retryable unless an explicit idempotency key is provided. Document the contract in retry.mjs header comments.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Massive cumulative diff for a minor version series risks undetected regressions\",\n      \"body\": \"v0.4.0→v0.4.6 adds 6,623 lines across 84 files. This is an extraordinary scope for six patch-level releases. Critical infrastructure (API client, retry, error handling, state management, job tracking, filesystem utilities) was all modified. UAT exists for v0.4.4 and v0.4.5 scenarios but there is no v0.4.6 UAT report in the repo, and no evidence of integration testing across the full retry→error→client→state pipeline under concurrent or failure conditions.\",\n      \"file\": \"release_card.md\",\n      \"line_start\": 1,\n      \"line_end\": 193,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Before tagging v0.4.7, run a cumulative integration test that exercises the complete pipeline: submit a job → trigger a transient API error → verify retry fires → verify error is classified correctly → verify final state is consistent. Consider adding a v0.4.6 UAT report to match the pattern established for v0.4.4 and v0.4.5.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Add tests/glm-client.test.mjs covering retry+error-classification integration with mocked HTTP before proceeding to v0.4.7.\",\n    \"Run a full-codebase grep for 'process.mjs' references (including dynamic imports) and confirm zero hits; add a CI guard.\",\n    \"Verify that retry.mjs does not retry POST/PUT mutations without an explicit idempotency safeguard.\",\n    \"Produce a v0.4.6 UAT report consistent with the v0.4.4/v0.4.5 evidence pattern before release.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T17:46:08.195Z"
+}

@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 61
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.5,
+    "citation_false_file_hits": 0,
+    "latency_ms": 121631,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces ~6,600 lines across 84 files, but leaves the core API client (glm-client.mjs, 155 lines changed) and job-tracking module (tracked-jobs.mjs, 78 lines changed) with zero dedicated test coverage. A process-management module (process.mjs) was deleted entirely with no UAT evidence for v0.4.6's new retry/backoff logic. These gaps represent the highest-risk blind spots in an otherwise well-tested release series.",
+    "findings": [
+      {
+        "severity": "critical",
+        "title": "glm-client.mjs (155 lines changed) has no dedicated test file",
+        "body": "The GLM API client is the trust boundary to the external model service — it handles authentication tokens, HTTP request construction, response parsing, error dispatch, and now integrates with the new retry/backoff layer (retry.mjs). Despite 155 lines of changes, there is no `tests/glm-client.test.mjs` in the file list. Every other library module (retry, bigmodel-errors, state, render, fs, args) has a corresponding test. The client is the one module where a silent failure (stale token, malformed response, network timeout misclassified as retryable) would be both user-visible and hard to diagnose. The `tests/result-propagation.test.mjs` and `tests/job-render.test.mjs` may exercise the client indirectly, but indirect coverage of an auth-bearing HTTP client is not sufficient — retry-loop interaction, backpressure, and error-classification edge cases need targeted assertions.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.92,
+        "recommendation": "Add `tests/glm-client.test.mjs` covering: (1) retry decision on each BigModel error class, (2) auth-token handling on 401/403, (3) response validation on malformed JSON, (4) timeout behavior, (5) idempotency of retried requests. Block ship until the retry↔client integration has explicit test cases."
+      },
+      {
+        "severity": "high",
+        "title": "process.mjs deleted (67 lines) with no visible replacement or test evidence",
+        "body": "The diff stat shows `scripts/lib/process.mjs` as 67 lines removed and no new file replacing it. If this module handled child-process spawning, signal propagation, or cleanup-on-exit, its removal could orphan child processes or break graceful shutdown. The commit message for the removal bundle says 'full thread/resume scaffolding purge' (commit 225401a), but there is no test file validating that the purge didn't leave dangling references. The remaining modules (glm-companion.mjs, job-control.mjs, tracked-jobs.mjs) may still call functions that no longer exist, which would surface as runtime ReferenceErrors only under live load.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.78,
+        "recommendation": "Verify via `grep -r 'from.*process\\.mjs\\|require.*process' scripts/` that no import of process.mjs remains. Add a test that exercises every remaining code path that previously depended on process.mjs to confirm no ReferenceError or silent undefined return. If orphan-process cleanup was handled here, confirm that signal handlers and exit hooks are registered elsewhere."
+      },
+      {
+        "severity": "high",
+        "title": "tracked-jobs.mjs (78 lines changed) has no dedicated test file",
+        "body": "Job tracking is the persistence layer for long-running operations. If tracked-jobs.mjs corrupts state (e.g., marking a failed job as running, losing a job on concurrent writes, or failing to clean up completed jobs), the user sees stale UI or phantom jobs — a data-integrity issue that is difficult to recover from. The diff stat shows 78 lines changed, and no `tests/tracked-jobs.test.mjs` exists. This is especially risky because v0.4.5 added --wait/--background execution modes which directly depend on correct job state transitions.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.85,
+        "recommendation": "Add `tests/tracked-jobs.test.mjs` covering: (1) job lifecycle (create→running→complete, create→running→failed), (2) concurrent job creation, (3) stale-job recovery, (4) file-corruption tolerance on read. Validate that --wait and --background modes in glm-companion.mjs handle every tracked-jobs edge case."
+      },
+      {
+        "severity": "medium",
+        "title": "No UAT evidence for v0.4.6 retry/backoff feature",
+        "body": "UAT reports and scenario JSON files exist for v0.4.4 and v0.4.5 but not for v0.4.6. The v0.4.6 release (commit e0a9ba8) introduced 'BigModel error dispatch + auto retry/backoff' — the single most failure-prone pattern to add to an API client. Retry storms, non-idempotent retries, and misclassified retryable errors are classic production incidents. Without UAT scenarios exercising the retry path under simulated failures (rate limits, timeouts, server errors), the retry logic is validated only by unit tests that may not capture real network behavior.",
+        "file": "test-automation/uat-reports",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.72,
+        "recommendation": "Create `test-automation/uat-reports/v0.4.6/` with scenarios that exercise: (1) retry on 429 rate-limit with correct backoff, (2) retry on 500/502/503 with eventual success, (3) retry exhaustion with clean failure propagation, (4) concurrent requests triggering independent retry loops without cross-contamination."
+      }
+    ],
+    "next_steps": [
+      "Run `grep -rn 'from.*process\\.mjs' scripts/` to confirm no dangling imports from the deleted process.mjs module.",
+      "Add `tests/glm-client.test.mjs` with retry-integration and auth-boundary test cases before release.",
+      "Add `tests/tracked-jobs.test.mjs` covering concurrent job-state mutations and corruption recovery.",
+      "Execute UAT for v0.4.6 retry/backoff under simulated failure conditions (rate-limit, timeout, server error).",
+      "Verify idempotency of all retried API calls in glm-client.mjs — if any POST mutation is retried, confirm the server handles duplicate requests safely or add idempotency keys."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff introduces ~6,600 lines across 84 files, but leaves the core API client (glm-client.mjs, 155 lines changed) and job-tracking module (tracked-jobs.mjs, 78 lines changed) with zero dedicated test coverage. A process-management module (process.mjs) was deleted entirely with no UAT evidence for v0.4.6's new retry/backoff logic. These gaps represent the highest-risk blind spots in an otherwise well-tested release series.\",\n  \"findings\": [\n    {\n      \"severity\": \"critical\",\n      \"title\": \"glm-client.mjs (155 lines changed) has no dedicated test file\",\n      \"body\": \"The GLM API client is the trust boundary to the external model service — it handles authentication tokens, HTTP request construction, response parsing, error dispatch, and now integrates with the new retry/backoff layer (retry.mjs). Despite 155 lines of changes, there is no `tests/glm-client.test.mjs` in the file list. Every other library module (retry, bigmodel-errors, state, render, fs, args) has a corresponding test. The client is the one module where a silent failure (stale token, malformed response, network timeout misclassified as retryable) would be both user-visible and hard to diagnose. The `tests/result-propagation.test.mjs` and `tests/job-render.test.mjs` may exercise the client indirectly, but indirect coverage of an auth-bearing HTTP client is not sufficient — retry-loop interaction, backpressure, and error-classification edge cases need targeted assertions.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.92,\n      \"recommendation\": \"Add `tests/glm-client.test.mjs` covering: (1) retry decision on each BigModel error class, (2) auth-token handling on 401/403, (3) response validation on malformed JSON, (4) timeout behavior, (5) idempotency of retried requests. Block ship until the retry↔client integration has explicit test cases.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"process.mjs deleted (67 lines) with no visible replacement or test evidence\",\n      \"body\": \"The diff stat shows `scripts/lib/process.mjs` as 67 lines removed and no new file replacing it. If this module handled child-process spawning, signal propagation, or cleanup-on-exit, its removal could orphan child processes or break graceful shutdown. The commit message for the removal bundle says 'full thread/resume scaffolding purge' (commit 225401a), but there is no test file validating that the purge didn't leave dangling references. The remaining modules (glm-companion.mjs, job-control.mjs, tracked-jobs.mjs) may still call functions that no longer exist, which would surface as runtime ReferenceErrors only under live load.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Verify via `grep -r 'from.*process\\\\.mjs\\\\|require.*process' scripts/` that no import of process.mjs remains. Add a test that exercises every remaining code path that previously depended on process.mjs to confirm no ReferenceError or silent undefined return. If orphan-process cleanup was handled here, confirm that signal handlers and exit hooks are registered elsewhere.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"tracked-jobs.mjs (78 lines changed) has no dedicated test file\",\n      \"body\": \"Job tracking is the persistence layer for long-running operations. If tracked-jobs.mjs corrupts state (e.g., marking a failed job as running, losing a job on concurrent writes, or failing to clean up completed jobs), the user sees stale UI or phantom jobs — a data-integrity issue that is difficult to recover from. The diff stat shows 78 lines changed, and no `tests/tracked-jobs.test.mjs` exists. This is especially risky because v0.4.5 added --wait/--background execution modes which directly depend on correct job state transitions.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.85,\n      \"recommendation\": \"Add `tests/tracked-jobs.test.mjs` covering: (1) job lifecycle (create→running→complete, create→running→failed), (2) concurrent job creation, (3) stale-job recovery, (4) file-corruption tolerance on read. Validate that --wait and --background modes in glm-companion.mjs handle every tracked-jobs edge case.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"No UAT evidence for v0.4.6 retry/backoff feature\",\n      \"body\": \"UAT reports and scenario JSON files exist for v0.4.4 and v0.4.5 but not for v0.4.6. The v0.4.6 release (commit e0a9ba8) introduced 'BigModel error dispatch + auto retry/backoff' — the single most failure-prone pattern to add to an API client. Retry storms, non-idempotent retries, and misclassified retryable errors are classic production incidents. Without UAT scenarios exercising the retry path under simulated failures (rate limits, timeouts, server errors), the retry logic is validated only by unit tests that may not capture real network behavior.\",\n      \"file\": \"test-automation/uat-reports\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Create `test-automation/uat-reports/v0.4.6/` with scenarios that exercise: (1) retry on 429 rate-limit with correct backoff, (2) retry on 500/502/503 with eventual success, (3) retry exhaustion with clean failure propagation, (4) concurrent requests triggering independent retry loops without cross-contamination.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `grep -rn 'from.*process\\\\.mjs' scripts/` to confirm no dangling imports from the deleted process.mjs module.\",\n    \"Add `tests/glm-client.test.mjs` with retry-integration and auth-boundary test cases before release.\",\n    \"Add `tests/tracked-jobs.test.mjs` covering concurrent job-state mutations and corruption recovery.\",\n    \"Execute UAT for v0.4.6 retry/backoff under simulated failure conditions (rate-limit, timeout, server error).\",\n    \"Verify idempotency of all retried API calls in glm-client.mjs — if any POST mutation is retried, confirm the server handles duplicate requests safely or add idempotency keys.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T19:42:52.799Z"
+}

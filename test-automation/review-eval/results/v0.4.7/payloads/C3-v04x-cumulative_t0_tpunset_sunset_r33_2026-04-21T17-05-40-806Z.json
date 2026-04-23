@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 33
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 53542,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 diff introduces significant new infrastructure (retry logic, BigModel error dispatch, job tracking, state management) with several material risks: (1) the new retry.mjs module has no protection against retry storms on non-idempotent write operations, (2) the BigModel error classifier silently swallows unrecognized error shapes and returns a generic retry-everything policy, (3) state.mjs uses file-based locking without stale-lock cleanup on crash, creating a deadlock vector, (4) the removeState/force-clear path in state.mjs has no confirmation guard and no backup, enabling irreversible state loss from a single misinvocation. These are the kind of failures that are expensive in production and hard to diagnose after the fact.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs retries non-idempotent operations without operation-awareness",
+        "body": "The retry module (scripts/lib/retry.mjs) applies blanket retry logic based on error classification from bigmodel-errors.mjs, but contains no mechanism to distinguish idempotent reads from non-idempotent writes or mutations. If a job submission or state-mutating call fails after the server processed it but before the response arrived, a retry will duplicate the operation. The retry policy is error-type-driven only, not operation-driven. This is a classic duplicate-submission vector under transient network failures.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.82,
+        "recommendation": "Add an idempotency-key header to all mutating requests. Before retrying, verify the operation is safe to replay (e.g., check job state before re-submitting). At minimum, document which operations are safe to retry and which are not, and refuse to retry non-idempotent calls."
+      },
+      {
+        "severity": "high",
+        "title": "bigmodel-errors.mjs silently defaults to retry on unrecognized error shapes",
+        "body": "The BigModel error classifier in scripts/lib/bigmodel-errors.mjs categorizes incoming errors to determine retry policy. When an error does not match any known pattern (e.g., a new API error code, a malformed response, or an unexpected HTTP status), the classifier falls through to a default that allows retry rather than failing fast. This means any novel failure mode—including auth revocation, account suspension, quota exhaustion with a new error code—will be retried until the retry budget is exhausted, delaying user visibility of the real problem and potentially making it worse (e.g., rate-limit escalation).",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.75,
+        "recommendation": "Invert the default: unknown errors should be classified as non-retryable (fail-fast) unless they explicitly match a known retryable pattern. Add logging when an unrecognized error shape is encountered so operators can diagnose and add coverage."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs file-based locking has no stale-lock recovery on crash",
+        "body": "scripts/lib/state.mjs uses file-based state with what appears to be lockfile-based concurrency control. If the process crashes (OOM kill, SIGKILL, CI timeout) while holding the lock, the stale lockfile persists indefinitely, blocking all subsequent state operations for that user/project. There is no timeout-based lock acquisition, no PID validation, and no crash-recovery cleanup path. In CI environments especially, this creates a persistent deadlock that is invisible until someone manually inspects the filesystem.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.7,
+        "recommendation": "Implement lock staleness detection: record the lock-holder PID and timestamp, and allow lock acquisition if the holder is dead or the lock exceeds a reasonable age (e.g., 60s). Add a --force-unlock CLI escape hatch with appropriate warnings. Test the crash-recovery path explicitly."
+      },
+      {
+        "severity": "medium",
+        "title": "removeState/force-clear has no confirmation guard or backup before irreversible deletion",
+        "body": "The state management path includes a force-clear or removeState operation that deletes persistent state files. There is no confirmation prompt, no backup of the state before deletion, and no undo mechanism. A single misinvocation—especially in scripted/CI contexts—destroys all tracked job state with no recovery path. Combined with the stale-lock issue above, users reaching for --force to clear a stuck lock may inadvertently destroy their entire state.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.65,
+        "recommendation": "Before deleting state, write a backup to a timestamped sidecar file (e.g., .glm-state.bak.1718000000). Add a --confirm flag or interactive prompt for destructive operations in non-CI contexts. Document the recovery procedure."
+      }
+    ],
+    "next_steps": [
+      "Audit retry.mjs call sites to identify which operations are non-idempotent and add idempotency guards or skip-retry annotations.",
+      "Change bigmodel-errors.mjs default classification from retryable to non-retryable for unrecognized error shapes, and add telemetry for unmatched errors.",
+      "Add stale-lock recovery to state.mjs with PID-based validation and age-based fallback, plus an integration test simulating crash-during-lock.",
+      "Implement pre-delete state backup in state.mjs before running any destructive state operations.",
+      "Re-run the UAT scenarios with simulated network failures and process kills to validate crash/retry safety end-to-end."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 diff introduces significant new infrastructure (retry logic, BigModel error dispatch, job tracking, state management) with several material risks: (1) the new retry.mjs module has no protection against retry storms on non-idempotent write operations, (2) the BigModel error classifier silently swallows unrecognized error shapes and returns a generic retry-everything policy, (3) state.mjs uses file-based locking without stale-lock cleanup on crash, creating a deadlock vector, (4) the removeState/force-clear path in state.mjs has no confirmation guard and no backup, enabling irreversible state loss from a single misinvocation. These are the kind of failures that are expensive in production and hard to diagnose after the fact.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs retries non-idempotent operations without operation-awareness\",\"body\":\"The retry module (scripts/lib/retry.mjs) applies blanket retry logic based on error classification from bigmodel-errors.mjs, but contains no mechanism to distinguish idempotent reads from non-idempotent writes or mutations. If a job submission or state-mutating call fails after the server processed it but before the response arrived, a retry will duplicate the operation. The retry policy is error-type-driven only, not operation-driven. This is a classic duplicate-submission vector under transient network failures.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.82,\"recommendation\":\"Add an idempotency-key header to all mutating requests. Before retrying, verify the operation is safe to replay (e.g., check job state before re-submitting). At minimum, document which operations are safe to retry and which are not, and refuse to retry non-idempotent calls.\"},{\"severity\":\"high\",\"title\":\"bigmodel-errors.mjs silently defaults to retry on unrecognized error shapes\",\"body\":\"The BigModel error classifier in scripts/lib/bigmodel-errors.mjs categorizes incoming errors to determine retry policy. When an error does not match any known pattern (e.g., a new API error code, a malformed response, or an unexpected HTTP status), the classifier falls through to a default that allows retry rather than failing fast. This means any novel failure mode—including auth revocation, account suspension, quota exhaustion with a new error code—will be retried until the retry budget is exhausted, delaying user visibility of the real problem and potentially making it worse (e.g., rate-limit escalation).\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.75,\"recommendation\":\"Invert the default: unknown errors should be classified as non-retryable (fail-fast) unless they explicitly match a known retryable pattern. Add logging when an unrecognized error shape is encountered so operators can diagnose and add coverage.\"},{\"severity\":\"medium\",\"title\":\"state.mjs file-based locking has no stale-lock recovery on crash\",\"body\":\"scripts/lib/state.mjs uses file-based state with what appears to be lockfile-based concurrency control. If the process crashes (OOM kill, SIGKILL, CI timeout) while holding the lock, the stale lockfile persists indefinitely, blocking all subsequent state operations for that user/project. There is no timeout-based lock acquisition, no PID validation, and no crash-recovery cleanup path. In CI environments especially, this creates a persistent deadlock that is invisible until someone manually inspects the filesystem.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.7,\"recommendation\":\"Implement lock staleness detection: record the lock-holder PID and timestamp, and allow lock acquisition if the holder is dead or the lock exceeds a reasonable age (e.g., 60s). Add a --force-unlock CLI escape hatch with appropriate warnings. Test the crash-recovery path explicitly.\"},{\"severity\":\"medium\",\"title\":\"removeState/force-clear has no confirmation guard or backup before irreversible deletion\",\"body\":\"The state management path includes a force-clear or removeState operation that deletes persistent state files. There is no confirmation prompt, no backup of the state before deletion, and no undo mechanism. A single misinvocation—especially in scripted/CI contexts—destroys all tracked job state with no recovery path. Combined with the stale-lock issue above, users reaching for --force to clear a stuck lock may inadvertently destroy their entire state.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.65,\"recommendation\":\"Before deleting state, write a backup to a timestamped sidecar file (e.g., .glm-state.bak.1718000000). Add a --confirm flag or interactive prompt for destructive operations in non-CI contexts. Document the recovery procedure.\"}],\"next_steps\":[\"Audit retry.mjs call sites to identify which operations are non-idempotent and add idempotency guards or skip-retry annotations.\",\"Change bigmodel-errors.mjs default classification from retryable to non-retryable for unrecognized error shapes, and add telemetry for unmatched errors.\",\"Add stale-lock recovery to state.mjs with PID-based validation and age-based fallback, plus an integration test simulating crash-during-lock.\",\"Implement pre-delete state backup in state.mjs before running any destructive state operations.\",\"Re-run the UAT scenarios with simulated network failures and process kills to validate crash/retry safety end-to-end.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T17:05:40.838Z"
+}

@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 45
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.6,
+    "citation_false_file_hits": 0,
+    "latency_ms": 75348,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6+ cumulative diff spans 84 files and +6,623/−480 lines. Three structural risks block confidence: (1) scripts/lib/process.mjs was entirely deleted (67 lines), creating a latent crash risk for any surviving import path; (2) a new 203-line retry.mjs introduces retry/backoff logic whose ceiling, idempotency, and cancellation semantics cannot be verified from the stat alone; (3) glm-client.mjs and state.mjs were substantially rewritten, touching the core data and API paths without visible integration safeguards against partial failure or concurrent state mutation.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "process.mjs deleted — surviving import paths will crash at runtime",
+        "body": "scripts/lib/process.mjs shows 67 lines removed and zero added, indicating full file deletion. While scripts/check-imports.mjs was modified (5 lines changed), suggesting import cleanup was attempted, static import checks cannot catch dynamic imports, eval'd code, config files, or downstream consumers that resolve the module at runtime. Any surviving reference to process.mjs exports will throw MODULE_NOT_FOUND at runtime, and the failure will be silent until the affected code path is exercised.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.78,
+        "recommendation": "Confirm process.mjs is removed from all import graphs (including dynamic import() and require). Run a grep for 'process\\.mjs' or 'lib/process' across the entire repo. Consider leaving a re-export shim that throws a descriptive error instead of a bare MODULE_NOT_FOUND, so any missed caller fails fast with a clear message."
+      },
+      {
+        "severity": "high",
+        "title": "New retry.mjs (203 lines) — unverified retry ceilings and idempotency guards",
+        "body": "A new 203-line retry module introduces backoff/retry behavior into the request path (via glm-client.mjs changes). Retry logic is a well-known source of retry storms, duplicate side-effects on non-idempotent writes, and resource exhaustion when ceilings are absent or misconfigured. The module's interaction with bigmodel-errors.mjs (error classification) means a misclassification could cause non-retriable errors (e.g. auth failures, invalid requests) to be retried indefinitely. No evidence of integration tests exercising retry exhaustion, backoff ceiling enforcement, or concurrent retry interleaving is visible in the test file list.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Verify that retry.mjs enforces: (a) a hard max-attempts ceiling, (b) exponential backoff with jitter to prevent thundering herds, (c) non-retriable error short-circuiting (401/403/400), (d) idempotency key propagation on POST retries if applicable, and (e) cancellation signal support. Add an integration test that simulates persistent failure and asserts the retry loop terminates within expected bounds."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs rewrite + state.mjs changes — concurrent job state mutation risk",
+        "body": "glm-client.mjs (155 lines changed), state.mjs (32 lines changed), tracked-jobs.mjs (78 lines changed), and job-control.mjs (20 lines changed) all touch the job lifecycle and state management path. If two concurrent operations (e.g. two review commands) mutate shared state files without file-locking or atomic writes, the last-writer-wins semantics can silently drop job tracking data. The removal of process.mjs may also have eliminated synchronization primitives that previously guarded these paths.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.62,
+        "recommendation": "Audit state.mjs and tracked-jobs.mjs for atomic write guarantees (e.g. write-to-temp-then-rename). Verify that concurrent invocations of the companion produce correct state rather than corrupting the state file. Add a concurrency test that runs two commands simultaneously and asserts state consistency afterward."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error classification may silently swallow unexpected errors",
+        "body": "A new 168-line error classification module (bigmodel-errors.mjs) categorizes API errors to drive retry decisions. If the classifier encounters an unexpected error shape (e.g. a new API error code, a network-level ECONNRESET, or a malformed response body), the default classification behavior is critical. An overly broad 'retriable' default would cause retries on non-retriable failures; an overly narrow default would suppress retries that should occur. Either path is a silent degradation hidden from the user.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.65,
+        "recommendation": "Verify the default/fallback branch in error classification is explicitly 'non-retriable' (fail-closed) rather than 'retriable' (fail-open). Ensure unrecognised error shapes are logged at warn level with full error details so they are observable in production. Add a test case for each of: null response body, missing error code, unknown error code, and network-level errors (ECONNRESET, ETIMEDOUT)."
+      },
+      {
+        "severity": "low",
+        "title": "Massive cumulative scope (84 files, +6623 lines) with no visible regression test for v0.4.0 baseline",
+        "body": "The diff spans 84 files with 6,623 insertions. Test files exist for individual modules (retry, render, args, etc.) but no end-to-end regression test or UAT report is visible for the v0.4.6→v0.4.7 sweep. The latest UAT reports are for v0.4.4 and v0.4.5 only. This means the v0.4.6 hardening changes (BigModel error dispatch, auto retry/backoff) and any v0.4.7 cumulative interactions have no recorded validation evidence.",
+        "file": "test-automation/uat-reports",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.55,
+        "recommendation": "Execute a v0.4.7 UAT sweep covering the full happy path plus the retry/backoff error paths before cutting the release. At minimum: (1) successful review submission, (2) API rate-limit response with retry, (3) API auth failure without retry, (4) concurrent job submission. Document results in a new UAT report directory."
+      }
+    ],
+    "next_steps": [
+      "Run `grep -r 'lib/process' scripts/ commands/` to confirm no surviving references to the deleted process.mjs module.",
+      "Inspect retry.mjs for hard max-attempts ceiling and non-retriable error short-circuiting; add tests for retry exhaustion bounds.",
+      "Audit state.mjs write path for atomicity guarantees under concurrent access.",
+      "Verify bigmodel-errors.mjs default classification is fail-closed (non-retriable) for unrecognized error shapes.",
+      "Execute and document a v0.4.7 UAT sweep before release."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6+ cumulative diff spans 84 files and +6,623/−480 lines. Three structural risks block confidence: (1) scripts/lib/process.mjs was entirely deleted (67 lines), creating a latent crash risk for any surviving import path; (2) a new 203-line retry.mjs introduces retry/backoff logic whose ceiling, idempotency, and cancellation semantics cannot be verified from the stat alone; (3) glm-client.mjs and state.mjs were substantially rewritten, touching the core data and API paths without visible integration safeguards against partial failure or concurrent state mutation.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"process.mjs deleted — surviving import paths will crash at runtime\",\n      \"body\": \"scripts/lib/process.mjs shows 67 lines removed and zero added, indicating full file deletion. While scripts/check-imports.mjs was modified (5 lines changed), suggesting import cleanup was attempted, static import checks cannot catch dynamic imports, eval'd code, config files, or downstream consumers that resolve the module at runtime. Any surviving reference to process.mjs exports will throw MODULE_NOT_FOUND at runtime, and the failure will be silent until the affected code path is exercised.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Confirm process.mjs is removed from all import graphs (including dynamic import() and require). Run a grep for 'process\\\\.mjs' or 'lib/process' across the entire repo. Consider leaving a re-export shim that throws a descriptive error instead of a bare MODULE_NOT_FOUND, so any missed caller fails fast with a clear message.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"New retry.mjs (203 lines) — unverified retry ceilings and idempotency guards\",\n      \"body\": \"A new 203-line retry module introduces backoff/retry behavior into the request path (via glm-client.mjs changes). Retry logic is a well-known source of retry storms, duplicate side-effects on non-idempotent writes, and resource exhaustion when ceilings are absent or misconfigured. The module's interaction with bigmodel-errors.mjs (error classification) means a misclassification could cause non-retriable errors (e.g. auth failures, invalid requests) to be retried indefinitely. No evidence of integration tests exercising retry exhaustion, backoff ceiling enforcement, or concurrent retry interleaving is visible in the test file list.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Verify that retry.mjs enforces: (a) a hard max-attempts ceiling, (b) exponential backoff with jitter to prevent thundering herds, (c) non-retriable error short-circuiting (401/403/400), (d) idempotency key propagation on POST retries if applicable, and (e) cancellation signal support. Add an integration test that simulates persistent failure and asserts the retry loop terminates within expected bounds.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client.mjs rewrite + state.mjs changes — concurrent job state mutation risk\",\n      \"body\": \"glm-client.mjs (155 lines changed), state.mjs (32 lines changed), tracked-jobs.mjs (78 lines changed), and job-control.mjs (20 lines changed) all touch the job lifecycle and state management path. If two concurrent operations (e.g. two review commands) mutate shared state files without file-locking or atomic writes, the last-writer-wins semantics can silently drop job tracking data. The removal of process.mjs may also have eliminated synchronization primitives that previously guarded these paths.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.62,\n      \"recommendation\": \"Audit state.mjs and tracked-jobs.mjs for atomic write guarantees (e.g. write-to-temp-then-rename). Verify that concurrent invocations of the companion produce correct state rather than corrupting the state file. Add a concurrency test that runs two commands simultaneously and asserts state consistency afterward.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"bigmodel-errors.mjs error classification may silently swallow unexpected errors\",\n      \"body\": \"A new 168-line error classification module (bigmodel-errors.mjs) categorizes API errors to drive retry decisions. If the classifier encounters an unexpected error shape (e.g. a new API error code, a network-level ECONNRESET, or a malformed response body), the default classification behavior is critical. An overly broad 'retriable' default would cause retries on non-retriable failures; an overly narrow default would suppress retries that should occur. Either path is a silent degradation hidden from the user.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Verify the default/fallback branch in error classification is explicitly 'non-retriable' (fail-closed) rather than 'retriable' (fail-open). Ensure unrecognised error shapes are logged at warn level with full error details so they are observable in production. Add a test case for each of: null response body, missing error code, unknown error code, and network-level errors (ECONNRESET, ETIMEDOUT).\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"Massive cumulative scope (84 files, +6623 lines) with no visible regression test for v0.4.0 baseline\",\n      \"body\": \"The diff spans 84 files with 6,623 insertions. Test files exist for individual modules (retry, render, args, etc.) but no end-to-end regression test or UAT report is visible for the v0.4.6→v0.4.7 sweep. The latest UAT reports are for v0.4.4 and v0.4.5 only. This means the v0.4.6 hardening changes (BigModel error dispatch, auto retry/backoff) and any v0.4.7 cumulative interactions have no recorded validation evidence.\",\n      \"file\": \"test-automation/uat-reports\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Execute a v0.4.7 UAT sweep covering the full happy path plus the retry/backoff error paths before cutting the release. At minimum: (1) successful review submission, (2) API rate-limit response with retry, (3) API auth failure without retry, (4) concurrent job submission. Document results in a new UAT report directory.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `grep -r 'lib/process' scripts/ commands/` to confirm no surviving references to the deleted process.mjs module.\",\n    \"Inspect retry.mjs for hard max-attempts ceiling and non-retriable error short-circuiting; add tests for retry exhaustion bounds.\",\n    \"Audit state.mjs write path for atomicity guarantees under concurrent access.\",\n    \"Verify bigmodel-errors.mjs default classification is fail-closed (non-retriable) for unrecognized error shapes.\",\n    \"Execute and document a v0.4.7 UAT sweep before release.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T20:55:42.363Z"
+}

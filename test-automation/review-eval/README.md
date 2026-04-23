@@ -33,9 +33,9 @@ review-eval/
 ## Non-goals for v0.4.7 sanity sweep (original scope, superseded by expanded sweep)
 
 - No top_p / thinking / seed parameter sweep (scope reduction per issue #7 comment).
-- ~~No C1 (small) / C3 (large) fixtures (single-diff sweep only).~~ **Superseded** — expanded-sweep added both in commit 7a971a7; v0.4.7 ships all three fixtures and a 149-run four-phase sweep.
+- ~~No C1 (small) / C3 (large) fixtures (single-diff sweep only).~~ **Superseded** — expanded-sweep added both in commit 7a971a7; v0.4.7 ships all three fixtures and a 457-run five-phase sweep.
 - No context-packing variant comparison (P1-P4 deferred).
-- No in-release default change unless sanity data shows strong signal. (Outcome: no default change; the N=14-17 data detected no significant sampling-parameter effect but was underpowered for ~15pct per-step differences.)
+- No in-release default change unless sanity data shows strong signal. (Outcome: no default change; final effective model-N is C3 81/83/84 and C1 44/43/42, with no significant C3 temperature contrast.)
 
 ## Metrics recorded per run
 

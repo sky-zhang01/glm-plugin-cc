@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 66
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 109095,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces 6600+ lines across 84 files, with the newest and riskiest addition being v0.4.6's retry/backoff + BigModel error dispatch (retry.mjs, bigmodel-errors.mjs, glm-client.mjs changes). A library module (process.mjs) was fully deleted, and the retry layer wraps external API calls that may not be idempotent. The combination of a new retry infrastructure, a new error taxonomy, and concurrent file-based job state creates failure modes—duplicate submissions, swallowed errors, state corruption—that are hard to detect in unit tests and expensive in production.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "process.mjs fully deleted — latent import will crash at runtime",
+        "body": "scripts/lib/process.mjs shows 67 lines deleted, 0 added. Any surviving import (dynamic or indirect) across glm-companion.mjs, hooks, or user-authored extensions will throw MODULE_NOT_FOUND at runtime. The companion check-imports.mjs was patched (5 lines changed), suggesting awareness, but static import checks cannot cover dynamic `import()` or eval paths. This is the kind of failure that passes CI (no static import found) but crashes in a less-exercised runtime path.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.72,
+        "recommendation": "Grep the entire tree for every occurrence of 'process' in import/require statements, including dynamic imports. If process.mjs utilities are still needed, migrate them into another module rather than deleting outright. Add a runtime smoke test that exercises every subcommand to confirm no latent import paths exist."
+      },
+      {
+        "severity": "high",
+        "title": "New retry layer on BigModel API calls may duplicate non-idempotent operations",
+        "body": "retry.mjs (203 new lines) and glm-client.mjs (155 lines changed) together introduce automatic retry/backoff for BigModel API calls. If any retried call creates a resource, submits a job, or mutates external state—and the call succeeds server-side but the response is lost (network timeout, 5xx)—the retry will issue a duplicate request. The diff provides no evidence of idempotency keys, request deduplication, or conditional-create semantics. This is the classic retry-on-non-idempotent-operation pattern that causes duplicate charges, duplicate jobs, or duplicate submissions in production under degraded network conditions.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.65,
+        "recommendation": "Audit every call site where retry logic is applied. For each, classify the operation as idempotent (GET, read-only) or non-idempotent (POST with side effects). For non-idempotent operations, either (a) add idempotency keys to the request, (b) use conditional retries that check if the operation already completed before retrying, or (c) opt the call out of automatic retry and fail fast instead."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error taxonomy may silently classify unknown errors as recoverable",
+        "body": "bigmodel-errors.mjs (168 new lines) classifies BigModel API errors to drive retry/backoff decisions. If BigModel introduces a new error code or returns an undocumented status, the classifier must either (a) fall through to a safe default or (b) propagate the error. If the default is 'retry', the system will hammer the API with requests that will never succeed. If the default is 'swallow', the user sees a silent failure. The test file (bigmodel-errors.test.mjs, 189 lines) tests known error types but cannot test future unknown ones. The fallback behavior at the boundary of the taxonomy is the highest-risk path.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.6,
+        "recommendation": "Ensure the error classifier's default/fallback branch treats unknown errors as non-retryable and surfaces the raw error to the caller. Add a test case that passes an unrecognized error shape and asserts it is classified as non-retryable with the original error preserved. Log the unrecognized error type at warn level so it is observable in production."
+      },
+      {
+        "severity": "medium",
+        "title": "File-based job state (tracked-jobs.mjs, state.mjs) has no concurrency guard",
+        "body": "tracked-jobs.mjs (78 lines changed) and state.mjs (32 lines changed) manage job state via filesystem writes. If two glm-companion processes run concurrently (e.g., user invokes a second command before the first finishes), both read the same state file, modify in memory, and write back—last-write-wins, silently losing the first process's state update. This produces orphaned or lost jobs with no error signal. The diff shows no file locking, atomic rename, or queue-based serialization.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.55,
+        "recommendation": "Add atomic write semantics (write to temp file, then rename) for state updates. Consider adding a PID or lock file to detect concurrent access. At minimum, add a last-modified timestamp check: read the file, check timestamp before writing, abort if the file was modified since read."
+      }
+    ],
+    "next_steps": [
+      "Grep entire codebase (including dynamic imports) for any remaining reference to process.mjs and verify all paths are covered",
+      "Audit every retry.mjs call site for idempotency; document which operations are safe to retry and which are not",
+      "Verify the bigmodel-errors.mjs fallback branch is non-retryable and logs the unrecognized error",
+      "Add concurrency protection to state.mjs/tracked-jobs.mjs file writes (atomic rename + timestamp check minimum)",
+      "Run the full UAT suite (v0.4.5 run-uat.sh) against the cumulative v0.4.6 build to validate no regressions in the upgrade path"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 cumulative diff introduces 6600+ lines across 84 files, with the newest and riskiest addition being v0.4.6's retry/backoff + BigModel error dispatch (retry.mjs, bigmodel-errors.mjs, glm-client.mjs changes). A library module (process.mjs) was fully deleted, and the retry layer wraps external API calls that may not be idempotent. The combination of a new retry infrastructure, a new error taxonomy, and concurrent file-based job state creates failure modes—duplicate submissions, swallowed errors, state corruption—that are hard to detect in unit tests and expensive in production.\",\"findings\":[{\"severity\":\"high\",\"title\":\"process.mjs fully deleted — latent import will crash at runtime\",\"body\":\"scripts/lib/process.mjs shows 67 lines deleted, 0 added. Any surviving import (dynamic or indirect) across glm-companion.mjs, hooks, or user-authored extensions will throw MODULE_NOT_FOUND at runtime. The companion check-imports.mjs was patched (5 lines changed), suggesting awareness, but static import checks cannot cover dynamic `import()` or eval paths. This is the kind of failure that passes CI (no static import found) but crashes in a less-exercised runtime path.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":67,\"confidence\":0.72,\"recommendation\":\"Grep the entire tree for every occurrence of 'process' in import/require statements, including dynamic imports. If process.mjs utilities are still needed, migrate them into another module rather than deleting outright. Add a runtime smoke test that exercises every subcommand to confirm no latent import paths exist.\"},{\"severity\":\"high\",\"title\":\"New retry layer on BigModel API calls may duplicate non-idempotent operations\",\"body\":\"retry.mjs (203 new lines) and glm-client.mjs (155 lines changed) together introduce automatic retry/backoff for BigModel API calls. If any retried call creates a resource, submits a job, or mutates external state—and the call succeeds server-side but the response is lost (network timeout, 5xx)—the retry will issue a duplicate request. The diff provides no evidence of idempotency keys, request deduplication, or conditional-create semantics. This is the classic retry-on-non-idempotent-operation pattern that causes duplicate charges, duplicate jobs, or duplicate submissions in production under degraded network conditions.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.65,\"recommendation\":\"Audit every call site where retry logic is applied. For each, classify the operation as idempotent (GET, read-only) or non-idempotent (POST with side effects). For non-idempotent operations, either (a) add idempotency keys to the request, (b) use conditional retries that check if the operation already completed before retrying, or (c) opt the call out of automatic retry and fail fast instead.\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors.mjs error taxonomy may silently classify unknown errors as recoverable\",\"body\":\"bigmodel-errors.mjs (168 new lines) classifies BigModel API errors to drive retry/backoff decisions. If BigModel introduces a new error code or returns an undocumented status, the classifier must either (a) fall through to a safe default or (b) propagate the error. If the default is 'retry', the system will hammer the API with requests that will never succeed. If the default is 'swallow', the user sees a silent failure. The test file (bigmodel-errors.test.mjs, 189 lines) tests known error types but cannot test future unknown ones. The fallback behavior at the boundary of the taxonomy is the highest-risk path.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.6,\"recommendation\":\"Ensure the error classifier's default/fallback branch treats unknown errors as non-retryable and surfaces the raw error to the caller. Add a test case that passes an unrecognized error shape and asserts it is classified as non-retryable with the original error preserved. Log the unrecognized error type at warn level so it is observable in production.\"},{\"severity\":\"medium\",\"title\":\"File-based job state (tracked-jobs.mjs, state.mjs) has no concurrency guard\",\"body\":\"tracked-jobs.mjs (78 lines changed) and state.mjs (32 lines changed) manage job state via filesystem writes. If two glm-companion processes run concurrently (e.g., user invokes a second command before the first finishes), both read the same state file, modify in memory, and write back—last-write-wins, silently losing the first process's state update. This produces orphaned or lost jobs with no error signal. The diff shows no file locking, atomic rename, or queue-based serialization.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.55,\"recommendation\":\"Add atomic write semantics (write to temp file, then rename) for state updates. Consider adding a PID or lock file to detect concurrent access. At minimum, add a last-modified timestamp check: read the file, check timestamp before writing, abort if the file was modified since read.\"}],\"next_steps\":[\"Grep entire codebase (including dynamic imports) for any remaining reference to process.mjs and verify all paths are covered\",\"Audit every retry.mjs call site for idempotency; document which operations are safe to retry and which are not\",\"Verify the bigmodel-errors.mjs fallback branch is non-retryable and logs the unrecognized error\",\"Add concurrency protection to state.mjs/tracked-jobs.mjs file writes (atomic rename + timestamp check minimum)\",\"Run the full UAT suite (v0.4.5 run-uat.sh) against the cumulative v0.4.6 build to validate no regressions in the upgrade path\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T18:06:27.580Z"
+}

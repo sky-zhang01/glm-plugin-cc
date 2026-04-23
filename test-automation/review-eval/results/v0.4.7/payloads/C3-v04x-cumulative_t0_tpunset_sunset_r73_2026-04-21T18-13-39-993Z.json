@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 73
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 58585,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.7 sweep introduces a retry/backoff system, BigModel error dispatch, job tracking, and background execution modes. While there are extensive tests, several high-severity concerns remain: the retry module and BigModel error classification make correctness claims that are difficult to verify without inspecting the actual code, and the state/job-control modules handle persistent state with unclear crash-safety guarantees. The diff is large (6600+ lines) and spans core runtime paths — shipping without targeted inspection of retry.mjs, bigmodel-errors.mjs, glm-client.mjs, and state.mjs is risky.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry module handles persistent state mutation but crash-safety is unclear",
+        "body": "The new retry.mjs (203 lines added) and tracked-jobs.mjs (78 lines changed) likely coordinate to persist retry state across invocations. If a retry is in progress and the process crashes or is killed, the persisted retry count and job state could become inconsistent — leaving a job permanently stuck in 'retrying' state with no recovery path. The tracked-jobs module change (+78 lines) suggests job lifecycle tracking was significantly reworked, which increases the surface for partial-write corruption. Without seeing the actual file contents, the risk of a stuck-state on crash cannot be ruled out.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.6,
+        "recommendation": "Inspect retry.mjs and tracked-jobs.mjs for: (1) atomic state writes (write-to-temp then rename), (2) crash recovery logic that resets stale 'retrying' states on startup, (3) a maximum retry ceiling that prevents infinite loops even if state gets corrupted. Add a specific test for process-mid-retry crash recovery."
+      },
+      {
+        "severity": "high",
+        "title": "BigModel error dispatch may misclassify errors leading to wrong retry behavior",
+        "body": "scripts/lib/bigmodel-errors.mjs (168 lines added) is a new module that classifies API errors to determine retry strategy. Misclassification here could cause: (a) retrying non-retryable errors (wasting quota, hitting rate limits harder), (b) not retrying retryable errors (silent user-visible failures), or (c) infinite retry loops on permanent errors. The tests file (189 lines) exists but error classification logic is notoriously fragile — edge cases like HTTP 429 with missing headers, network timeouts that look like auth failures, or changed API error schemas can break assumptions.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.65,
+        "recommendation": "Inspect bigmodel-errors.mjs for: (1) a default/fallback classification that always errs on the side of not retrying permanent errors, (2) logging of classification decisions for debugging, (3) test coverage for edge cases: empty response body, malformed JSON, unexpected status codes, and rate-limit headers with retry-after=0 or missing entirely."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs changes (+155 lines) combine retry + error dispatch — integration risk",
+        "body": "The main client module glm-client.mjs gained 155 lines of changes, likely integrating the new retry and error dispatch modules. This is the core HTTP call path. Any bug here affects every API interaction. The combination of new retry logic + new error classification + existing request handling in one change creates integration risk — unit tests for each module individually may pass while the integration fails in subtle ways (e.g., retry module throws but client catches and returns undefined, masking the error).",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.7,
+        "recommendation": "Inspect glm-client.mjs to verify: (1) errors from retry.mjs are always propagated, never swallowed, (2) the retry wrapper doesn't double-count retries if the client itself has internal retry logic, (3) there is an integration test that exercises the full call chain: client → retry → error dispatch → actual HTTP failure scenario."
+      },
+      {
+        "severity": "medium",
+        "title": "render.mjs rewrite (+79 lines changed) may break output formatting silently",
+        "body": "scripts/lib/render.mjs was substantially rewritten (79 lines changed). This module controls what the user sees. If rendering fails silently (e.g., returns empty string or throws into an unhandled promise), the user gets no output with no error message — a confusing failure mode. The 193-line test file exists, but rendering edge cases (empty arrays, objects with circular refs, very large outputs, Unicode edge cases) are easy to miss.",
+        "file": "scripts/lib/render.mjs",
+        "line_start": 1,
+        "line_end": 79,
+        "confidence": 0.5,
+        "recommendation": "Verify render.mjs has: (1) a top-level try/catch that always produces visible output even on render failure, (2) explicit handling for null/undefined/empty inputs, (3) test coverage for the render path being called with unexpected argument types."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs changes (+32 lines) lack crash-safety detail",
+        "body": "scripts/lib/state.mjs had 32 lines changed in a module managing persistent state. If state writes are not atomic, a crash during write could corrupt the state file, leaving the plugin in an unrecoverable state on next startup. The state.test.mjs file (81 lines) may not cover crash-during-write scenarios.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.55,
+        "recommendation": "Inspect state.mjs for atomic write patterns (write-to-temp-file then fs.rename). Add a test that simulates a corrupted state file and verifies the module can recover or rebuild from defaults rather than crashing."
+      }
+    ],
+    "next_steps": [
+      "Read scripts/lib/retry.mjs and scripts/lib/tracked-jobs.mjs in full to verify crash safety and stuck-state recovery",
+      "Read scripts/lib/bigmodel-errors.mjs in full to verify error classification has safe defaults and no infinite-retry paths",
+      "Read scripts/lib/glm-client.mjs in full to verify error propagation through the retry+dispatch chain is never swallowed",
+      "Read scripts/lib/state.mjs to verify atomic writes and crash recovery",
+      "Run the full test suite and verify no tests are skipped or marked as TODO in the new test files"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.7 sweep introduces a retry/backoff system, BigModel error dispatch, job tracking, and background execution modes. While there are extensive tests, several high-severity concerns remain: the retry module and BigModel error classification make correctness claims that are difficult to verify without inspecting the actual code, and the state/job-control modules handle persistent state with unclear crash-safety guarantees. The diff is large (6600+ lines) and spans core runtime paths — shipping without targeted inspection of retry.mjs, bigmodel-errors.mjs, glm-client.mjs, and state.mjs is risky.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Retry module handles persistent state mutation but crash-safety is unclear\",\"body\":\"The new retry.mjs (203 lines added) and tracked-jobs.mjs (78 lines changed) likely coordinate to persist retry state across invocations. If a retry is in progress and the process crashes or is killed, the persisted retry count and job state could become inconsistent — leaving a job permanently stuck in 'retrying' state with no recovery path. The tracked-jobs module change (+78 lines) suggests job lifecycle tracking was significantly reworked, which increases the surface for partial-write corruption. Without seeing the actual file contents, the risk of a stuck-state on crash cannot be ruled out.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.6,\"recommendation\":\"Inspect retry.mjs and tracked-jobs.mjs for: (1) atomic state writes (write-to-temp then rename), (2) crash recovery logic that resets stale 'retrying' states on startup, (3) a maximum retry ceiling that prevents infinite loops even if state gets corrupted. Add a specific test for process-mid-retry crash recovery.\"},{\"severity\":\"high\",\"title\":\"BigModel error dispatch may misclassify errors leading to wrong retry behavior\",\"body\":\"scripts/lib/bigmodel-errors.mjs (168 lines added) is a new module that classifies API errors to determine retry strategy. Misclassification here could cause: (a) retrying non-retryable errors (wasting quota, hitting rate limits harder), (b) not retrying retryable errors (silent user-visible failures), or (c) infinite retry loops on permanent errors. The tests file (189 lines) exists but error classification logic is notoriously fragile — edge cases like HTTP 429 with missing headers, network timeouts that look like auth failures, or changed API error schemas can break assumptions.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.65,\"recommendation\":\"Inspect bigmodel-errors.mjs for: (1) a default/fallback classification that always errs on the side of not retrying permanent errors, (2) logging of classification decisions for debugging, (3) test coverage for edge cases: empty response body, malformed JSON, unexpected status codes, and rate-limit headers with retry-after=0 or missing entirely.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs changes (+155 lines) combine retry + error dispatch — integration risk\",\"body\":\"The main client module glm-client.mjs gained 155 lines of changes, likely integrating the new retry and error dispatch modules. This is the core HTTP call path. Any bug here affects every API interaction. The combination of new retry logic + new error classification + existing request handling in one change creates integration risk — unit tests for each module individually may pass while the integration fails in subtle ways (e.g., retry module throws but client catches and returns undefined, masking the error).\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.7,\"recommendation\":\"Inspect glm-client.mjs to verify: (1) errors from retry.mjs are always propagated, never swallowed, (2) the retry wrapper doesn't double-count retries if the client itself has internal retry logic, (3) there is an integration test that exercises the full call chain: client → retry → error dispatch → actual HTTP failure scenario.\"},{\"severity\":\"medium\",\"title\":\"render.mjs rewrite (+79 lines changed) may break output formatting silently\",\"body\":\"scripts/lib/render.mjs was substantially rewritten (79 lines changed). This module controls what the user sees. If rendering fails silently (e.g., returns empty string or throws into an unhandled promise), the user gets no output with no error message — a confusing failure mode. The 193-line test file exists, but rendering edge cases (empty arrays, objects with circular refs, very large outputs, Unicode edge cases) are easy to miss.\",\"file\":\"scripts/lib/render.mjs\",\"line_start\":1,\"line_end\":79,\"confidence\":0.5,\"recommendation\":\"Verify render.mjs has: (1) a top-level try/catch that always produces visible output even on render failure, (2) explicit handling for null/undefined/empty inputs, (3) test coverage for the render path being called with unexpected argument types.\"},{\"severity\":\"medium\",\"title\":\"state.mjs changes (+32 lines) lack crash-safety detail\",\"body\":\"scripts/lib/state.mjs had 32 lines changed in a module managing persistent state. If state writes are not atomic, a crash during write could corrupt the state file, leaving the plugin in an unrecoverable state on next startup. The state.test.mjs file (81 lines) may not cover crash-during-write scenarios.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.55,\"recommendation\":\"Inspect state.mjs for atomic write patterns (write-to-temp-file then fs.rename). Add a test that simulates a corrupted state file and verifies the module can recover or rebuild from defaults rather than crashing.\"}],\"next_steps\":[\"Read scripts/lib/retry.mjs and scripts/lib/tracked-jobs.mjs in full to verify crash safety and stuck-state recovery\",\"Read scripts/lib/bigmodel-errors.mjs in full to verify error classification has safe defaults and no infinite-retry paths\",\"Read scripts/lib/glm-client.mjs in full to verify error propagation through the retry+dispatch chain is never swallowed\",\"Read scripts/lib/state.mjs to verify atomic writes and crash recovery\",\"Run the full test suite and verify no tests are skipped or marked as TODO in the new test files\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T18:13:40.040Z"
+}

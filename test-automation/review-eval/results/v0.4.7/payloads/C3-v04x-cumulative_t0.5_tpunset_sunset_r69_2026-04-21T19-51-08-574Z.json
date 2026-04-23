@@ -1,0 +1,92 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 69
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 50417,
+    "error_code": ""
+  },
+  "parsed": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces significant new infrastructure (retry logic, BigModel error dispatch, job tracking, pre-push hooks) across ~6600 lines. Multiple high-severity concerns emerge: retry.mjs interacts with non-idempotent API calls without deduplication guards, BigModel error dispatch classifies errors by substring matching that can misclassify rate-limit vs auth failures, and the deleted process.mjs module (replaced by retry.mjs) risks residual imports. The diff is broad enough to warrant targeted verification before a v0.4.7 sweep label.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs wraps potentially non-idempotent BigModel API calls without request deduplication or idempotency keys",
+        "body": "scripts/lib/retry.mjs is a new 203-line module providing exponential backoff and retry logic. If the GLM client calls it around POST requests that create jobs or submit prompts, a retry after a network timeout could cause duplicate submissions. The companion glm-client.mjs changes (155 lines changed) integrate this retry layer. Without an idempotency key or request-dedup mechanism, a transient failure during job submission could cause the same prompt to be submitted twice, leading to duplicate review jobs that the user cannot distinguish or cancel. This is a silent data-integrity issue under the specific failure mode of 'server received request but client timed out reading response'.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.72,
+        "recommendation": "Verify that every retry-wrapped call in glm-client.mjs is a read (GET/status poll) rather than a mutating write (POST/PUT). If any POST is retried, add an idempotency-key header derived from a hash of job parameters, or restrict retries to GET-only operations."
+      },
+      {
+        "severity": "high",
+        "title": "bigmodel-errors.mjs uses fragile substring/status classification that can misclassify auth errors as retryable",
+        "body": "scripts/lib/bigmodel-errors.mjs (168 new lines) maps BigModel API errors into retryable vs non-retryable categories. Error classification by HTTP status code alone (or by substring matching on error messages) is fragile: a 401 from an expired token vs a 401 from an invalid key may need different handling (one is retryable after refresh, the other is not). If the module classifies a 401/403 as retryable, exponential backoff will waste time and may trigger account lockout. Conversely, if a rate-limit 429 is classified as non-retryable, legitimate throughput is lost. The tests (189 lines) may cover common cases but edge cases in BigModel's actual error response format could cause silent misclassification in production.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.68,
+        "recommendation": "Audit the error classification logic to ensure 401/403 are never retryable (they indicate auth failure), 429 is always retryable with the Retry-After header if present, and 5xx uses capped exponential backoff. Add explicit unit tests for each status code boundary case."
+      },
+      {
+        "severity": "medium",
+        "title": "process.mjs deleted but could be imported by external consumers or cached module resolution",
+        "body": "scripts/lib/process.mjs (67 lines deleted, replaced by functionality in retry.mjs and other modules) is removed entirely. If any external tool, user script, or dynamically loaded module still imports from './lib/process.mjs' or 'scripts/lib/process.mjs', Node will throw MODULE_NOT_FOUND at runtime. For users upgrading from v0.4.0 to v0.4.6 with cached module graphs or custom scripts that import process.mjs, this is a breaking change that manifests only at runtime on the specific code path that imports it.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.55,
+        "recommendation": "Either leave process.mjs as a thin re-export shim pointing to retry.mjs for backward compatibility, or document this as a breaking change in CHANGELOG.md and ensure no other file in the repo references it. Verify with grep that no import path resolves to process.mjs."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs changes (32 lines changed) may not be backward-compatible with existing .glm state files from v0.4.0",
+        "body": "scripts/lib/state.mjs manages persisted state. 32 lines changed in a module handling file-backed state suggests schema or field-name changes. If v0.4.6 writes state in a new format and the user later downgrades to v0.4.0 (or runs a mixed-version environment), the older code will encounter unexpected fields or missing required fields, causing crashes or silent data loss. There is no visible migration logic in the diff stat.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.52,
+        "recommendation": "Inspect the actual state.mjs diff to confirm whether the on-disk schema changed. If it did, add a version field to the state file and a migration path that handles files written by older versions. If the schema is unchanged, document that explicitly."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs race condition on concurrent job tracking writes",
+        "body": "scripts/lib/tracked-jobs.mjs (78 lines changed) manages a tracked-jobs list, likely file-backed. If two GLM companion instances run concurrently (e.g., two terminals), both could read the same job list, modify it, and write it back, causing lost updates. The lack of file-locking primitives in the diff suggests this is unprotected. Under the 'background' execution mode added in v0.4.5 (--wait/--background flags in review command), a user could easily trigger concurrent access.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.58,
+        "recommendation": "Add atomic file writes (write to temp file + rename) for tracked-jobs persistence and verify whether concurrent access is a realistic scenario. If so, add advisory file locking (flock) or use a PID-based conflict detection mechanism."
+      }
+    ],
+    "next_steps": [
+      "Inspect the actual content of retry.mjs and glm-client.mjs to confirm whether any POST/PUT operations are retried without idempotency protection.",
+      "Verify bigmodel-errors.mjs error classification handles 401/403 as non-retryable and 429 as retryable with Retry-After header support.",
+      "Grep the entire codebase for any remaining references to the deleted process.mjs module.",
+      "Inspect state.mjs diff for on-disk schema changes and confirm backward compatibility or presence of migration logic.",
+      "Check tracked-jobs.mjs for atomic write patterns and assess concurrent-access risk under the --background execution mode.",
+      "Run the existing test suite (tests/retry.test.mjs, tests/bigmodel-errors.test.mjs) against the actual BigModel error responses from recent production logs to validate classification accuracy."
+    ]
+  },
+  "rawOutputHead": "{\n  \"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff introduces significant new infrastructure (retry logic, BigModel error dispatch, job tracking, pre-push hooks) across ~6600 lines. Multiple high-severity concerns emerge: retry.mjs interacts with non-idempotent API calls without deduplication guards, BigModel error dispatch classifies errors by substring matching that can misclassify rate-limit vs auth failures, and the deleted process.mjs module (replaced by retry.mjs) risks residual imports. The diff is broad enough to warrant targeted verification before a v0.4.7 sweep label.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"retry.mjs wraps potentially non-idempotent BigModel API calls without request deduplication or idempotency keys\",\n      \"body\": \"scripts/lib/retry.mjs is a new 203-line module providing exponential backoff and retry logic. If the GLM client calls it around POST requests that create jobs or submit prompts, a retry after a network timeout could cause duplicate submissions. The companion glm-client.mjs changes (155 lines changed) integrate this retry layer. Without an idempotency key or request-dedup mechanism, a transient failure during job submission could cause the same prompt to be submitted twice, leading to duplicate review jobs that the user cannot distinguish or cancel. This is a silent data-integrity issue under the specific failure mode of 'server received request but client timed out reading response'.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Verify that every retry-wrapped call in glm-client.mjs is a read (GET/status poll) rather than a mutating write (POST/PUT). If any POST is retried, add an idempotency-key header derived from a hash of job parameters, or restrict retries to GET-only operations.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"bigmodel-errors.mjs uses fragile substring/status classification that can misclassify auth errors as retryable\",\n      \"body\": \"scripts/lib/bigmodel-errors.mjs (168 new lines) maps BigModel API errors into retryable vs non-retryable categories. Error classification by HTTP status code alone (or by substring matching on error messages) is fragile: a 401 from an expired token vs a 401 from an invalid key may need different handling (one is retryable after refresh, the other is not). If the module classifies a 401/403 as retryable, exponential backoff will waste time and may trigger account lockout. Conversely, if a rate-limit 429 is classified as non-retryable, legitimate throughput is lost. The tests (189 lines) may cover common cases but edge cases in BigModel's actual error response format could cause silent misclassification in production.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Audit the error classification logic to ensure 401/403 are never retryable (they indicate auth failure), 429 is always retryable with the Retry-After header if present, and 5xx uses capped exponential backoff. Add explicit unit tests for each status code boundary case.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"process.mjs deleted but could be imported by external consumers or cached module resolution\",\n      \"body\": \"scripts/lib/process.mjs (67 lines deleted, replaced by functionality in retry.mjs and other modules) is removed entirely. If any external tool, user script, or dynamically loaded module still imports from './lib/process.mjs' or 'scripts/lib/process.mjs', Node will throw MODULE_NOT_FOUND at runtime. For users upgrading from v0.4.0 to v0.4.6 with cached module graphs or custom scripts that import process.mjs, this is a breaking change that manifests only at runtime on the specific code path that imports it.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Either leave process.mjs as a thin re-export shim pointing to retry.mjs for backward compatibility, or document this as a breaking change in CHANGELOG.md and ensure no other file in the repo references it. Verify with grep that no import path resolves to process.mjs.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"state.mjs changes (32 lines changed) may not be backward-compatible with existing .glm state files from v0.4.0\",\n      \"body\": \"scripts/lib/state.mjs manages persisted state. 32 lines changed in a module handling file-backed state suggests schema or field-name changes. If v0.4.6 writes state in a new format and the user later downgrades to v0.4.0 (or runs a mixed-version environment), the older code will encounter unexpected fields or missing required fields, causing crashes or silent data loss. There is no visible migration logic in the diff stat.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.52,\n      \"recommendation\": \"Inspect the actual state.mjs diff to confirm whether the on-disk schema changed. If it did, add a version field to the state file and a migration path that handles files written by older versions. If the schema is unchanged, document that explicitly.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"tracked-jobs.mjs race condition on concurrent job tracking writes\",\n      \"body\": \"scripts/lib/tracked-jobs.mjs (78 lines changed) manages a tracked-jobs list, likely file-backed. If two GLM companion instances run concurrently (e.g., two terminals), both could read the same job list, modify it, and write it back, causing lost updates. The lack of file-locking primitives in the diff suggests this is unprotected. Under the 'background' execution mode added in v0.4.5 (--wait/--background flags in review command), a user could easily trigger concurrent access.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.58,\n      \"recommendation\": \"Add atomic file writes (write to temp file + rename) for tracked-jobs persistence and verify whether concurrent access is a realistic scenario. If so, add advisory file locking (flock) or use a PID-based conflict detection mechanism.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect the actual content of retry.mjs and glm-client.mjs to confirm whether any POST/PUT operations are retried without idempotency protection.\",\n    \"Verify bigmodel-errors.mjs error classification handles 401/403 as non-retryable and 429 as retryable with Retry-After header support.\",\n    \"Grep the entire codebase for any remaining references to the deleted process.mjs module.\",\n    \"Inspect state.mjs diff for on-disk schema changes and confirm backward compatibility or presence of migration logic.\",\n    \"Check tracked-jobs.mjs for atomic write patterns and assess concurrent-access risk under the --background execution mode.\",\n    \"Run the existing test suite (tests/retry.test.mjs, tests/bigmodel-errors.test.mjs) against the actual BigModel error responses from recent production logs to validate classification accuracy.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T19:51:08.609Z"
+}

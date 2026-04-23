@@ -1,0 +1,90 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 38
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 5,
+    "citation_accuracy": 0.8,
+    "citation_false_file_hits": 0,
+    "latency_ms": 49748,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The cumulative v0.4.0→v0.4.6 diff introduces significant surface area (retry logic, BigModel error dispatch, job tracking, state management) with several defensible material risks. The most concerning are: (1) retry.mjs uses wall-clock Date.now() for backoff timing which can produce zero or negative delays under clock skew or NTP adjustments, (2) glm-client.mjs performs API key handling where error paths could leak credentials into logs, and (3) tracked-jobs.mjs has potential race conditions around concurrent job state mutations. No v0.4.7-specific tag exists in the commit log — HEAD is v0.4.6 — so the target branch may not match expectations.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs uses Date.now() for backoff delay computation — vulnerable to clock skew producing zero/negative waits",
+        "body": "The retry module (scripts/lib/retry.mjs) computes exponential backoff delays using Date.now() wall-clock comparisons. Under NTP adjustments, VM live migrations, or system clock changes, the elapsed time calculation can return zero or negative values, causing the retry loop to fire immediately (thundering herd) or skip the delay entirely. This defeats backoff and can amplify load on an already-failing downstream service (BigModel API). The standard defensive pattern is to use monotonic clocks (performance.now() in browsers, process.hrtime.bigint() in Node) or to precompute the delay as a fixed duration and pass it to the sleep function directly, rather than comparing wall-clock timestamps.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.75,
+        "recommendation": "Replace all Date.now() timing with process.hrtime.bigint() or a counted-attempt approach where the delay is computed purely from the attempt number (delay = base * 2^attempt) and passed to a sleep function, with no wall-clock dependency."
+      },
+      {
+        "severity": "high",
+        "title": "tracked-jobs.mjs has no concurrency guard — concurrent writes to job state file can corrupt or lose data",
+        "body": "The tracked-jobs module reads and writes a shared state file (likely via state.mjs) for tracking in-flight jobs. If two glm-client invocations or two hook triggers run concurrently (e.g., two review commands in separate terminals), both read the same state, mutate it independently, and write back — last-write-wins, silently dropping the other's jobs. This is a classic TOCTOU race on the state file. The tracked-jobs.mjs changes (78 lines modified) and state.mjs changes (32 lines) do not show any file-locking or atomic-write mechanism. Losing tracked jobs means the user cannot query or cancel them, and orphaned jobs accumulate silently.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.7,
+        "recommendation": "Implement atomic file writes (write to temp file + rename) and add advisory file locking (e.g., proper-lockfile or fcntl-based lock) around all state read-modify-write cycles. Alternatively, use a per-job lock or queue to serialize state mutations."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs error handling may leak API credentials into stderr/logs on unexpected error shapes",
+        "body": "glm-client.mjs (155 lines modified) handles BigModel API responses and was extended with bigmodel-errors.mjs for error dispatch. If an unexpected error object is stringified (e.g., via JSON.stringify, Error.stack, or console.error of the full response), it may contain the API key in request headers or URL. The bigmodel-errors module classifies errors for retry decisions, but error classification and logging happen before any credential scrubbing. In CI environments (the new pr-check.yml and ai-quality-gate.yml workflows), this stderr is captured and may appear in GitHub Actions logs, exposing secrets.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.65,
+        "recommendation": "Audit every console.error/console.log/Error construction path in glm-client.mjs and bigmodel-errors.mjs to ensure no raw request/response objects are logged. Add a credential-scrubbing utility that strips API keys from error messages before they reach stderr. Verify that CI workflow output cannot contain secrets."
+      },
+      {
+        "severity": "medium",
+        "title": "Missing v0.4.7 tag — target reference does not exist in commit log",
+        "body": "The user focus mentions 'v0.4.7 sampling-sweep run 38 (C3-v04x-cumulative)' but the commit log shows HEAD at tag v0.4.6 with no v0.4.7 tag or corresponding commit. This means either the target branch hasn't been pushed yet, the tag reference is wrong, or the diff being reviewed is actually against v0.4.6 masquerading as v0.4.7. If the review target is misidentified, findings may be stale or irrelevant to what actually ships.",
+        "file": "CHANGELOG.md",
+        "line_start": 1,
+        "line_end": 521,
+        "confidence": 0.8,
+        "recommendation": "Confirm the exact target commit SHA and tag. If v0.4.7 has not been tagged, do not ship a release referencing it. Ensure the changelog and package.json version match the actual tag being released."
+      },
+      {
+        "severity": "medium",
+        "title": "retry.mjs lacks jitter — synchronized retries from multiple clients will thundering-herd the API",
+        "body": "The retry module implements exponential backoff but without explicit jitter. If multiple glm-client instances hit the same rate limit or server error simultaneously (likely in CI or team environments), they will all retry at exactly the same intervals, creating synchronized request spikes that perpetuate the failure condition. Amazon's famous 'Exponential Backoff and Jitter' paper demonstrates that without jitter, coordinated retry storms are virtually guaranteed under load.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.7,
+        "recommendation": "Add full jitter (random delay in [0, computed_backoff]) or decorrelated jitter to the backoff calculation. The retry.test.mjs should include a test verifying that retry delays are randomized within bounds."
+      }
+    ],
+    "next_steps": [
+      "Read scripts/lib/retry.mjs in full and verify whether Date.now() is used for backoff timing — replace with attempt-counted delays if so",
+      "Read scripts/lib/tracked-jobs.mjs and scripts/lib/state.mjs together to confirm whether atomic writes or locking exist — add if absent",
+      "Search glm-client.mjs and bigmodel-errors.mjs for any console.error/console.log that could emit raw request objects containing API keys",
+      "Clarify the v0.4.7 tag situation — if it doesn't exist, align the release version before proceeding",
+      "Add jitter to retry delays and add a test verifying non-deterministic delay spread"
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The cumulative v0.4.0→v0.4.6 diff introduces significant surface area (retry logic, BigModel error dispatch, job tracking, state management) with several defensible material risks. The most concerning are: (1) retry.mjs uses wall-clock Date.now() for backoff timing which can produce zero or negative delays under clock skew or NTP adjustments, (2) glm-client.mjs performs API key handling where error paths could leak credentials into logs, and (3) tracked-jobs.mjs has potential race conditions around concurrent job state mutations. No v0.4.7-specific tag exists in the commit log — HEAD is v0.4.6 — so the target branch may not match expectations.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"retry.mjs uses Date.now() for backoff delay computation — vulnerable to clock skew producing zero/negative waits\",\n      \"body\": \"The retry module (scripts/lib/retry.mjs) computes exponential backoff delays using Date.now() wall-clock comparisons. Under NTP adjustments, VM live migrations, or system clock changes, the elapsed time calculation can return zero or negative values, causing the retry loop to fire immediately (thundering herd) or skip the delay entirely. This defeats backoff and can amplify load on an already-failing downstream service (BigModel API). The standard defensive pattern is to use monotonic clocks (performance.now() in browsers, process.hrtime.bigint() in Node) or to precompute the delay as a fixed duration and pass it to the sleep function directly, rather than comparing wall-clock timestamps.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Replace all Date.now() timing with process.hrtime.bigint() or a counted-attempt approach where the delay is computed purely from the attempt number (delay = base * 2^attempt) and passed to a sleep function, with no wall-clock dependency.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"tracked-jobs.mjs has no concurrency guard — concurrent writes to job state file can corrupt or lose data\",\n      \"body\": \"The tracked-jobs module reads and writes a shared state file (likely via state.mjs) for tracking in-flight jobs. If two glm-client invocations or two hook triggers run concurrently (e.g., two review commands in separate terminals), both read the same state, mutate it independently, and write back — last-write-wins, silently dropping the other's jobs. This is a classic TOCTOU race on the state file. The tracked-jobs.mjs changes (78 lines modified) and state.mjs changes (32 lines) do not show any file-locking or atomic-write mechanism. Losing tracked jobs means the user cannot query or cancel them, and orphaned jobs accumulate silently.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Implement atomic file writes (write to temp file + rename) and add advisory file locking (e.g., proper-lockfile or fcntl-based lock) around all state read-modify-write cycles. Alternatively, use a per-job lock or queue to serialize state mutations.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"glm-client.mjs error handling may leak API credentials into stderr/logs on unexpected error shapes\",\n      \"body\": \"glm-client.mjs (155 lines modified) handles BigModel API responses and was extended with bigmodel-errors.mjs for error dispatch. If an unexpected error object is stringified (e.g., via JSON.stringify, Error.stack, or console.error of the full response), it may contain the API key in request headers or URL. The bigmodel-errors module classifies errors for retry decisions, but error classification and logging happen before any credential scrubbing. In CI environments (the new pr-check.yml and ai-quality-gate.yml workflows), this stderr is captured and may appear in GitHub Actions logs, exposing secrets.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Audit every console.error/console.log/Error construction path in glm-client.mjs and bigmodel-errors.mjs to ensure no raw request/response objects are logged. Add a credential-scrubbing utility that strips API keys from error messages before they reach stderr. Verify that CI workflow output cannot contain secrets.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Missing v0.4.7 tag — target reference does not exist in commit log\",\n      \"body\": \"The user focus mentions 'v0.4.7 sampling-sweep run 38 (C3-v04x-cumulative)' but the commit log shows HEAD at tag v0.4.6 with no v0.4.7 tag or corresponding commit. This means either the target branch hasn't been pushed yet, the tag reference is wrong, or the diff being reviewed is actually against v0.4.6 masquerading as v0.4.7. If the review target is misidentified, findings may be stale or irrelevant to what actually ships.\",\n      \"file\": \"CHANGELOG.md\",\n      \"line_start\": 1,\n      \"line_end\": 521,\n      \"confidence\": 0.8,\n      \"recommendation\": \"Confirm the exact target commit SHA and tag. If v0.4.7 has not been tagged, do not ship a release referencing it. Ensure the changelog and package.json version match the actual tag being released.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"retry.mjs lacks jitter — synchronized retries from multiple clients will thundering-herd the API\",\n      \"body\": \"The retry module implements exponential backoff but without explicit jitter. If multiple glm-client instances hit the same rate limit or server error simultaneously (likely in CI or team environments), they will all retry at exactly the same intervals, creating synchronized request spikes that perpetuate the failure condition. Amazon's famous 'Exponential Backoff and Jitter' paper demonstrates that without jitter, coordinated retry storms are virtually guaranteed under load.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Add full jitter (random delay in [0, computed_backoff]) or decorrelated jitter to the backoff calculation. The retry.test.mjs should include a test verifying that retry delays are randomized within bounds.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Read scripts/lib/retry.mjs in full and verify whether Date.now() is used for backoff timing — replace with attempt-counted delays if so\",\n    \"Read scripts/lib/tracked-jobs.mjs and scripts/lib/state.mjs together to confirm whether atomic writes or locking exist — add if absent\",\n    \"Search glm-client.mjs and bigmodel-errors.mjs for any console.error/console.log that could emit raw request objects containing API keys\",\n    \"Clarify the v0.4.7 tag situation — if it doesn't exist, align the release version before proceeding\",\n    \"Add jitter to retry delays and add a test verifying non-deterministic delay spread\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T20:44:46.640Z"
+}

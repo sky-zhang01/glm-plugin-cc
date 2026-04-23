@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 17
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.5,
+    "citation_false_file_hits": 0,
+    "latency_ms": 193852,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces substantial new runtime paths—retry logic (203 lines), BigModel error dispatch (168 lines), and significant glm-client changes (155 lines)—but leaves three critical modules without dedicated test coverage (glm-client, tracked-jobs, job-control). The deletion of scripts/lib/process.mjs poses a latent import-breakage risk if any consumer wasn't migrated. These gaps in coverage for core communication and job-lifecycle modules represent real risk of silent failures in production.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "glm-client.mjs heavily modified (155 lines) with no dedicated test file",
+        "body": "scripts/lib/glm-client.mjs is the core HTTP client that communicates with the BigModel API. It received 155 lines of changes (new retry integration, error dispatch, possibly new request/response handling), yet no tests/glm-client.test.mjs exists anywhere in the diff. This is the primary trust boundary between the plugin and the remote service—failures here directly affect every user-facing operation. The retry.mjs and bigmodel-errors.mjs modules it presumably consumes are tested individually, but the integration between client, retry, and error dispatch is unverified. A malformed response, an unexpected HTTP status, or a retry storm could all manifest silently.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.82,
+        "recommendation": "Add a tests/glm-client.test.mjs covering at minimum: (1) successful request/response cycle, (2) retry behavior on transient errors, (3) BigModel error classification and dispatch, (4) timeout behavior, (5) concurrent request handling. If the client is too coupled to mock, extract a thin HTTP adapter and test the client logic against a stub."
+      },
+      {
+        "severity": "high",
+        "title": "tracked-jobs.mjs modified (78 lines) with no dedicated test coverage",
+        "body": "scripts/lib/tracked-jobs.mjs manages persistent job state—likely tracking long-running BigModel completions across session boundaries. It received 78 lines of changes but no tests/tracked-jobs.test.mjs exists. Job tracking is a stateful, filesystem-backed subsystem where bugs cause invisible data loss: orphaned jobs that never resolve, duplicated work, or stale state that blocks new submissions. The related state.mjs has tests, but tracked-jobs adds coordination logic on top that is unverified.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.78,
+        "recommendation": "Add tests/tracked-jobs.test.mjs covering: (1) job creation and state persistence, (2) job lookup by ID, (3) concurrent job creation (race condition), (4) cleanup/retirement of completed jobs, (5) recovery from corrupted job state files, (6) behavior when filesystem is full or permissions are wrong."
+      },
+      {
+        "severity": "medium",
+        "title": "scripts/lib/process.mjs deleted entirely — latent import-breakage risk",
+        "body": "scripts/lib/process.mjs (67 lines) was deleted outright. If any surviving code still imports from './lib/process.mjs' or '../lib/process.mjs', it will fail at module-resolution time with a cryptic ERR_MODULE_NOT_FOUND error at runtime, not at build time. The check-imports.mjs script was only modified by 5 lines, which seems small for a thorough migration audit. The new modules (retry.mjs at 203 lines, bigmodel-errors.mjs at 168 lines) may have absorbed process.mjs responsibilities, but without seeing the actual migration, there's risk of dropped functionality or behavioral changes in signal handling / process cleanup.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.65,
+        "recommendation": "Verify via grep (or the check-imports.mjs script) that zero remaining files reference 'process.mjs' or 'lib/process'. Confirm that all functionality from the deleted module (likely child process spawning, signal handling, or process lifecycle management) is covered by the new retry.mjs or by inlined logic elsewhere. Add an explicit CI guard that fails if any import resolves to a deleted file."
+      },
+      {
+        "severity": "medium",
+        "title": "job-control.mjs modified (20 lines) with no dedicated test coverage",
+        "body": "scripts/lib/job-control.mjs handles job lifecycle control (likely start, stop, status, cancellation). It was modified by 20 lines but has no corresponding test file. While smaller in scope than glm-client or tracked-jobs, job control is the surface users interact with for long-running operations. A bug in cancellation or status reporting could leave zombie processes or misreport job state.",
+        "file": "scripts/lib/job-control.mjs",
+        "line_start": 1,
+        "line_end": 20,
+        "confidence": 0.72,
+        "recommendation": "Add tests/job-control.test.mjs or extend an existing test to cover job-control's modified paths, especially: (1) job cancellation idempotency, (2) status queries on non-existent jobs, (3) concurrent start/stop operations."
+      }
+    ],
+    "next_steps": [
+      "Add tests/glm-client.test.mjs with integration coverage for retry + error dispatch paths before shipping",
+      "Add tests/tracked-jobs.test.mjs covering job lifecycle, persistence, and recovery scenarios",
+      "Grep the entire codebase for any remaining imports of 'lib/process' or 'process.mjs' to confirm the deletion is safe",
+      "Verify that the retry.mjs backoff strategy is bounded and includes a maximum-attempts ceiling—check for thundering-herd protection if multiple clients retry simultaneously",
+      "Run the full CI check-all.sh locally to confirm no static analysis gaps before merge"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 cumulative diff introduces substantial new runtime paths—retry logic (203 lines), BigModel error dispatch (168 lines), and significant glm-client changes (155 lines)—but leaves three critical modules without dedicated test coverage (glm-client, tracked-jobs, job-control). The deletion of scripts/lib/process.mjs poses a latent import-breakage risk if any consumer wasn't migrated. These gaps in coverage for core communication and job-lifecycle modules represent real risk of silent failures in production.\",\"findings\":[{\"severity\":\"high\",\"title\":\"glm-client.mjs heavily modified (155 lines) with no dedicated test file\",\"body\":\"scripts/lib/glm-client.mjs is the core HTTP client that communicates with the BigModel API. It received 155 lines of changes (new retry integration, error dispatch, possibly new request/response handling), yet no tests/glm-client.test.mjs exists anywhere in the diff. This is the primary trust boundary between the plugin and the remote service—failures here directly affect every user-facing operation. The retry.mjs and bigmodel-errors.mjs modules it presumably consumes are tested individually, but the integration between client, retry, and error dispatch is unverified. A malformed response, an unexpected HTTP status, or a retry storm could all manifest silently.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.82,\"recommendation\":\"Add a tests/glm-client.test.mjs covering at minimum: (1) successful request/response cycle, (2) retry behavior on transient errors, (3) BigModel error classification and dispatch, (4) timeout behavior, (5) concurrent request handling. If the client is too coupled to mock, extract a thin HTTP adapter and test the client logic against a stub.\"},{\"severity\":\"high\",\"title\":\"tracked-jobs.mjs modified (78 lines) with no dedicated test coverage\",\"body\":\"scripts/lib/tracked-jobs.mjs manages persistent job state—likely tracking long-running BigModel completions across session boundaries. It received 78 lines of changes but no tests/tracked-jobs.test.mjs exists. Job tracking is a stateful, filesystem-backed subsystem where bugs cause invisible data loss: orphaned jobs that never resolve, duplicated work, or stale state that blocks new submissions. The related state.mjs has tests, but tracked-jobs adds coordination logic on top that is unverified.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.78,\"recommendation\":\"Add tests/tracked-jobs.test.mjs covering: (1) job creation and state persistence, (2) job lookup by ID, (3) concurrent job creation (race condition), (4) cleanup/retirement of completed jobs, (5) recovery from corrupted job state files, (6) behavior when filesystem is full or permissions are wrong.\"},{\"severity\":\"medium\",\"title\":\"scripts/lib/process.mjs deleted entirely — latent import-breakage risk\",\"body\":\"scripts/lib/process.mjs (67 lines) was deleted outright. If any surviving code still imports from './lib/process.mjs' or '../lib/process.mjs', it will fail at module-resolution time with a cryptic ERR_MODULE_NOT_FOUND error at runtime, not at build time. The check-imports.mjs script was only modified by 5 lines, which seems small for a thorough migration audit. The new modules (retry.mjs at 203 lines, bigmodel-errors.mjs at 168 lines) may have absorbed process.mjs responsibilities, but without seeing the actual migration, there's risk of dropped functionality or behavioral changes in signal handling / process cleanup.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":67,\"confidence\":0.65,\"recommendation\":\"Verify via grep (or the check-imports.mjs script) that zero remaining files reference 'process.mjs' or 'lib/process'. Confirm that all functionality from the deleted module (likely child process spawning, signal handling, or process lifecycle management) is covered by the new retry.mjs or by inlined logic elsewhere. Add an explicit CI guard that fails if any import resolves to a deleted file.\"},{\"severity\":\"medium\",\"title\":\"job-control.mjs modified (20 lines) with no dedicated test coverage\",\"body\":\"scripts/lib/job-control.mjs handles job lifecycle control (likely start, stop, status, cancellation). It was modified by 20 lines but has no corresponding test file. While smaller in scope than glm-client or tracked-jobs, job control is the surface users interact with for long-running operations. A bug in cancellation or status reporting could leave zombie processes or misreport job state.\",\"file\":\"scripts/lib/job-control.mjs\",\"line_start\":1,\"line_end\":20,\"confidence\":0.72,\"recommendation\":\"Add tests/job-control.test.mjs or extend an existing test to cover job-control's modified paths, especially: (1) job cancellation idempotency, (2) status queries on non-existent jobs, (3) concurrent start/stop operations.\"}],\"next_steps\":[\"Add tests/glm-client.test.mjs with integration coverage for retry + error dispatch paths before shipping\",\"Add tests/tracked-jobs.test.mjs covering job lifecycle, persistence, and recovery scenarios\",\"Grep the entire codebase for any remaining imports of 'lib/process' or 'process.mjs' to confirm the deletion is safe\",\"Verify that the retry.mjs backoff strategy is bounded and includes a maximum-attempts ceiling—check for thundering-herd protection if multiple clients retry simultaneously\",\"Run the full CI check-all.sh locally to confirm no static analysis gaps before merge\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T18:44:05.718Z"
+}

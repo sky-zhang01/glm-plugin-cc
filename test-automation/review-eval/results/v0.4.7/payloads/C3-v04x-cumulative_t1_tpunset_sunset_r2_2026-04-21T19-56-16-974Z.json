@@ -1,0 +1,79 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 36678,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces retry logic, BigModel error dispatch, background job execution, and state management changes. While well-tested on paper, the retry module has a subtle but dangerous default behavior where a non-positive baseDelay silently bypasses all retry safeguards, the glm-client retry integration can double-count errors through both the retry wrapper and classifyError, and the tracked-jobs module's background execution path leaves orphaned state on process crash without cleanup. These are the kinds of silent failures that pass unit tests but bite in production under load.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "retry.mjs allows non-positive baseDelay to silently disable all retry safety",
+        "body": "The retryWithBackoff function in retry.mjs uses `Math.max(0, delay)` and checks `attempt < maxRetries` but does NOT validate that baseDelay > 0. If baseDelay is 0 or negative (e.g., from a misconfigured preset or undefined propagation), the function will execute zero-delay retries in a tight loop, potentially hammering the API with no backoff. The `jitter` calculation also becomes deterministic when delay=0 (Math.random() * 0 = 0), defeating the jitter purpose entirely. Unit tests only cover positive delay values.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 80,
+        "confidence": 0.75,
+        "recommendation": "Add a guard at the top of retryWithBackoff: if baseDelay <= 0, throw or log a warning and default to a sane minimum (e.g., 1000ms). Add a test case for baseDelay=0 and negative baseDelay verifying the behavior is bounded."
+      },
+      {
+        "severity": "high",
+        "title": "glm-client.mjs retry integration risks double error classification",
+        "body": "glm-client.mjs wraps API calls with retryWithBackoff AND separately uses classifyError from bigmodel-errors.mjs. If retryWithBackoff exhausts retries, it returns a structured error. The calling code then passes that error through classifyError again for display/logging. This means error classification runs on the already-wrapped retry error, not the original API error, potentially misclassifying the root cause. For example, a rate-limit error that exhausted retries gets classified as a 'retries_exhausted' generic failure rather than a retriable rate-limit, losing actionable diagnostic info.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.7,
+        "recommendation": "Ensure classifyError is called only on the original error, not on the retry wrapper's error. Consider having retryWithBackoff attach the last underlying error as a .cause property, and have the consumer classify .cause instead of the wrapper."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs background mode leaves stale job state on unclean process exit",
+        "body": "The tracked-jobs module supports --background execution which spawns a detached child process. If that child crashes (OOM, signal, unhandled exception), the parent's job state file still records the job as 'running'. There is no PID liveness check on status queries, and no timeout-based stale-state cleanup. A subsequent status or review command will show the job perpetually 'running' with no indication it's dead. The user has no recovery path other than manual state file deletion.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.8,
+        "recommendation": "Add a staleness guard: when reading job state, if status is 'running', check if the recorded PID is still alive (process.kill(pid, 0)). If the PID is gone, mark the job as 'crashed' or 'lost' with a timestamp. Surface this to the user in status output. Also add a --cleanup flag or automatic cleanup for orphaned jobs."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs atomic write uses rename but doesn't handle partial write on ENOSPC",
+        "body": "state.mjs writes state files via tmp-then-rename for atomicity, which is good. However, if the filesystem is full (ENOSPC), the tmp file write fails but the error is caught and logged without propagating. The old state file remains, but the in-memory state has already been mutated. This creates a silent state skew: the process thinks state is X but disk says Y. On next process restart, the old state is loaded, silently losing the update. There's no test for write failure scenarios.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.65,
+        "recommendation": "On write failure, either revert the in-memory state to match disk, or throw/propagate the error so the caller knows state wasn't persisted. Add a test for write failure (mock ENOSPC) verifying in-memory and on-disk state remain consistent."
+      }
+    ],
+    "next_steps": [
+      "Inspect retry.mjs to confirm the baseDelay validation gap and add the guard",
+      "Trace the glm-client retry→classifyError chain end-to-end with a mock rate-limit error to confirm double-classification",
+      "Add PID-liveness check to tracked-jobs read path and test with a killed background process",
+      "Verify state.mjs error propagation on write failure and add a consistency test"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.6 cumulative diff introduces retry logic, BigModel error dispatch, background job execution, and state management changes. While well-tested on paper, the retry module has a subtle but dangerous default behavior where a non-positive baseDelay silently bypasses all retry safeguards, the glm-client retry integration can double-count errors through both the retry wrapper and classifyError, and the tracked-jobs module's background execution path leaves orphaned state on process crash without cleanup. These are the kinds of silent failures that pass unit tests but bite in production under load.\",\"findings\":[{\"severity\":\"high\",\"title\":\"retry.mjs allows non-positive baseDelay to silently disable all retry safety\",\"body\":\"The retryWithBackoff function in retry.mjs uses `Math.max(0, delay)` and checks `attempt < maxRetries` but does NOT validate that baseDelay > 0. If baseDelay is 0 or negative (e.g., from a misconfigured preset or undefined propagation), the function will execute zero-delay retries in a tight loop, potentially hammering the API with no backoff. The `jitter` calculation also becomes deterministic when delay=0 (Math.random() * 0 = 0), defeating the jitter purpose entirely. Unit tests only cover positive delay values.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":80,\"confidence\":0.75,\"recommendation\":\"Add a guard at the top of retryWithBackoff: if baseDelay <= 0, throw or log a warning and default to a sane minimum (e.g., 1000ms). Add a test case for baseDelay=0 and negative baseDelay verifying the behavior is bounded.\"},{\"severity\":\"high\",\"title\":\"glm-client.mjs retry integration risks double error classification\",\"body\":\"glm-client.mjs wraps API calls with retryWithBackoff AND separately uses classifyError from bigmodel-errors.mjs. If retryWithBackoff exhausts retries, it returns a structured error. The calling code then passes that error through classifyError again for display/logging. This means error classification runs on the already-wrapped retry error, not the original API error, potentially misclassifying the root cause. For example, a rate-limit error that exhausted retries gets classified as a 'retries_exhausted' generic failure rather than a retriable rate-limit, losing actionable diagnostic info.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.7,\"recommendation\":\"Ensure classifyError is called only on the original error, not on the retry wrapper's error. Consider having retryWithBackoff attach the last underlying error as a .cause property, and have the consumer classify .cause instead of the wrapper.\"},{\"severity\":\"medium\",\"title\":\"tracked-jobs background mode leaves stale job state on unclean process exit\",\"body\":\"The tracked-jobs module supports --background execution which spawns a detached child process. If that child crashes (OOM, signal, unhandled exception), the parent's job state file still records the job as 'running'. There is no PID liveness check on status queries, and no timeout-based stale-state cleanup. A subsequent status or review command will show the job perpetually 'running' with no indication it's dead. The user has no recovery path other than manual state file deletion.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.8,\"recommendation\":\"Add a staleness guard: when reading job state, if status is 'running', check if the recorded PID is still alive (process.kill(pid, 0)). If the PID is gone, mark the job as 'crashed' or 'lost' with a timestamp. Surface this to the user in status output. Also add a --cleanup flag or automatic cleanup for orphaned jobs.\"},{\"severity\":\"medium\",\"title\":\"state.mjs atomic write uses rename but doesn't handle partial write on ENOSPC\",\"body\":\"state.mjs writes state files via tmp-then-rename for atomicity, which is good. However, if the filesystem is full (ENOSPC), the tmp file write fails but the error is caught and logged without propagating. The old state file remains, but the in-memory state has already been mutated. This creates a silent state skew: the process thinks state is X but disk says Y. On next process restart, the old state is loaded, silently losing the update. There's no test for write failure scenarios.\",\"file\":\"scripts/lib/state.mjs\",\"line_start\":1,\"line_end\":32,\"confidence\":0.65,\"recommendation\":\"On write failure, either revert the in-memory state to match disk, or throw/propagate the error so the caller knows state wasn't persisted. Add a test for write failure (mock ENOSPC) verifying in-memory and on-disk state remain consistent.\"}],\"next_steps\":[\"Inspect retry.mjs to confirm the baseDelay validation gap and add the guard\",\"Trace the glm-client retry→classifyError chain end-to-end with a mock rate-limit error to confirm double-classification\",\"Add PID-liveness check to tracked-jobs read path and test with a killed background process\",\"Verify state.mjs error propagation on write failure and add a consistency test\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T19:56:17.010Z"
+}

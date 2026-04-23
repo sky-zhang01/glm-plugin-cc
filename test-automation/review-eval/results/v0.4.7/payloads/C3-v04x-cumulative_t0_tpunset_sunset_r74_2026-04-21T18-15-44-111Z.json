@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 74
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 124069,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "Large cumulative delta (84 files, +6.6k/−480 lines) introducing new retry, error-dispatch, and client infrastructure. The highest-risk structural concerns are (1) a fully deleted module (process.mjs) that previously caused a ReferenceError in production, with residual import-breakage risk, and (2) the new retry/error-classification coupling in retry.mjs + bigmodel-errors.mjs that makes implicit idempotency assumptions about API calls — dangerous for a sampling-sweep workload where duplicate operations silently corrupt results. These are not speculative: the commit log itself documents a prior ReferenceError purge and multiple rounds of post-review hotfixes (Bundles C through G), indicating the codebase is still stabilizing around these modules.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Deleted process.mjs leaves residual import-breakage risk",
+        "body": "scripts/lib/process.mjs was entirely removed (−67 lines). The commit 'ReferenceError + full thread/resume scaffolding purge' documents that this deletion follows a runtime ReferenceError. While check-imports.mjs was updated, static import checking does not cover dynamic imports, re-exports through intermediate barrels, or eval-based references. If any surviving path dynamically imports from 'process.mjs' (e.g., via glm-client.mjs, render.mjs, or the companion entry point), the error recurs at runtime — exactly the failure mode already observed once. The check-imports.mjs modification (5 lines) is too small to credibly cover all edge cases across a 6.6k-line diff.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.65,
+        "recommendation": "Audit every remaining file for any reference (static or dynamic) to 'process.mjs' or its exported symbols. Grep for the module path string and each former export name. If the module was a barrel re-exporter, verify no downstream consumer relied on it transitively. Consider keeping process.mjs as a thin deprecated wrapper that throws a descriptive error rather than deleting it outright, so any missed import surfaces immediately with a message instead of an opaque ReferenceError."
+      },
+      {
+        "severity": "high",
+        "title": "Retry + error-classification coupling makes undocumented idempotency assumptions",
+        "body": "retry.mjs (203 new lines) implements automatic retry/backoff, and bigmodel-errors.mjs (168 new lines) classifies errors to decide retryability. This coupling implicitly assumes that every retried API call is idempotent. For a sampling-sweep workload (the stated user focus), if a request reaches the server but the response is lost (timeout, network reset), the retry module will re-issue the request, producing a duplicate sample. There is no evidence in the diff stat of request-deduplication, idempotency keys, or result-set deduplication. Duplicate samples silently corrupt sweep statistics without any visible error. The 352-line test file for retry covers many cases but test file size alone does not prove idempotency is handled — the test file name (retry.test.mjs) does not suggest idempotency-specific test scenarios.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.7,
+        "recommendation": "Add explicit idempotency guards: either (a) generate and pass idempotency keys on retried API calls if the upstream API supports them, or (b) deduplicate results client-side using request identifiers before aggregating sweep data. Document which operations are safe to retry and which are not. Add at least one test case that verifies a timed-out request is not double-counted in results."
+      },
+      {
+        "severity": "medium",
+        "title": "glm-client.mjs changes integrate untested error-path interactions",
+        "body": "glm-client.mjs was significantly modified (155 lines changed) to integrate the new retry.mjs and bigmodel-errors.mjs modules. The integration point between client, retry, and error dispatch is the highest-risk surface in this diff — it is where misclassified errors propagate into incorrect retry decisions. The test suite has per-module tests (retry.test.mjs, bigmodel-errors.test.mjs) but no integration test file for glm-client.mjs itself appears in the diff. The result-propagation.test.mjs (69 lines) and job-render.test.mjs (144 lines) may exercise some paths, but their names suggest they test downstream rendering, not the client retry integration. This means the actual error → classify → retry/abort → return-to-caller flow has no end-to-end test coverage.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.6,
+        "recommendation": "Add an integration test that exercises the full error path: client call → server error response → bigmodel-errors classification → retry decision → eventual success or final failure. Cover at minimum: (1) a rate-limit error that should succeed after backoff, (2) an auth error that should not be retried, and (3) a network timeout where the request may have reached the server. This is the minimum evidence needed to trust the retry integration in a sampling sweep."
+      }
+    ],
+    "next_steps": [
+      "Grep the entire codebase for any remaining reference (static or dynamic) to scripts/lib/process.mjs or its former exports before shipping.",
+      "Verify that retried API operations in glm-client.mjs are idempotent or that results are deduplicated client-side; add a test proving it.",
+      "Add end-to-end integration tests covering the client → error-classify → retry → result flow before the sampling sweep.",
+      "Tag the current state as a release candidate rather than a stable release; run the sampling sweep against it in a non-production context first."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"Large cumulative delta (84 files, +6.6k/−480 lines) introducing new retry, error-dispatch, and client infrastructure. The highest-risk structural concerns are (1) a fully deleted module (process.mjs) that previously caused a ReferenceError in production, with residual import-breakage risk, and (2) the new retry/error-classification coupling in retry.mjs + bigmodel-errors.mjs that makes implicit idempotency assumptions about API calls — dangerous for a sampling-sweep workload where duplicate operations silently corrupt results. These are not speculative: the commit log itself documents a prior ReferenceError purge and multiple rounds of post-review hotfixes (Bundles C through G), indicating the codebase is still stabilizing around these modules.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Deleted process.mjs leaves residual import-breakage risk\",\"body\":\"scripts/lib/process.mjs was entirely removed (−67 lines). The commit 'ReferenceError + full thread/resume scaffolding purge' documents that this deletion follows a runtime ReferenceError. While check-imports.mjs was updated, static import checking does not cover dynamic imports, re-exports through intermediate barrels, or eval-based references. If any surviving path dynamically imports from 'process.mjs' (e.g., via glm-client.mjs, render.mjs, or the companion entry point), the error recurs at runtime — exactly the failure mode already observed once. The check-imports.mjs modification (5 lines) is too small to credibly cover all edge cases across a 6.6k-line diff.\",\"file\":\"scripts/lib/process.mjs\",\"line_start\":1,\"line_end\":67,\"confidence\":0.65,\"recommendation\":\"Audit every remaining file for any reference (static or dynamic) to 'process.mjs' or its exported symbols. Grep for the module path string and each former export name. If the module was a barrel re-exporter, verify no downstream consumer relied on it transitively. Consider keeping process.mjs as a thin deprecated wrapper that throws a descriptive error rather than deleting it outright, so any missed import surfaces immediately with a message instead of an opaque ReferenceError.\"},{\"severity\":\"high\",\"title\":\"Retry + error-classification coupling makes undocumented idempotency assumptions\",\"body\":\"retry.mjs (203 new lines) implements automatic retry/backoff, and bigmodel-errors.mjs (168 new lines) classifies errors to decide retryability. This coupling implicitly assumes that every retried API call is idempotent. For a sampling-sweep workload (the stated user focus), if a request reaches the server but the response is lost (timeout, network reset), the retry module will re-issue the request, producing a duplicate sample. There is no evidence in the diff stat of request-deduplication, idempotency keys, or result-set deduplication. Duplicate samples silently corrupt sweep statistics without any visible error. The 352-line test file for retry covers many cases but test file size alone does not prove idempotency is handled — the test file name (retry.test.mjs) does not suggest idempotency-specific test scenarios.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.7,\"recommendation\":\"Add explicit idempotency guards: either (a) generate and pass idempotency keys on retried API calls if the upstream API supports them, or (b) deduplicate results client-side using request identifiers before aggregating sweep data. Document which operations are safe to retry and which are not. Add at least one test case that verifies a timed-out request is not double-counted in results.\"},{\"severity\":\"medium\",\"title\":\"glm-client.mjs changes integrate untested error-path interactions\",\"body\":\"glm-client.mjs was significantly modified (155 lines changed) to integrate the new retry.mjs and bigmodel-errors.mjs modules. The integration point between client, retry, and error dispatch is the highest-risk surface in this diff — it is where misclassified errors propagate into incorrect retry decisions. The test suite has per-module tests (retry.test.mjs, bigmodel-errors.test.mjs) but no integration test file for glm-client.mjs itself appears in the diff. The result-propagation.test.mjs (69 lines) and job-render.test.mjs (144 lines) may exercise some paths, but their names suggest they test downstream rendering, not the client retry integration. This means the actual error → classify → retry/abort → return-to-caller flow has no end-to-end test coverage.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":155,\"confidence\":0.6,\"recommendation\":\"Add an integration test that exercises the full error path: client call → server error response → bigmodel-errors classification → retry decision → eventual success or final failure. Cover at minimum: (1) a rate-limit error that should succeed after backoff, (2) an auth error that should not be retried, and (3) a network timeout where the request may have reached the server. This is the minimum evidence needed to trust the retry integration in a sampling sweep.\"}],\"next_steps\":[\"Grep the entire codebase for any remaining reference (static or dynamic) to scripts/lib/process.mjs or its former exports before shipping.\",\"Verify that retried API operations in glm-client.mjs are idempotent or that results are deduplicated client-side; add a test proving it.\",\"Add end-to-end integration tests covering the client → error-classify → retry → result flow before the sampling sweep.\",\"Tag the current state as a release candidate rather than a stable release; run the sampling sweep against it in a non-production context first.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T18:15:44.137Z"
+}

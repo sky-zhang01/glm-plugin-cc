@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 20
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 72902,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The commit renames the npm package scope and adds an interactive re-configuration menu to /glm:setup. The scope rename is a distribution-breaking change for any existing consumer pinned to the old package name, with no migration guard or deprecation path visible. The interactive setup menu for already-configured states needs scrutiny for accidental config destruction. Documentation-heavy change overall but the scope rename carries real upgrade risk.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "NPM scope rename is a breaking change with no migration path",
+        "body": "package.json shows 4 lines changed, consistent with a package name/scope rename. Existing installations referencing the old scoped package (e.g. @oldscope/name) will not resolve to the new package. There is no deprecation notice on the old package, no install-time migration script, and the CHANGELOG does not flag this as breaking. Users on v0.4.6 and below who run `npm update` will silently stay on the old scope and never receive future patches. This is an orphaning risk under semver minor/patch.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.75,
+        "recommendation": "If the scope changed, publish a deprecated stub under the old name that depends on the new name, or explicitly document this as a breaking change and bump the major version. Add a postinstall or peerDep warning if the old name is still resolvable."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive re-configuration menu may lack destructive-action guards",
+        "body": "commands/setup.md changed by 19 lines to add an interactive menu when the plugin is already configured. Without seeing the exact content, the risk is that a user selecting a 'reconfigure' or 'reset' option could overwrite or discard an existing working configuration without an explicit confirmation step or backup. For a setup command, accidental config loss is a real user pain point, especially if the menu is presented on every invocation without a --force flag.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.6,
+        "recommendation": "Ensure any destructive option (overwrite config, reset to defaults) requires an explicit confirmation step. Consider adding a --force flag for scripted re-configuration. If the file is a Claude prompt template, include guard language that asks the user to confirm before overwriting existing configuration values."
+      },
+      {
+        "severity": "low",
+        "title": "Plugin metadata changes may invalidate existing marketplace listings",
+        "body": "Both .claude-plugin/marketplace.json (4 lines) and plugin.json (2 lines) changed. If the identifier or name fields changed to match the new scope, any existing marketplace listing or user bookmark may break. Stale cached metadata could cause silent install failures or version mismatch for users who haven't refreshed their plugin registry.",
+        "file": ".claude-plugin/marketplace.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.5,
+        "recommendation": "Verify that the plugin identifier is consistent across marketplace.json, plugin.json, and package.json. If the identifier changed, ensure the old listing is deprecated or redirected, not just abandoned."
+      }
+    ],
+    "next_steps": [
+      "Inspect the full diff of package.json to confirm whether the scope/name actually changed and, if so, treat this as a semver-major breaking change.",
+      "Read commands/setup.md in full to verify that the interactive menu includes confirmation guards before any destructive configuration overwrite.",
+      "Cross-check .claude-plugin/marketplace.json and plugin.json for identifier consistency with the new package name.",
+      "If the scope did change, publish a deprecation stub under the old name before shipping."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The commit renames the npm package scope and adds an interactive re-configuration menu to /glm:setup. The scope rename is a distribution-breaking change for any existing consumer pinned to the old package name, with no migration guard or deprecation path visible. The interactive setup menu for already-configured states needs scrutiny for accidental config destruction. Documentation-heavy change overall but the scope rename carries real upgrade risk.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"NPM scope rename is a breaking change with no migration path\",\n      \"body\": \"package.json shows 4 lines changed, consistent with a package name/scope rename. Existing installations referencing the old scoped package (e.g. @oldscope/name) will not resolve to the new package. There is no deprecation notice on the old package, no install-time migration script, and the CHANGELOG does not flag this as breaking. Users on v0.4.6 and below who run `npm update` will silently stay on the old scope and never receive future patches. This is an orphaning risk under semver minor/patch.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.75,\n      \"recommendation\": \"If the scope changed, publish a deprecated stub under the old name that depends on the new name, or explicitly document this as a breaking change and bump the major version. Add a postinstall or peerDep warning if the old name is still resolvable.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Interactive re-configuration menu may lack destructive-action guards\",\n      \"body\": \"commands/setup.md changed by 19 lines to add an interactive menu when the plugin is already configured. Without seeing the exact content, the risk is that a user selecting a 'reconfigure' or 'reset' option could overwrite or discard an existing working configuration without an explicit confirmation step or backup. For a setup command, accidental config loss is a real user pain point, especially if the menu is presented on every invocation without a --force flag.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Ensure any destructive option (overwrite config, reset to defaults) requires an explicit confirmation step. Consider adding a --force flag for scripted re-configuration. If the file is a Claude prompt template, include guard language that asks the user to confirm before overwriting existing configuration values.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"title\": \"Plugin metadata changes may invalidate existing marketplace listings\",\n      \"body\": \"Both .claude-plugin/marketplace.json (4 lines) and plugin.json (2 lines) changed. If the identifier or name fields changed to match the new scope, any existing marketplace listing or user bookmark may break. Stale cached metadata could cause silent install failures or version mismatch for users who haven't refreshed their plugin registry.\",\n      \"file\": \".claude-plugin/marketplace.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.5,\n      \"recommendation\": \"Verify that the plugin identifier is consistent across marketplace.json, plugin.json, and package.json. If the identifier changed, ensure the old listing is deprecated or redirected, not just abandoned.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Inspect the full diff of package.json to confirm whether the scope/name actually changed and, if so, treat this as a semver-major breaking change.\",\n    \"Read commands/setup.md in full to verify that the interactive menu includes confirmation guards before any destructive configuration overwrite.\",\n    \"Cross-check .claude-plugin/marketplace.json and plugin.json for identifier consistency with the new package name.\",\n    \"If the scope did change, publish a deprecation stub under the old name before shipping.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T17:12:09.292Z"
+}

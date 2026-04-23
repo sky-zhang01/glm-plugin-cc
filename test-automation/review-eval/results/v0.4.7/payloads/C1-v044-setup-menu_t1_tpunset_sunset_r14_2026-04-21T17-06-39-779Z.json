@@ -1,0 +1,70 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 14
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 108270,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This commit bundles a potentially breaking npm scope rename with a feature-level change (interactive setup menu). The scope rename can silently break existing installations, CI pipelines, or documentation references that hardcode the old package name. A version bump alone (assuming v0.4.7 per the branch focus) doesn't adequately communicate a scope migration. The setup.md menu addition also lacks observable failure handling if the markdown-driven prompt is misinterpreted by the model.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "npm scope rename is a silent breaking change for existing installations",
+        "body": "The commit message explicitly states 'rename npm scope' and package.json shows 4 changed lines consistent with a scope/name change. Any user, CI pipeline, or downstream tooling referencing the old scoped package name will fail to resolve or update. This is packaged as a 'fix' commit in a minor version (v0.4.7) with no visible migration path, deprecation notice, or compatibility shim. Users who installed under the old scope will not receive this update and may be stranded on the old package. The marketplace.json changes (4 lines) suggest the listing was updated, but existing installations won't auto-migrate.",
+        "file": "package.json",
+        "line_start": 1,
+        "line_end": 4,
+        "confidence": 0.82,
+        "recommendation": "Verify whether a deprecation path exists for the old scope (e.g., a stub package that depends on the new one). If not, add one. Ensure the CHANGELOG explicitly documents the migration steps and pin the major version bump if semver is being followed, since a scope rename is breaking for any consumer resolving by package name."
+      },
+      {
+        "severity": "medium",
+        "title": "Interactive setup menu added without guardrails for ambiguous or malformed model output",
+        "body": "commands/setup.md shows 19 line changes, adding an interactive menu when the system is already configured. Since this is a markdown-driven Claude command, the menu behavior relies entirely on the model correctly interpreting and executing branching logic. There is no visible error handling if the model misinterprets the menu, selects multiple options, or produces unexpected output. In a re-invocation scenario (user runs setup twice), a misinterpreted menu could lead to config overwrite, data loss of existing settings, or an inconsistent state where partial reconfiguration occurred.",
+        "file": "commands/setup.md",
+        "line_start": 1,
+        "line_end": 19,
+        "confidence": 0.68,
+        "recommendation": "Add explicit guard clauses in the markdown for the 'already configured' path: (1) confirm destructive actions like reconfiguration before executing, (2) preserve existing config in a backup before overwriting, (3) define a clear fallback if the model cannot parse the menu selection. Test the menu under adversarial or ambiguous input conditions."
+      },
+      {
+        "severity": "medium",
+        "title": "Metadata files may be inconsistent after scope rename",
+        "body": "Both .claude-plugin/marketplace.json (4 changes) and .claude-plugin/plugin.json (2 changes) were modified alongside package.json. If the scope rename is not reflected consistently across all three files (e.g., plugin.json references the old name while package.json uses the new scope), the plugin may fail to load, appear with a broken icon/link in the marketplace, or create duplicate entries. Two-line changes in plugin.json are suspiciously minimal for a scope rename that typically affects name, version, description, and possibly identifier fields.",
+        "file": ".claude-plugin/plugin.json",
+        "line_start": 1,
+        "line_end": 2,
+        "confidence": 0.6,
+        "recommendation": "Audit all three metadata files (plugin.json, marketplace.json, package.json) for internal consistency. Verify that every field referencing the package identity (name, scope, URL, identifier) uses the new scope uniformly. Add a CI check or pre-publish validation that cross-references these fields."
+      }
+    ],
+    "next_steps": [
+      "Run `git diff 7766943^..7766943 -- package.json` to confirm the exact scope rename and verify semver implications",
+      "Check if a stub/deprecation package exists under the old npm scope to redirect existing consumers",
+      "Audit commands/setup.md for the 'already configured' menu paths and verify each branch has confirmation guards before destructive actions",
+      "Cross-reference all fields in plugin.json, marketplace.json, and package.json for consistent use of the new scope",
+      "Verify CHANGELOG.md documents the migration path for users on the old scope"
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"This commit bundles a potentially breaking npm scope rename with a feature-level change (interactive setup menu). The scope rename can silently break existing installations, CI pipelines, or documentation references that hardcode the old package name. A version bump alone (assuming v0.4.7 per the branch focus) doesn't adequately communicate a scope migration. The setup.md menu addition also lacks observable failure handling if the markdown-driven prompt is misinterpreted by the model.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"npm scope rename is a silent breaking change for existing installations\",\n      \"body\": \"The commit message explicitly states 'rename npm scope' and package.json shows 4 changed lines consistent with a scope/name change. Any user, CI pipeline, or downstream tooling referencing the old scoped package name will fail to resolve or update. This is packaged as a 'fix' commit in a minor version (v0.4.7) with no visible migration path, deprecation notice, or compatibility shim. Users who installed under the old scope will not receive this update and may be stranded on the old package. The marketplace.json changes (4 lines) suggest the listing was updated, but existing installations won't auto-migrate.\",\n      \"file\": \"package.json\",\n      \"line_start\": 1,\n      \"line_end\": 4,\n      \"confidence\": 0.82,\n      \"recommendation\": \"Verify whether a deprecation path exists for the old scope (e.g., a stub package that depends on the new one). If not, add one. Ensure the CHANGELOG explicitly documents the migration steps and pin the major version bump if semver is being followed, since a scope rename is breaking for any consumer resolving by package name.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Interactive setup menu added without guardrails for ambiguous or malformed model output\",\n      \"body\": \"commands/setup.md shows 19 line changes, adding an interactive menu when the system is already configured. Since this is a markdown-driven Claude command, the menu behavior relies entirely on the model correctly interpreting and executing branching logic. There is no visible error handling if the model misinterprets the menu, selects multiple options, or produces unexpected output. In a re-invocation scenario (user runs setup twice), a misinterpreted menu could lead to config overwrite, data loss of existing settings, or an inconsistent state where partial reconfiguration occurred.\",\n      \"file\": \"commands/setup.md\",\n      \"line_start\": 1,\n      \"line_end\": 19,\n      \"confidence\": 0.68,\n      \"recommendation\": \"Add explicit guard clauses in the markdown for the 'already configured' path: (1) confirm destructive actions like reconfiguration before executing, (2) preserve existing config in a backup before overwriting, (3) define a clear fallback if the model cannot parse the menu selection. Test the menu under adversarial or ambiguous input conditions.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Metadata files may be inconsistent after scope rename\",\n      \"body\": \"Both .claude-plugin/marketplace.json (4 changes) and .claude-plugin/plugin.json (2 changes) were modified alongside package.json. If the scope rename is not reflected consistently across all three files (e.g., plugin.json references the old name while package.json uses the new scope), the plugin may fail to load, appear with a broken icon/link in the marketplace, or create duplicate entries. Two-line changes in plugin.json are suspiciously minimal for a scope rename that typically affects name, version, description, and possibly identifier fields.\",\n      \"file\": \".claude-plugin/plugin.json\",\n      \"line_start\": 1,\n      \"line_end\": 2,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Audit all three metadata files (plugin.json, marketplace.json, package.json) for internal consistency. Verify that every field referencing the package identity (name, scope, URL, identifier) uses the new scope uniformly. Add a CI check or pre-publish validation that cross-references these fields.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run `git diff 7766943^..7766943 -- package.json` to confirm the exact scope rename and verify semver implications\",\n    \"Check if a stub/deprecation package exists under the old npm scope to redirect existing consumers\",\n    \"Audit commands/setup.md for the 'already configured' menu paths and verify each branch has confirmation guards before destructive actions\",\n    \"Cross-reference all fields in plugin.json, marketplace.json, and package.json for consistent use of the new scope\",\n    \"Verify CHANGELOG.md documents the migration path for users on the old scope\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T17:06:39.804Z"
+}

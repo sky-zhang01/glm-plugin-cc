@@ -1,0 +1,79 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 94437,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.6 cumulative diff introduces three tightly-coupled new modules (retry.mjs, bigmodel-errors.mjs, tracked-jobs.mjs) that mediate API calls, error classification, and persistent job state. The deletion of process.mjs, the complexity of the retry backoff logic, and the absence of any visible concurrency guard on state files create realistic failure paths: stale job state after partial retries, misclassified errors silently swallowed, and race conditions when multiple GLM processes write the same state file. These are the kinds of defects that pass unit tests but surface under real load or transient network failures.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "process.mjs deleted — potential dangling imports at runtime",
+        "body": "scripts/lib/process.mjs was removed entirely (67 lines). Although check-imports.mjs was updated, import verification only runs in CI. Any runtime code path that lazily or conditionally imports from './lib/process.mjs' (e.g., in glm-companion.mjs, glm-client.mjs, or render.mjs) will throw an uncatchable MODULE_NOT_FOUND at invocation time. The companion CLI is the primary user-facing entry point, so this would manifest as a hard crash with no diagnostic guidance.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.62,
+        "recommendation": "Grep every .mjs file for the string 'process' (or 'lib/process') to confirm no remaining import sites. If the deletion is intentional, add a regression test that exercises every CLI subcommand in a subprocess and asserts exit code 0."
+      },
+      {
+        "severity": "high",
+        "title": "retry.mjs retry-without-idempotency can duplicate side effects in tracked-jobs",
+        "body": "scripts/lib/retry.mjs adds 203 lines of backoff/retry logic. scripts/lib/tracked-jobs.mjs (78 lines changed) persists job state to disk. If an API call to GLM succeeds server-side but the response is lost or times out, retry.mjs will re-invoke the operation. The tracked-jobs layer will record a second job entry because it has no deduplication key tied to the original request identity. Under transient network blips — exactly the scenario retry is meant to handle — this produces duplicate job records and potentially duplicate billable API calls. The 352-line test suite for retry covers backoff timing but cannot surface this without an integration test that simulates partial success.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.58,
+        "recommendation": "Add an idempotency-key or request-dedup mechanism: before persisting a retried job, check whether a job with the same request fingerprint already exists in tracked-jobs state. Add an integration test that injects a simulated response timeout after server-side success and asserts exactly one job record is written."
+      },
+      {
+        "severity": "medium",
+        "title": "state.mjs and tracked-jobs.mjs lack file-locking — concurrent writes corrupt state",
+        "body": "scripts/lib/state.mjs (32 lines changed) and scripts/lib/tracked-jobs.mjs (78 lines changed) both read/write JSON state files with no visible advisory lock (flock, lockfile, or atomic rename). If two GLM companion processes run concurrently (e.g., two terminal sessions invoking glm:review simultaneously), they can interleave reads and writes, producing truncated or merged JSON that is unparseable on the next load. This is a classic TOCTOU race on developer workstations. The unit tests for state.mjs (81 lines) appear to test single-process scenarios only.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.55,
+        "recommendation": "Use write-to-temp-then-rename (atomic rename) for state file updates: write to state.json.tmp, then fs.rename('state.json.tmp', 'state.json'). This is atomic on POSIX and eliminates the interleaving window. Add a test that runs two concurrent state writers and verifies the final file is valid JSON."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error classification is the single point of truth for retry decisions — misclassification is a silent failure",
+        "body": "scripts/lib/bigmodel-errors.mjs (168 new lines) classifies API errors to decide retry-vs-fail. If an error code or response shape is not covered (e.g., a new BigModel API error variant introduced server-side), the classifier likely falls through to a default 'non-retriable' classification, causing the retry layer to give up immediately. Users see an opaque failure with no indication that the error was simply unrecognized. Conversely, if a non-retriable error (e.g., auth failure, quota exceeded) is misclassified as retriable, the system will burn through retry budget and delay surfacing the real problem by minutes.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.52,
+        "recommendation": "Ensure the classifier has an explicit 'unknown' category that logs the full error payload at WARN level and is treated as non-retriable by default (fail fast). Add a test that passes an entirely unrecognised error shape and asserts it is classified as unknown/non-retriable rather than crashing or defaulting to retry."
+      }
+    ],
+    "next_steps": [
+      "Verify no remaining imports of scripts/lib/process.mjs across all .mjs files (grep -r 'lib/process' scripts/).",
+      "Add an integration test for retry + tracked-jobs that simulates a response timeout after server success and asserts single job creation.",
+      "Switch state.mjs and tracked-jobs.mjs to atomic write (write-to-temp + rename) to eliminate concurrent-write corruption.",
+      "Add a 'unknown error' classification path in bigmodel-errors.mjs with explicit logging and fail-fast default."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.0→v0.4.6 cumulative diff introduces three tightly-coupled new modules (retry.mjs, bigmodel-errors.mjs, tracked-jobs.mjs) that mediate API calls, error classification, and persistent job state. The deletion of process.mjs, the complexity of the retry backoff logic, and the absence of any visible concurrency guard on state files create realistic failure paths: stale job state after partial retries, misclassified errors silently swallowed, and race conditions when multiple GLM processes write the same state file. These are the kinds of defects that pass unit tests but surface under real load or transient network failures.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"process.mjs deleted — potential dangling imports at runtime\",\n      \"body\": \"scripts/lib/process.mjs was removed entirely (67 lines). Although check-imports.mjs was updated, import verification only runs in CI. Any runtime code path that lazily or conditionally imports from './lib/process.mjs' (e.g., in glm-companion.mjs, glm-client.mjs, or render.mjs) will throw an uncatchable MODULE_NOT_FOUND at invocation time. The companion CLI is the primary user-facing entry point, so this would manifest as a hard crash with no diagnostic guidance.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.62,\n      \"recommendation\": \"Grep every .mjs file for the string 'process' (or 'lib/process') to confirm no remaining import sites. If the deletion is intentional, add a regression test that exercises every CLI subcommand in a subprocess and asserts exit code 0.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"retry.mjs retry-without-idempotency can duplicate side effects in tracked-jobs\",\n      \"body\": \"scripts/lib/retry.mjs adds 203 lines of backoff/retry logic. scripts/lib/tracked-jobs.mjs (78 lines changed) persists job state to disk. If an API call to GLM succeeds server-side but the response is lost or times out, retry.mjs will re-invoke the operation. The tracked-jobs layer will record a second job entry because it has no deduplication key tied to the original request identity. Under transient network blips — exactly the scenario retry is meant to handle — this produces duplicate job records and potentially duplicate billable API calls. The 352-line test suite for retry covers backoff timing but cannot surface this without an integration test that simulates partial success.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.58,\n      \"recommendation\": \"Add an idempotency-key or request-dedup mechanism: before persisting a retried job, check whether a job with the same request fingerprint already exists in tracked-jobs state. Add an integration test that injects a simulated response timeout after server-side success and asserts exactly one job record is written.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"state.mjs and tracked-jobs.mjs lack file-locking — concurrent writes corrupt state\",\n      \"body\": \"scripts/lib/state.mjs (32 lines changed) and scripts/lib/tracked-jobs.mjs (78 lines changed) both read/write JSON state files with no visible advisory lock (flock, lockfile, or atomic rename). If two GLM companion processes run concurrently (e.g., two terminal sessions invoking glm:review simultaneously), they can interleave reads and writes, producing truncated or merged JSON that is unparseable on the next load. This is a classic TOCTOU race on developer workstations. The unit tests for state.mjs (81 lines) appear to test single-process scenarios only.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Use write-to-temp-then-rename (atomic rename) for state file updates: write to state.json.tmp, then fs.rename('state.json.tmp', 'state.json'). This is atomic on POSIX and eliminates the interleaving window. Add a test that runs two concurrent state writers and verifies the final file is valid JSON.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"bigmodel-errors.mjs error classification is the single point of truth for retry decisions — misclassification is a silent failure\",\n      \"body\": \"scripts/lib/bigmodel-errors.mjs (168 new lines) classifies API errors to decide retry-vs-fail. If an error code or response shape is not covered (e.g., a new BigModel API error variant introduced server-side), the classifier likely falls through to a default 'non-retriable' classification, causing the retry layer to give up immediately. Users see an opaque failure with no indication that the error was simply unrecognized. Conversely, if a non-retriable error (e.g., auth failure, quota exceeded) is misclassified as retriable, the system will burn through retry budget and delay surfacing the real problem by minutes.\",\n      \"file\": \"scripts/lib/bigmodel-errors.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 168,\n      \"confidence\": 0.52,\n      \"recommendation\": \"Ensure the classifier has an explicit 'unknown' category that logs the full error payload at WARN level and is treated as non-retriable by default (fail fast). Add a test that passes an entirely unrecognised error shape and asserts it is classified as unknown/non-retriable rather than crashing or defaulting to retry.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Verify no remaining imports of scripts/lib/process.mjs across all .mjs files (grep -r 'lib/process' scripts/).\",\n    \"Add an integration test for retry + tracked-jobs that simulates a response timeout after server success and asserts single job creation.\",\n    \"Switch state.mjs and tracked-jobs.mjs to atomic write (write-to-temp + rename) to eliminate concurrent-write corruption.\",\n    \"Add a 'unknown error' classification path in bigmodel-errors.mjs with explicit logging and fail-fast default.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T18:23:11.933Z"
+}

@@ -1,0 +1,101 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 48
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 6,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 158467,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This release (v0.4.0→v0.4.6) is a 6600+ line, 84-file cumulative diff with several structural risks. A core module (process.mjs) was deleted, the primary API client (glm-client.mjs) has no dedicated test file despite 155 lines of changes, and a security-sensitive Gitea branch-protection script ships without tests. The breadth alone warrants caution; the specific gaps below are blocking.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "process.mjs deleted — residual imports will crash at runtime",
+        "body": "scripts/lib/process.mjs (67 lines) was fully removed. Any surviving import (re-export, dynamic import, cached compiled artifact) will throw MODULE_NOT_FOUND at runtime. In a cumulative sweep, downstream consumers in glm-companion.mjs or other scripts may still reference it. No migration shim or re-export stub is visible in the diff.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.65,
+        "recommendation": "Grep the entire codebase for 'process\\.mjs' or 'lib/process' references. If any exist, either add a re-export stub or update the consumer. Add a CI check that imports every exported module to catch this class of break."
+      },
+      {
+        "severity": "high",
+        "title": "glm-client.mjs heavily modified with no dedicated test coverage",
+        "body": "The core API client changed by 155 lines (retry wiring, error dispatch, likely request/response handling). No glm-client.test.mjs file exists in the test suite. Client changes are the #1 source of silent failures: wrong error mapping, dropped retries, corrupted response bodies. Existing integration tests may not cover new failure paths.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.75,
+        "recommendation": "Add a dedicated unit test for glm-client.mjs covering: retry on transient errors, error dispatch classification, timeout handling, and malformed response bodies. At minimum, add contract tests for every exported function."
+      },
+      {
+        "severity": "high",
+        "title": "configure-gitea-protection.sh — security-sensitive, untested, 126 new lines",
+        "body": "This new shell script configures Gitea branch protection rules. A misconfiguration could leave repos unprotected or lock out all collaborators. Shell scripts are prone to quoting/escaping bugs, unhandled API errors, and partial application. No test file exists for it, and it is not referenced in any UAT scenario.",
+        "file": "scripts/setup/configure-gitea-protection.sh",
+        "line_start": 1,
+        "line_end": 126,
+        "confidence": 0.6,
+        "recommendation": "Add a dry-run mode that prints the API calls without executing them. Create a test that validates the script against a mock Gitea API. At minimum, add shellcheck linting in CI for this file."
+      },
+      {
+        "severity": "medium",
+        "title": "retry.mjs — new 203-line module, idempotency gap risk",
+        "body": "New retry infrastructure (retry.mjs, 203 lines) with tests (retry.test.mjs, 352 lines). Test coverage exists but retry modules historically fail on: operations with side effects retried without idempotency keys, missing jitter causing thundering herd, and retrying non-idempotent HTTP methods. The test file size suggests good coverage but cannot verify edge cases without code inspection.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.55,
+        "recommendation": "Verify retry.mjs only retries idempotent operations or includes idempotency keys. Confirm jitter is applied to backoff. Add explicit test cases for: concurrent retries of the same operation, retry after partial write, and retry budget exhaustion."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs modified (78 lines) without dedicated test",
+        "body": "Job tracking was modified (78 lines changed) with no tracked-jobs.test.mjs. Job tracking is critical for preventing duplicate work and ensuring completion across crashes/restarts. A bug here could cause silent job loss, duplication, or stuck jobs.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.7,
+        "recommendation": "Add unit tests for tracked-jobs.mjs covering: job creation, completion, crash recovery, concurrent job creation, and stale job cleanup."
+      },
+      {
+        "severity": "medium",
+        "title": "Cumulative 6600-line diff with no rollback plan documented",
+        "body": "This is a massive cumulative release (v0.4.0→v0.4.6) touching 84 files including state management, client code, retry logic, and job tracking. No migration guide, rollback procedure, or compatibility matrix is visible. If state.mjs or job-control.mjs schemas changed, existing user state files could be corrupted on upgrade.",
+        "file": "scripts/lib/state.mjs",
+        "line_start": 1,
+        "line_end": 32,
+        "confidence": 0.6,
+        "recommendation": "Document a rollback procedure. If state.mjs or job-control.mjs schemas changed, add versioned migration with backward compatibility. Test upgrade from v0.4.0 state files to current format."
+      }
+    ],
+    "next_steps": [
+      "Run: grep -r 'lib/process' scripts/ to verify no dangling imports from deleted process.mjs",
+      "Inspect retry.mjs for idempotency: confirm retried operations are safe to repeat",
+      "Add glm-client.mjs unit tests before merging — this is the highest-impact untested module",
+      "Verify state.mjs schema compatibility with v0.4.0 persisted state files",
+      "Add shellcheck to CI for configure-gitea-protection.sh and add a dry-run mode",
+      "Request a focused diff review of glm-client.mjs changes against v0.4.0 baseline"
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"This release (v0.4.0→v0.4.6) is a 6600+ line, 84-file cumulative diff with several structural risks. A core module (process.mjs) was deleted, the primary API client (glm-client.mjs) has no dedicated test file despite 155 lines of changes, and a security-sensitive Gitea branch-protection script ships without tests. The breadth alone warrants caution; the specific gaps below are blocking.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"process.mjs deleted — residual imports will crash at runtime\",\n      \"body\": \"scripts/lib/process.mjs (67 lines) was fully removed. Any surviving import (re-export, dynamic import, cached compiled artifact) will throw MODULE_NOT_FOUND at runtime. In a cumulative sweep, downstream consumers in glm-companion.mjs or other scripts may still reference it. No migration shim or re-export stub is visible in the diff.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Grep the entire codebase for 'process\\\\.mjs' or 'lib/process' references. If any exist, either add a re-export stub or update the consumer. Add a CI check that imports every exported module to catch this class of break.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"glm-client.mjs heavily modified with no dedicated test coverage\",\n      \"body\": \"The core API client changed by 155 lines (retry wiring, error dispatch, likely request/response handling). No glm-client.test.mjs file exists in the test suite. Client changes are the #1 source of silent failures: wrong error mapping, dropped retries, corrupted response bodies. Existing integration tests may not cover new failure paths.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.75,\n      \"recommendation\": \"Add a dedicated unit test for glm-client.mjs covering: retry on transient errors, error dispatch classification, timeout handling, and malformed response bodies. At minimum, add contract tests for every exported function.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"configure-gitea-protection.sh — security-sensitive, untested, 126 new lines\",\n      \"body\": \"This new shell script configures Gitea branch protection rules. A misconfiguration could leave repos unprotected or lock out all collaborators. Shell scripts are prone to quoting/escaping bugs, unhandled API errors, and partial application. No test file exists for it, and it is not referenced in any UAT scenario.\",\n      \"file\": \"scripts/setup/configure-gitea-protection.sh\",\n      \"line_start\": 1,\n      \"line_end\": 126,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Add a dry-run mode that prints the API calls without executing them. Create a test that validates the script against a mock Gitea API. At minimum, add shellcheck linting in CI for this file.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"retry.mjs — new 203-line module, idempotency gap risk\",\n      \"body\": \"New retry infrastructure (retry.mjs, 203 lines) with tests (retry.test.mjs, 352 lines). Test coverage exists but retry modules historically fail on: operations with side effects retried without idempotency keys, missing jitter causing thundering herd, and retrying non-idempotent HTTP methods. The test file size suggests good coverage but cannot verify edge cases without code inspection.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 203,\n      \"confidence\": 0.55,\n      \"recommendation\": \"Verify retry.mjs only retries idempotent operations or includes idempotency keys. Confirm jitter is applied to backoff. Add explicit test cases for: concurrent retries of the same operation, retry after partial write, and retry budget exhaustion.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"tracked-jobs.mjs modified (78 lines) without dedicated test\",\n      \"body\": \"Job tracking was modified (78 lines changed) with no tracked-jobs.test.mjs. Job tracking is critical for preventing duplicate work and ensuring completion across crashes/restarts. A bug here could cause silent job loss, duplication, or stuck jobs.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 78,\n      \"confidence\": 0.7,\n      \"recommendation\": \"Add unit tests for tracked-jobs.mjs covering: job creation, completion, crash recovery, concurrent job creation, and stale job cleanup.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"Cumulative 6600-line diff with no rollback plan documented\",\n      \"body\": \"This is a massive cumulative release (v0.4.0→v0.4.6) touching 84 files including state management, client code, retry logic, and job tracking. No migration guide, rollback procedure, or compatibility matrix is visible. If state.mjs or job-control.mjs schemas changed, existing user state files could be corrupted on upgrade.\",\n      \"file\": \"scripts/lib/state.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 32,\n      \"confidence\": 0.6,\n      \"recommendation\": \"Document a rollback procedure. If state.mjs or job-control.mjs schemas changed, add versioned migration with backward compatibility. Test upgrade from v0.4.0 state files to current format.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run: grep -r 'lib/process' scripts/ to verify no dangling imports from deleted process.mjs\",\n    \"Inspect retry.mjs for idempotency: confirm retried operations are safe to repeat\",\n    \"Add glm-client.mjs unit tests before merging — this is the highest-impact untested module\",\n    \"Verify state.mjs schema compatibility with v0.4.0 persisted state files\",\n    \"Add shellcheck to CI for configure-gitea-protection.sh and add a dry-run mode\",\n    \"Request a focused diff review of glm-client.mjs changes against v0.4.0 baseline\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T17:35:38.824Z"
+}

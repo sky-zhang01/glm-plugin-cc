@@ -1,0 +1,80 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0.5,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 46
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.75,
+    "citation_false_file_hits": 0,
+    "latency_ms": 91314,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.x cumulative diff deletes a core module (process.mjs), adds new retry/error-dispatch infrastructure, and significantly refactors the API client (glm-client.mjs) — yet three of the most stateful, failure-prone modules (glm-client, tracked-jobs, job-control) have no corresponding test files. The combination of a deleted module and untested client-layer changes creates a credible risk of import-time crashes and silent regressions in API communication that the sampling sweep may not exercise.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "process.mjs deleted without verifiable migration safety",
+        "body": "scripts/lib/process.mjs (67 lines) was removed entirely. While check-imports.mjs was modified (suggesting import-path updates), there is no evidence that dynamic imports, indirect require/import chains, or string-based module resolution paths were audited. If any runtime code path still references process.mjs, the application crashes at import time with a MODULE_NOT_FOUND error — a failure mode that is silent until the specific code path is exercised. The risk is elevated because this deletion was bundled into a multi-version cumulative sweep rather than a focused change.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.72,
+        "recommendation": "Run `grep -r 'process\\.mjs' scripts/ commands/ --include='*.mjs' --include='*.js' --include='*.md'` against the full tree and verify zero references remain. Add a CI gate that grepping for any import of deleted files fails the build."
+      },
+      {
+        "severity": "high",
+        "title": "glm-client.mjs has no test file despite 155 lines of changes",
+        "body": "scripts/lib/glm-client.mjs was substantially modified (added retry integration, error dispatch, backoff logic via new retry.mjs and bigmodel-errors.mjs). It is the sole module responsible for API authentication, request construction, and response handling. There is no tests/glm-client.test.mjs or equivalent. While retry.test.mjs and bigmodel-errors.test.mjs exist for the helper modules, the integration point — where the client decides whether to retry, how to map BigModel errors, and how to surface failures — is completely untested. A regression in header construction, auth token handling, or error classification would be invisible until a live API call fails.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.85,
+        "recommendation": "Create tests/glm-client.test.mjs covering: (1) successful request construction including auth headers, (2) retry behavior on transient errors, (3) error classification from BigModel responses, (4) backoff timing boundaries. At minimum, add contract tests that stub the HTTP layer and verify the client's retry/error-decision logic."
+      },
+      {
+        "severity": "medium",
+        "title": "tracked-jobs.mjs and job-control.mjs changed without test coverage",
+        "body": "scripts/lib/tracked-jobs.mjs (78 lines changed) and scripts/lib/job-control.mjs (20 lines changed) manage job lifecycle state — start, track, complete, fail. Neither has a dedicated test file. Job state corruption (e.g., a job marked complete but still tracked, or a stale lock not cleaned up on crash) causes subtle issues: stuck jobs, duplicate processing, or missed failures. The existing tests/job-render.test.mjs may exercise render paths but does not validate state transitions or concurrency safety in these modules.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.78,
+        "recommendation": "Add tests/tracked-jobs.test.mjs covering state transitions (start→running→complete, start→running→failed), concurrent job tracking, and cleanup on abnormal termination. Verify job-control.mjs lock acquisition/release under simulated contention."
+      },
+      {
+        "severity": "medium",
+        "title": "retry.mjs is new (203 lines) and retry logic is historically fragile",
+        "body": "scripts/lib/retry.mjs is entirely new code implementing retry/backoff. retry.test.mjs (352 lines) exists, which is good. However, the adversarial concern is whether the retry logic correctly handles: (1) non-idempotent operations that must not be retried, (2) wall-clock vs. attempt-count limits, (3) jitter to prevent thundering-herd retry storms, (4) proper abort-signal propagation so retries can be cancelled. Without seeing the implementation, the existence of a large new retry module integrated into the API client is a high-leverage risk point. The sampling sweep run count (46) suggests repeated execution, which may mask retry-storm issues that only appear under real load.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 1,
+        "confidence": 0.65,
+        "recommendation": "Verify in retry.test.mjs that tests cover: (a) idempotency-key or non-retriable operation gating, (b) jitter in backoff to prevent synchronized retries, (c) AbortSignal cancellation mid-retry-loop, (d) max-elapsed-time vs max-attempts boundary conditions. If any of these are missing, add them before shipping."
+      }
+    ],
+    "next_steps": [
+      "Run a full-tree grep for 'process.mjs' references to confirm the deleted module is fully migrated.",
+      "Create tests/glm-client.test.mjs with at minimum auth-header, retry-on-transient, and error-classification test cases.",
+      "Audit retry.mjs for idempotency guards, jitter, and AbortSignal handling; add missing test coverage.",
+      "Add tests/tracked-jobs.test.mjs covering state machine transitions and concurrent job scenarios.",
+      "Consider running the sampling sweep with intentional network failures (e.g., SIGSTOP the API mid-request) to exercise retry and error-recovery paths under stress."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The v0.4.x cumulative diff deletes a core module (process.mjs), adds new retry/error-dispatch infrastructure, and significantly refactors the API client (glm-client.mjs) — yet three of the most stateful, failure-prone modules (glm-client, tracked-jobs, job-control) have no corresponding test files. The combination of a deleted module and untested client-layer changes creates a credible risk of import-time crashes and silent regressions in API communication that the sampling sweep may not exercise.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"process.mjs deleted without verifiable migration safety\",\n      \"body\": \"scripts/lib/process.mjs (67 lines) was removed entirely. While check-imports.mjs was modified (suggesting import-path updates), there is no evidence that dynamic imports, indirect require/import chains, or string-based module resolution paths were audited. If any runtime code path still references process.mjs, the application crashes at import time with a MODULE_NOT_FOUND error — a failure mode that is silent until the specific code path is exercised. The risk is elevated because this deletion was bundled into a multi-version cumulative sweep rather than a focused change.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.72,\n      \"recommendation\": \"Run `grep -r 'process\\\\.mjs' scripts/ commands/ --include='*.mjs' --include='*.js' --include='*.md'` against the full tree and verify zero references remain. Add a CI gate that grepping for any import of deleted files fails the build.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"glm-client.mjs has no test file despite 155 lines of changes\",\n      \"body\": \"scripts/lib/glm-client.mjs was substantially modified (added retry integration, error dispatch, backoff logic via new retry.mjs and bigmodel-errors.mjs). It is the sole module responsible for API authentication, request construction, and response handling. There is no tests/glm-client.test.mjs or equivalent. While retry.test.mjs and bigmodel-errors.test.mjs exist for the helper modules, the integration point — where the client decides whether to retry, how to map BigModel errors, and how to surface failures — is completely untested. A regression in header construction, auth token handling, or error classification would be invisible until a live API call fails.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.85,\n      \"recommendation\": \"Create tests/glm-client.test.mjs covering: (1) successful request construction including auth headers, (2) retry behavior on transient errors, (3) error classification from BigModel responses, (4) backoff timing boundaries. At minimum, add contract tests that stub the HTTP layer and verify the client's retry/error-decision logic.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"tracked-jobs.mjs and job-control.mjs changed without test coverage\",\n      \"body\": \"scripts/lib/tracked-jobs.mjs (78 lines changed) and scripts/lib/job-control.mjs (20 lines changed) manage job lifecycle state — start, track, complete, fail. Neither has a dedicated test file. Job state corruption (e.g., a job marked complete but still tracked, or a stale lock not cleaned up on crash) causes subtle issues: stuck jobs, duplicate processing, or missed failures. The existing tests/job-render.test.mjs may exercise render paths but does not validate state transitions or concurrency safety in these modules.\",\n      \"file\": \"scripts/lib/tracked-jobs.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.78,\n      \"recommendation\": \"Add tests/tracked-jobs.test.mjs covering state transitions (start→running→complete, start→running→failed), concurrent job tracking, and cleanup on abnormal termination. Verify job-control.mjs lock acquisition/release under simulated contention.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"retry.mjs is new (203 lines) and retry logic is historically fragile\",\n      \"body\": \"scripts/lib/retry.mjs is entirely new code implementing retry/backoff. retry.test.mjs (352 lines) exists, which is good. However, the adversarial concern is whether the retry logic correctly handles: (1) non-idempotent operations that must not be retried, (2) wall-clock vs. attempt-count limits, (3) jitter to prevent thundering-herd retry storms, (4) proper abort-signal propagation so retries can be cancelled. Without seeing the implementation, the existence of a large new retry module integrated into the API client is a high-leverage risk point. The sampling sweep run count (46) suggests repeated execution, which may mask retry-storm issues that only appear under real load.\",\n      \"file\": \"scripts/lib/retry.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 1,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Verify in retry.test.mjs that tests cover: (a) idempotency-key or non-retriable operation gating, (b) jitter in backoff to prevent synchronized retries, (c) AbortSignal cancellation mid-retry-loop, (d) max-elapsed-time vs max-attempts boundary conditions. If any of these are missing, add them before shipping.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Run a full-tree grep for 'process.mjs' references to confirm the deleted module is fully migrated.\",\n    \"Create tests/glm-client.test.mjs with at minimum auth-header, retry-on-transient, and error-classification test cases.\",\n    \"Audit retry.mjs for idempotency guards, jitter, and AbortSignal handling; add missing test coverage.\",\n    \"Add tests/tracked-jobs.test.mjs covering state machine transitions and concurrent job scenarios.\",\n    \"Consider running the sampling sweep with intentional network failures (e.g., SIGSTOP the API mid-request) to exercise retry and error-recovery paths under stress.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T19:21:20.944Z"
+}

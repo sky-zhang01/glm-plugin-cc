@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 1,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 16
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 91818,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The cumulative v0.4.0→v0.4.6 diff ships significant runtime-critical new code (retry, BigModel error dispatch, client rewrite) without end-to-end UAT evidence for v0.4.6, without unit-test coverage for the most-heavily-modified module (glm-client.mjs, +155 lines), and with a complete module deletion (process.mjs, 67 lines) whose import-cleanup completeness cannot be verified from the diff summary alone. Any one of these represents a plausible production failure path that is not gated by observable evidence.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "No v0.4.6 UAT evidence for retry/error-dispatch runtime paths",
+        "body": "Directories test-automation/uat-reports/v0.4.4/ and v0.4.5/ exist with full reports and run scripts. There is no test-automation/uat-reports/v0.4.6/ directory. The v0.4.6 release (d5fa754, e0a9ba8) introduced scripts/lib/bigmodel-errors.mjs (168 lines), scripts/lib/retry.mjs (203 lines), and significant glm-client.mjs modifications (+155 lines). These are the core request pipeline — error classification drives retry decisions which drive client behavior. The only validation evidence is unit tests (tests/retry.test.mjs, tests/bigmodel-errors.test.mjs) which cannot exercise the integrated retry→error-classify→client→state-mutation chain under real API failure conditions.",
+        "file": "test-automation/uat-reports/v0.4.5/report.md",
+        "line_start": 1,
+        "line_end": 125,
+        "confidence": 0.92,
+        "recommendation": "Add a v0.4.6 UAT run covering at minimum: (1) a BigModel API call that triggers each error category in bigmodel-errors.mjs, (2) retry exhaustion with backoff verification, and (3) a successful recovery after transient failure. Do not ship without UAT evidence for the new runtime paths."
+      },
+      {
+        "severity": "high",
+        "title": "No unit tests for glm-client.mjs despite +155 lines of changes",
+        "body": "scripts/lib/glm-client.mjs received the largest modification in the core library (+155 lines). It integrates the new retry.mjs and bigmodel-errors.mjs modules. The test directory contains no glm-client.test.mjs. While tests/result-propagation.test.mjs (69 lines) may exercise some client paths indirectly, the client module now owns retry orchestration, error dispatch, and backoff — all logic that must be tested in isolation, especially around edge cases like partial responses, timeouts mid-stream, and concurrent request interleaving.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 155,
+        "confidence": 0.85,
+        "recommendation": "Create tests/glm-client.test.mjs covering: retry delegation on each BigModel error code, backoff parameter propagation, max-retry exhaustion, and the interaction between error classification and the caller's error path. This is the highest-delta module in the release and it has zero direct test coverage."
+      },
+      {
+        "severity": "medium",
+        "title": "process.mjs deleted (67 lines) — orphaned import risk",
+        "body": "scripts/lib/process.mjs was completely removed (67 lines deleted). The diff shows modifications to glm-companion.mjs, render.mjs, and other modules that presumably consumed process.mjs exports. However, with 84 files changed in the cumulative diff, the risk of a stale dynamic import, re-export barrel file reference, or lazy-loaded path that still points to process.mjs is non-trivial. A missed import would surface as a runtime ModuleNotFoundError only when the code path is exercised — exactly the class of bug UAT is meant to catch, and exactly the class where v0.4.6 UAT is absent.",
+        "file": "scripts/lib/process.mjs",
+        "line_start": 1,
+        "line_end": 67,
+        "confidence": 0.65,
+        "recommendation": "Run `grep -r 'process\\.mjs\\|lib/process' scripts/ commands/ prompts/` against the working tree to confirm zero remaining references. Add a CI check (or extend scripts/ci/check-imports.mjs) that fails if any import target resolves to a nonexistent file."
+      }
+    ],
+    "next_steps": [
+      "Create v0.4.6 UAT run covering retry, error dispatch, and client integration under simulated API failures.",
+      "Add tests/glm-client.test.mjs with direct unit coverage of the new retry/error-classification integration paths.",
+      "Grep the full tree for any remaining references to scripts/lib/process.mjs and add a CI gate that validates all import targets resolve.",
+      "Consider adding an integration smoke test that exercises the full companion→client→retry→state pipeline before tagging v0.4.7."
+    ]
+  },
+  "rawOutputHead": "{\n  \"verdict\": \"needs-attention\",\n  \"summary\": \"The cumulative v0.4.0→v0.4.6 diff ships significant runtime-critical new code (retry, BigModel error dispatch, client rewrite) without end-to-end UAT evidence for v0.4.6, without unit-test coverage for the most-heavily-modified module (glm-client.mjs, +155 lines), and with a complete module deletion (process.mjs, 67 lines) whose import-cleanup completeness cannot be verified from the diff summary alone. Any one of these represents a plausible production failure path that is not gated by observable evidence.\",\n  \"findings\": [\n    {\n      \"severity\": \"high\",\n      \"title\": \"No v0.4.6 UAT evidence for retry/error-dispatch runtime paths\",\n      \"body\": \"Directories test-automation/uat-reports/v0.4.4/ and v0.4.5/ exist with full reports and run scripts. There is no test-automation/uat-reports/v0.4.6/ directory. The v0.4.6 release (d5fa754, e0a9ba8) introduced scripts/lib/bigmodel-errors.mjs (168 lines), scripts/lib/retry.mjs (203 lines), and significant glm-client.mjs modifications (+155 lines). These are the core request pipeline — error classification drives retry decisions which drive client behavior. The only validation evidence is unit tests (tests/retry.test.mjs, tests/bigmodel-errors.test.mjs) which cannot exercise the integrated retry→error-classify→client→state-mutation chain under real API failure conditions.\",\n      \"file\": \"test-automation/uat-reports/v0.4.5/report.md\",\n      \"line_start\": 1,\n      \"line_end\": 125,\n      \"confidence\": 0.92,\n      \"recommendation\": \"Add a v0.4.6 UAT run covering at minimum: (1) a BigModel API call that triggers each error category in bigmodel-errors.mjs, (2) retry exhaustion with backoff verification, and (3) a successful recovery after transient failure. Do not ship without UAT evidence for the new runtime paths.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"title\": \"No unit tests for glm-client.mjs despite +155 lines of changes\",\n      \"body\": \"scripts/lib/glm-client.mjs received the largest modification in the core library (+155 lines). It integrates the new retry.mjs and bigmodel-errors.mjs modules. The test directory contains no glm-client.test.mjs. While tests/result-propagation.test.mjs (69 lines) may exercise some client paths indirectly, the client module now owns retry orchestration, error dispatch, and backoff — all logic that must be tested in isolation, especially around edge cases like partial responses, timeouts mid-stream, and concurrent request interleaving.\",\n      \"file\": \"scripts/lib/glm-client.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 155,\n      \"confidence\": 0.85,\n      \"recommendation\": \"Create tests/glm-client.test.mjs covering: retry delegation on each BigModel error code, backoff parameter propagation, max-retry exhaustion, and the interaction between error classification and the caller's error path. This is the highest-delta module in the release and it has zero direct test coverage.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"title\": \"process.mjs deleted (67 lines) — orphaned import risk\",\n      \"body\": \"scripts/lib/process.mjs was completely removed (67 lines deleted). The diff shows modifications to glm-companion.mjs, render.mjs, and other modules that presumably consumed process.mjs exports. However, with 84 files changed in the cumulative diff, the risk of a stale dynamic import, re-export barrel file reference, or lazy-loaded path that still points to process.mjs is non-trivial. A missed import would surface as a runtime ModuleNotFoundError only when the code path is exercised — exactly the class of bug UAT is meant to catch, and exactly the class where v0.4.6 UAT is absent.\",\n      \"file\": \"scripts/lib/process.mjs\",\n      \"line_start\": 1,\n      \"line_end\": 67,\n      \"confidence\": 0.65,\n      \"recommendation\": \"Run `grep -r 'process\\\\.mjs\\\\|lib/process' scripts/ commands/ prompts/` against the working tree to confirm zero remaining references. Add a CI check (or extend scripts/ci/check-imports.mjs) that fails if any import target resolves to a nonexistent file.\"\n    }\n  ],\n  \"next_steps\": [\n    \"Create v0.4.6 UAT run covering retry, error dispatch, and client integration under simulated API failures.\",\n    \"Add tests/glm-client.test.mjs with direct unit coverage of the new retry/error-classification integration paths.\",\n    \"Grep the full tree for any remaining references to scripts/lib/process.mjs and add a CI gate that validates all import targets resolve.\",\n    \"Consider adding an integration smoke test that exercises the full companion→client→retry→state pipeline before tagging v0.4.7.\"\n  ]\n}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-21T20:12:43.312Z"
+}

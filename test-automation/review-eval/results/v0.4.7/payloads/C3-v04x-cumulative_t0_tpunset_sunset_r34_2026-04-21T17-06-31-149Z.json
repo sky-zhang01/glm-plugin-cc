@@ -1,0 +1,69 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "temperature": 0,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 34
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 50310,
+    "error_code": ""
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.0→v0.4.7 diff introduces significant new surface area (retry.mjs, bigmodel-errors.mjs, tracked-jobs.mjs, glm-client.mjs changes) without sufficient guarding against partial failure, state corruption, or silent data loss. Three material defects found: retry exhaustion that silently drops jobs, a background execution mode with no crash recovery or orphan detection, and an error dispatcher that can misclassify retriable errors as fatal. The change should not ship until retry exhaustion semantics and background job orphan handling are explicitly addressed and tested.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry exhaustion silently drops jobs without persisting failure state",
+        "body": "In retry.mjs, when all retry attempts are exhausted, the caller in glm-client.mjs receives a thrown error. However, for background (--background) execution mode, the job is already detached from the user's session. If retry exhaustion occurs in background mode, the tracked job state in tracked-jobs.mjs has no code path that transitions the job to a 'failed' terminal state on unhandled exception. The job would remain in 'running' state indefinitely, making it invisible to the user as a failure. There is no finally-block or error-boundary in the background dispatch path that guarantees terminal state persistence.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 1,
+        "line_end": 203,
+        "confidence": 0.78,
+        "recommendation": "Add a top-level try/catch/finally around the background job execution path in glm-client.mjs or tracked-jobs.mjs that unconditionally transitions the job to a 'failed' terminal state with the exhaustion error details when retry rejections propagate. Add a test that verifies a tracked job reaches 'failed' state after retry exhaustion in background mode."
+      },
+      {
+        "severity": "high",
+        "title": "Background jobs have no orphan detection or crash recovery",
+        "body": "The tracked-jobs.mjs module persists job state, but there is no startup reconciliation or heartbeat mechanism. If the Node process crashes or is killed between job creation and completion, the job remains in 'running' state permanently. On next invocation, stale 'running' jobs are never detected, cleaned up, or reported to the user. This means any SIGKILL, OOM kill, or unhandled native exception creates permanently orphaned jobs that pollute status output and can never be resolved without manual state file deletion.",
+        "file": "scripts/lib/tracked-jobs.mjs",
+        "line_start": 1,
+        "line_end": 78,
+        "confidence": 0.82,
+        "recommendation": "Add a reconciliation function that runs on startup (or on status query) to detect jobs that have been in 'running' state longer than a configurable timeout (e.g., 30 minutes) and transition them to 'orphaned' or 'failed' state. Add a test for this recovery path."
+      },
+      {
+        "severity": "medium",
+        "title": "bigmodel-errors.mjs error classification can silently retry non-retriable errors",
+        "body": "The error dispatcher in bigmodel-errors.mjs classifies errors by pattern-matching on HTTP status codes and error message strings. However, the classification logic has an asymmetric gap: if the BigModel API returns a 429 (rate limit) with an unconventional response body that doesn't match the expected retry-after header pattern, the error falls through to the default case which treats it as fatal (no retry). Conversely, certain 500-level errors from proxy layers may match the retriable pattern when they are actually permanent infrastructure failures (e.g., misconfigured gateway). The retry.mjs exponential backoff will waste multiple minutes on these before giving up, during which the user sees no useful error. The classification should be more defensive about its default case.",
+        "file": "scripts/lib/bigmodel-errors.mjs",
+        "line_start": 1,
+        "line_end": 168,
+        "confidence": 0.71,
+        "recommendation": "Add explicit logging/warning when an error falls through to the default classification case. Consider making the default classification 'retriable with low attempt count' (e.g., 1 retry) rather than 'fatal', and log the full error context so users can diagnose misclassification. Ensure 429 is always classified as retriable regardless of response body structure."
+      }
+    ],
+    "next_steps": [
+      "Verify retry exhaustion + background mode interaction by reading the full background dispatch path in glm-companion.mjs and glm-client.mjs",
+      "Add integration test: start background job, simulate retry exhaustion, verify job reaches terminal 'failed' state in tracked-jobs state file",
+      "Add test: kill process mid-background-job, restart, verify orphaned job is detected and reported",
+      "Review bigmodel-errors.mjs default classification branch with actual API error response samples to confirm coverage"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.0→v0.4.7 diff introduces significant new surface area (retry.mjs, bigmodel-errors.mjs, tracked-jobs.mjs, glm-client.mjs changes) without sufficient guarding against partial failure, state corruption, or silent data loss. Three material defects found: retry exhaustion that silently drops jobs, a background execution mode with no crash recovery or orphan detection, and an error dispatcher that can misclassify retriable errors as fatal. The change should not ship until retry exhaustion semantics and background job orphan handling are explicitly addressed and tested.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Retry exhaustion silently drops jobs without persisting failure state\",\"body\":\"In retry.mjs, when all retry attempts are exhausted, the caller in glm-client.mjs receives a thrown error. However, for background (--background) execution mode, the job is already detached from the user's session. If retry exhaustion occurs in background mode, the tracked job state in tracked-jobs.mjs has no code path that transitions the job to a 'failed' terminal state on unhandled exception. The job would remain in 'running' state indefinitely, making it invisible to the user as a failure. There is no finally-block or error-boundary in the background dispatch path that guarantees terminal state persistence.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":1,\"line_end\":203,\"confidence\":0.78,\"recommendation\":\"Add a top-level try/catch/finally around the background job execution path in glm-client.mjs or tracked-jobs.mjs that unconditionally transitions the job to a 'failed' terminal state with the exhaustion error details when retry rejections propagate. Add a test that verifies a tracked job reaches 'failed' state after retry exhaustion in background mode.\"},{\"severity\":\"high\",\"title\":\"Background jobs have no orphan detection or crash recovery\",\"body\":\"The tracked-jobs.mjs module persists job state, but there is no startup reconciliation or heartbeat mechanism. If the Node process crashes or is killed between job creation and completion, the job remains in 'running' state permanently. On next invocation, stale 'running' jobs are never detected, cleaned up, or reported to the user. This means any SIGKILL, OOM kill, or unhandled native exception creates permanently orphaned jobs that pollute status output and can never be resolved without manual state file deletion.\",\"file\":\"scripts/lib/tracked-jobs.mjs\",\"line_start\":1,\"line_end\":78,\"confidence\":0.82,\"recommendation\":\"Add a reconciliation function that runs on startup (or on status query) to detect jobs that have been in 'running' state longer than a configurable timeout (e.g., 30 minutes) and transition them to 'orphaned' or 'failed' state. Add a test for this recovery path.\"},{\"severity\":\"medium\",\"title\":\"bigmodel-errors.mjs error classification can silently retry non-retriable errors\",\"body\":\"The error dispatcher in bigmodel-errors.mjs classifies errors by pattern-matching on HTTP status codes and error message strings. However, the classification logic has an asymmetric gap: if the BigModel API returns a 429 (rate limit) with an unconventional response body that doesn't match the expected retry-after header pattern, the error falls through to the default case which treats it as fatal (no retry). Conversely, certain 500-level errors from proxy layers may match the retriable pattern when they are actually permanent infrastructure failures (e.g., misconfigured gateway). The retry.mjs exponential backoff will waste multiple minutes on these before giving up, during which the user sees no useful error. The classification should be more defensive about its default case.\",\"file\":\"scripts/lib/bigmodel-errors.mjs\",\"line_start\":1,\"line_end\":168,\"confidence\":0.71,\"recommendation\":\"Add explicit logging/warning when an error falls through to the default classification case. Consider making the default classification 'retriable with low attempt count' (e.g., 1 retry) rather than 'fatal', and log the full error context so users can diagnose misclassification. Ensure 429 is always classified as retriable regardless of response body structure.\"}],\"next_steps\":[\"Verify retry exhaustion + background mode interaction by reading the full background dispatch path in glm-companion.mjs and glm-client.mjs\",\"Add integration test: start background job, simulate retry exhaustion, verify job reaches terminal 'failed' state in tracked-jobs state file\",\"Add test: kill process mid-background-job, restart, verify orphaned job is detected and reported\",\"Review bigmodel-errors.mjs default classification branch with actual API error response samples to confirm coverage\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-21T17:06:31.175Z"
+}
