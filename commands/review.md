@@ -107,7 +107,7 @@ Bash({
   explicit `--temperature` makes runs approximately reproducible and
   is useful for A/B probing.
 - `--wait` / `--background` — execution mode bypass. See "Execution mode rules" above.
-- Trailing tokens after flags are treated as free-form focus text.
+- Trailing positional tokens after flags are **rejected** for `/glm:review` (see "Core constraint" above). For custom framing, use `/glm:adversarial-review`, which does accept trailing focus text.
 
 ## Diff size guidance
 

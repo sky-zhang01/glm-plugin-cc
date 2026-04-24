@@ -63,10 +63,17 @@ function normalizeReviewFinding(finding, index) {
       ? source.confidence
       : null;
 
-  // M0: pass through optional confidence_tier if present and valid enum value.
+  // M0: confidence_tier is a PIPELINE-ASSIGNED evidence state per
+  // architecture doc §6.2. At M0 there is no structural validator pass
+  // (M1 delivers it), so any tier the model self-reports is untrusted.
+  // Clamp to `proposed` whenever the model returned a valid enum value;
+  // drop entirely if the claim is missing or malformed. This prevents a
+  // hallucinated `deterministically-validated` from rendering as if a
+  // real validator had confirmed it. M1 will replace this clamp with a
+  // post-normalization validator pass that sets tier from actual checks.
   const confidenceTier =
     typeof source.confidence_tier === "string" && CONFIDENCE_TIER_VALUES.has(source.confidence_tier)
-      ? source.confidence_tier
+      ? "proposed"
       : undefined;
 
   // M0: pass through validation_signals array if present.

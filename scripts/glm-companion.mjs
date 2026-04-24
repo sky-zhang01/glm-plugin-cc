@@ -64,7 +64,7 @@ function printUsage() {
     [
       "Usage:",
       "  node scripts/glm-companion.mjs setup [--preset ...] [--api-key <key>] [--ping] [--enable-review-gate|--disable-review-gate] [--json]",
-      "  node scripts/glm-companion.mjs review [--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--temperature <0-2>] [--top-p <0-1>] [--seed <int>] [--json] [focus text]",
+      "  node scripts/glm-companion.mjs review [--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--temperature <0-2>] [--top-p <0-1>] [--seed <int>] [--json]",
       "  node scripts/glm-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--temperature <0-2>] [--top-p <0-1>] [--seed <int>] [--json] [focus text]",
       "  node scripts/glm-companion.mjs task [--system <text>] [--model <model>] [--thinking on|off] [--json] [prompt]",
       "  node scripts/glm-companion.mjs rescue [--system <text>] [--model <model>] [--thinking on|off] [--json] [prompt]",
@@ -370,11 +370,13 @@ async function runReview(argv, { adversarial }) {
   const workspaceRoot = resolveCommandWorkspace(options);
   const focusText = positionals.join(" ").trim();
   // C4 (M0): /glm:review does not accept focus text — reject early with a
-  // clear usage error so the user knows to use /glm:adversarial-review instead.
+  // clear usage error. Message leads with the actionable fix (remove the
+  // text) before offering adversarial-review as an alternative, so users
+  // who only wanted a balanced review are not pushed toward adversarial.
   // Runs before ensureGitRepository so the error is not shadowed by git checks.
   if (!adversarial && focusText) {
     process.stderr.write(
-      "/glm:review does not accept focus text. Use /glm:adversarial-review if you need custom framing on top of the base review.\n"
+      "/glm:review does not accept focus text — remove the trailing text to run a balanced review. If you genuinely need custom framing, use /glm:adversarial-review instead.\n"
     );
     process.exit(1);
   }

@@ -184,31 +184,61 @@ describe("renderReviewResult — backward compat (v0.4.7 finding, no new fields)
   });
 });
 
-// ── New-shape finding: confidence_tier ─────────────────────────────────────
+// ── New-shape finding: confidence_tier (M0 clamp semantics) ────────────────
+//
+// At M0 there is no validator pass; confidence_tier is a pipeline-assigned
+// evidence state per architecture doc §6.2. Any model-claimed tier is
+// untrusted and clamped to `proposed` by the normalizer so hallucinated
+// `deterministically-validated` cannot render as if a validator approved it.
+// M1 will land the post-normalization validator that assigns tiers from
+// actual structural checks and replace these tests with real-tier cases.
 
-describe("renderReviewResult — new confidence_tier field", () => {
-  it("finding with confidence_tier renders with tier visible in confidence suffix", () => {
+describe("renderReviewResult — confidence_tier M0 clamp", () => {
+  it("model-claimed tier='cross-checked' clamps to 'proposed' at M0", () => {
+    // m0Finding carries confidence_tier: "cross-checked". With no validator
+    // in M0, normalizer clamps to `proposed` — never to the unverified claim.
     const rendered = renderReviewResult(makeResult(m0Finding), baseMeta);
-    // tier should appear alongside confidence
-    assert.match(rendered, /\[high · conf 0\.90 · tier cross-checked\]/);
+    assert.match(rendered, /\[high · conf 0\.90 · tier proposed\]/);
+    assert.doesNotMatch(rendered, /tier cross-checked/);
   });
 
-  it("finding with confidence_tier='rejected' renders tier", () => {
+  it("model-claimed tier='rejected' clamps to 'proposed' at M0", () => {
     const rejFinding = { ...v047Finding, confidence_tier: "rejected" };
     const rendered = renderReviewResult(makeResult(rejFinding), baseMeta);
-    assert.match(rendered, /tier rejected/);
+    assert.match(rendered, /tier proposed/);
+    assert.doesNotMatch(rendered, /tier rejected/);
   });
 
-  it("finding with confidence_tier='proposed' renders tier", () => {
+  it("model-claimed tier='proposed' stays 'proposed' at M0", () => {
     const propFinding = { ...v047Finding, confidence_tier: "proposed" };
     const rendered = renderReviewResult(makeResult(propFinding), baseMeta);
     assert.match(rendered, /tier proposed/);
   });
 
-  it("finding with confidence_tier='deterministically-validated' renders tier", () => {
+  it("model-claimed tier='deterministically-validated' clamps to 'proposed' at M0", () => {
+    // This is the specific Codex-external-review HIGH case: prevents a
+    // hallucinated 'deterministically-validated' from rendering as if it
+    // had been confirmed by a validator that doesn't exist yet.
     const dvFinding = { ...v047Finding, confidence_tier: "deterministically-validated" };
     const rendered = renderReviewResult(makeResult(dvFinding), baseMeta);
-    assert.match(rendered, /tier deterministically-validated/);
+    assert.match(rendered, /tier proposed/);
+    assert.doesNotMatch(rendered, /tier deterministically-validated/);
+  });
+
+  it("malformed tier (not in enum) is dropped, not rendered", () => {
+    // Defensive: an invalid string or non-string must not leak into output.
+    const malformedFinding = { ...v047Finding, confidence_tier: "super-validated" };
+    const rendered = renderReviewResult(makeResult(malformedFinding), baseMeta);
+    assert.doesNotMatch(rendered, /tier /, "invalid tier must not render at all");
+  });
+
+  it("normalizer preserves validation_signals while clamping tier", () => {
+    // Regression guard: fixing the tier clamp must not accidentally drop
+    // validation_signals pass-through.
+    const normalized = normalizeReviewFindingM0(m0Finding, 0);
+    assert.equal(normalized.confidence_tier, "proposed", "tier must be clamped to proposed");
+    assert.ok(Array.isArray(normalized.validation_signals), "signals still passed through");
+    assert.equal(normalized.validation_signals.length, 2);
   });
 });
 
