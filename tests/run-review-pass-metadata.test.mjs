@@ -192,4 +192,28 @@ describe("runReview wiring — glm-companion.mjs writeJobFile path", () => {
       "runReview must store the sanitized result, not the raw model result"
     );
   });
+
+  it("runReview --json output uses the sanitized result and includes passes", () => {
+    const runReviewStart = companionSource.indexOf("async function runReview(");
+    const afterRunReview = companionSource.slice(runReviewStart + 1);
+    const nextTopLevel = afterRunReview.search(/\nasync function |\nfunction /);
+    const runReviewBody =
+      nextTopLevel === -1
+        ? companionSource.slice(runReviewStart)
+        : companionSource.slice(runReviewStart, runReviewStart + 1 + nextTopLevel);
+
+    const outputStart = runReviewBody.indexOf("outputCommandResult(");
+    assert.ok(outputStart !== -1, "runReview must call outputCommandResult");
+    const outputRegion = runReviewBody.slice(outputStart, outputStart + 700);
+    assert.match(
+      outputRegion,
+      /result:\s*storedResult/,
+      "runReview JSON payload must expose the sanitized result, not the raw model result"
+    );
+    assert.match(
+      outputRegion,
+      /\bpasses\b/,
+      "runReview JSON payload must include the same passes metadata as the stored job"
+    );
+  });
 });

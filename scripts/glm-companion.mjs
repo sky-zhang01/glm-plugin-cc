@@ -470,11 +470,18 @@ async function runReview(argv, { adversarial }) {
     ...jobRecord,
     status: finalStatus,
     completedAt,
-    summary: firstMeaningfulLine(result.rawOutput, result.failureMessage || "")
+    summary: firstMeaningfulLine(storedResult.rawOutput, storedResult.failureMessage || "")
   });
 
   outputCommandResult(
-    { command: meta.reviewLabel.toLowerCase().replace(/\s+/g, "-"), jobId, result, rendered, meta },
+    {
+      command: meta.reviewLabel.toLowerCase().replace(/\s+/g, "-"),
+      jobId,
+      result: storedResult,
+      rendered,
+      meta,
+      passes
+    },
     rendered,
     Boolean(options.json)
   );

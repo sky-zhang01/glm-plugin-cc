@@ -589,7 +589,149 @@ export function classifyReviewPayload(parsed) {
       message: `Review payload missing required field(s): ${missing.join(", ")}.`
     };
   }
+  const schemaViolation = findReviewSchemaViolation(parsed);
+  if (schemaViolation) {
+    return {
+      kind: "invalid_shape",
+      errorCode: "INVALID_SHAPE",
+      message: schemaViolation
+    };
+  }
   return { kind: "valid", errorCode: null, message: null };
+}
+
+const REVIEW_VERDICTS = new Set(["approve", "needs-attention"]);
+const REVIEW_SEVERITIES = new Set(["critical", "high", "medium", "low"]);
+const FINDING_REQUIRED_KEYS = [
+  "severity",
+  "title",
+  "body",
+  "file",
+  "line_start",
+  "line_end",
+  "confidence",
+  "recommendation"
+];
+const FINDING_ALLOWED_KEYS = new Set([
+  ...FINDING_REQUIRED_KEYS,
+  "confidence_tier",
+  "validation_signals"
+]);
+const CONFIDENCE_TIERS = new Set([
+  "proposed",
+  "cross-checked",
+  "deterministically-validated",
+  "rejected"
+]);
+const VALIDATION_SIGNAL_KINDS = new Set([
+  "initial_confidence_score",
+  "file_in_target",
+  "line_range_in_file",
+  "anchor_literal_found",
+  "known_false_reference_absent",
+  "repo_check",
+  "test_result",
+  "command_result"
+]);
+const VALIDATION_SIGNAL_RESULTS = new Set(["pass", "fail", "skip"]);
+const VALIDATION_SIGNAL_ALLOWED_KEYS = new Set(["kind", "result", "artifact"]);
+
+function isNonEmptyString(value) {
+  return typeof value === "string" && value.length > 0;
+}
+
+function findReviewSchemaViolation(parsed) {
+  if (!REVIEW_VERDICTS.has(parsed.verdict)) {
+    return `Review payload field verdict must be one of: ${Array.from(REVIEW_VERDICTS).join(", ")}.`;
+  }
+  if (!isNonEmptyString(parsed.summary)) {
+    return "Review payload field summary must be a non-empty string.";
+  }
+  if (!Array.isArray(parsed.next_steps)) {
+    return "Review payload missing required field(s): next_steps.";
+  }
+  for (const [index, step] of parsed.next_steps.entries()) {
+    if (!isNonEmptyString(step)) {
+      return `Review payload next_steps[${index}] must be a non-empty string.`;
+    }
+  }
+  for (const [index, finding] of parsed.findings.entries()) {
+    const violation = findReviewFindingSchemaViolation(finding, index);
+    if (violation) {
+      return violation;
+    }
+  }
+  return null;
+}
+
+function findReviewFindingSchemaViolation(finding, index) {
+  const prefix = `Review payload findings[${index}]`;
+  if (finding === null || typeof finding !== "object" || Array.isArray(finding)) {
+    return `${prefix} must be an object.`;
+  }
+  const missing = FINDING_REQUIRED_KEYS.filter((key) => !(key in finding));
+  if (missing.length > 0) {
+    return `${prefix} missing required field(s): ${missing.join(", ")}.`;
+  }
+  const unknown = Object.keys(finding).filter((key) => !FINDING_ALLOWED_KEYS.has(key));
+  if (unknown.length > 0) {
+    return `${prefix} has unknown field(s): ${unknown.join(", ")}.`;
+  }
+  if (!REVIEW_SEVERITIES.has(finding.severity)) {
+    return `${prefix}.severity must be one of: ${Array.from(REVIEW_SEVERITIES).join(", ")}.`;
+  }
+  for (const key of ["title", "body", "file"]) {
+    if (!isNonEmptyString(finding[key])) {
+      return `${prefix}.${key} must be a non-empty string.`;
+    }
+  }
+  for (const key of ["line_start", "line_end"]) {
+    if (!Number.isInteger(finding[key]) || finding[key] < 1) {
+      return `${prefix}.${key} must be an integer >= 1.`;
+    }
+  }
+  if (typeof finding.confidence !== "number" || finding.confidence < 0 || finding.confidence > 1) {
+    return `${prefix}.confidence must be a number between 0 and 1.`;
+  }
+  if (typeof finding.recommendation !== "string") {
+    return `${prefix}.recommendation must be a string.`;
+  }
+  if ("confidence_tier" in finding && !CONFIDENCE_TIERS.has(finding.confidence_tier)) {
+    return `${prefix}.confidence_tier must be one of: ${Array.from(CONFIDENCE_TIERS).join(", ")}.`;
+  }
+  if ("validation_signals" in finding) {
+    const violation = findValidationSignalsSchemaViolation(finding.validation_signals, prefix);
+    if (violation) {
+      return violation;
+    }
+  }
+  return null;
+}
+
+function findValidationSignalsSchemaViolation(value, prefix) {
+  if (!Array.isArray(value)) {
+    return `${prefix}.validation_signals must be an array.`;
+  }
+  for (const [index, signal] of value.entries()) {
+    const signalPrefix = `${prefix}.validation_signals[${index}]`;
+    if (signal === null || typeof signal !== "object" || Array.isArray(signal)) {
+      return `${signalPrefix} must be an object.`;
+    }
+    const unknown = Object.keys(signal).filter((key) => !VALIDATION_SIGNAL_ALLOWED_KEYS.has(key));
+    if (unknown.length > 0) {
+      return `${signalPrefix} has unknown field(s): ${unknown.join(", ")}.`;
+    }
+    if (!VALIDATION_SIGNAL_KINDS.has(signal.kind)) {
+      return `${signalPrefix}.kind must be one of: ${Array.from(VALIDATION_SIGNAL_KINDS).join(", ")}.`;
+    }
+    if (!VALIDATION_SIGNAL_RESULTS.has(signal.result)) {
+      return `${signalPrefix}.result must be one of: ${Array.from(VALIDATION_SIGNAL_RESULTS).join(", ")}.`;
+    }
+    if ("artifact" in signal && typeof signal.artifact !== "string") {
+      return `${signalPrefix}.artifact must be a string when present.`;
+    }
+  }
+  return null;
 }
 
 /**

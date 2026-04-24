@@ -181,6 +181,40 @@ describe("runTrackedJob — passes.model on failure path", () => {
     assert.equal(stored.passes.model.status, "failed");
     assert.ok(stored.passes.model.durationMs >= 0, "durationMs must be >= 0 on failure path");
   });
+
+  it("thrown runner failure still persists passes.model with status=failed", async () => {
+    const { workspaceRoot, pluginData } = makeTempDirs();
+    process.env.CLAUDE_PLUGIN_DATA = pluginData;
+
+    const { runTrackedJob, createJobRecord, nowIso } = await importTrackedJobs("throw");
+    const stateMod = await importState("throw");
+
+    const jobId = `job-meta-throw-${Date.now()}`;
+    const job = createJobRecord({
+      id: jobId,
+      kind: "review",
+      title: "Test review",
+      status: "queued",
+      workspaceRoot,
+      startedAt: nowIso()
+    });
+
+    await assert.rejects(
+      () => runTrackedJob(job, async () => {
+        throw new Error("boom");
+      }),
+      /boom/
+    );
+
+    const jobFile = stateMod.resolveJobFile(workspaceRoot, jobId);
+    const stored = stateMod.readJobFile(jobFile);
+
+    assert.ok(stored.passes !== undefined, "passes field must be present on thrown failure");
+    assert.equal(stored.passes.model.status, "failed");
+    assert.ok(stored.passes.model.durationMs >= 0, "durationMs must be >= 0 on thrown failure");
+    assert.equal(stored.passes.validation, null);
+    assert.equal(stored.passes.rerank, null);
+  });
 });
 
 // ── Backward compat: old stored job (no passes) replays without error ────────

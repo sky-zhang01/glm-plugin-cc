@@ -19,6 +19,30 @@ import { describe, it } from "node:test";
 
 import { classifyParseFailure, classifyReviewPayload, stripMarkdownFences } from "../scripts/lib/glm-client.mjs";
 
+function validFinding(overrides = {}) {
+  return {
+    severity: "high",
+    title: "Unsafe default",
+    body: "The change weakens a guard.",
+    file: "scripts/example.mjs",
+    line_start: 1,
+    line_end: 2,
+    confidence: 0.9,
+    recommendation: "Restore the guard.",
+    ...overrides
+  };
+}
+
+function validPayload(overrides = {}) {
+  return {
+    verdict: "approve",
+    summary: "Looks good.",
+    findings: [],
+    next_steps: [],
+    ...overrides
+  };
+}
+
 describe("stripMarkdownFences", () => {
   it("removes ```json ... ``` wrapper", () => {
     const wrapped = "```json\n{\"verdict\": \"approve\"}\n```";
@@ -63,24 +87,33 @@ describe("stripMarkdownFences", () => {
 
 describe("classifyReviewPayload — valid payloads", () => {
   it("accepts a minimal valid review payload", () => {
-    const payload = {
-      verdict: "approve",
-      summary: "Looks good.",
-      findings: []
-    };
+    const payload = validPayload();
     const result = classifyReviewPayload(payload);
     assert.equal(result.kind, "valid");
     assert.equal(result.errorCode, null);
   });
 
   it("accepts payload with findings array populated", () => {
-    const payload = {
+    const payload = validPayload({
       verdict: "needs-attention",
       summary: "Two issues found.",
+      findings: [validFinding()]
+    });
+    const result = classifyReviewPayload(payload);
+    assert.equal(result.kind, "valid");
+  });
+
+  it("accepts valid M0 confidence_tier and validation_signals fields", () => {
+    const payload = validPayload({
       findings: [
-        { severity: "high", title: "t", body: "b", file: "f", line_start: 1, line_end: 2 }
+        validFinding({
+          confidence_tier: "proposed",
+          validation_signals: [
+            { kind: "file_in_target", result: "pass", artifact: "scripts/example.mjs" }
+          ]
+        })
       ]
-    };
+    });
     const result = classifyReviewPayload(payload);
     assert.equal(result.kind, "valid");
   });
@@ -128,7 +161,8 @@ describe("classifyReviewPayload — SCHEMA_ECHO detection", () => {
       $schema: "https://example.com/review-schema.json",
       verdict: "approve",
       summary: "ok",
-      findings: []
+      findings: [],
+      next_steps: []
     };
     const result = classifyReviewPayload(payload);
     assert.equal(result.kind, "valid");
@@ -137,7 +171,7 @@ describe("classifyReviewPayload — SCHEMA_ECHO detection", () => {
 
 describe("classifyReviewPayload — INVALID_SHAPE detection", () => {
   it("flags missing verdict", () => {
-    const payload = { summary: "ok", findings: [] };
+    const payload = { summary: "ok", findings: [], next_steps: [] };
     const result = classifyReviewPayload(payload);
     assert.equal(result.kind, "invalid_shape");
     assert.equal(result.errorCode, "INVALID_SHAPE");
@@ -145,14 +179,14 @@ describe("classifyReviewPayload — INVALID_SHAPE detection", () => {
   });
 
   it("flags missing summary", () => {
-    const payload = { verdict: "approve", findings: [] };
+    const payload = { verdict: "approve", findings: [], next_steps: [] };
     const result = classifyReviewPayload(payload);
     assert.equal(result.kind, "invalid_shape");
     assert.match(result.message, /summary/);
   });
 
   it("flags findings not being an array", () => {
-    const payload = { verdict: "approve", summary: "ok", findings: "nope" };
+    const payload = { verdict: "approve", summary: "ok", findings: "nope", next_steps: [] };
     const result = classifyReviewPayload(payload);
     assert.equal(result.kind, "invalid_shape");
     assert.match(result.message, /findings/);
@@ -180,6 +214,50 @@ describe("classifyReviewPayload — INVALID_SHAPE detection", () => {
     assert.equal(result.kind, "invalid_shape");
     assert.match(result.message, /verdict/);
     assert.match(result.message, /summary/);
+  });
+
+  it("flags missing next_steps from the shipped top-level schema", () => {
+    const payload = { verdict: "approve", summary: "ok", findings: [] };
+    const result = classifyReviewPayload(payload);
+    assert.equal(result.kind, "invalid_shape");
+    assert.match(result.message, /next_steps/);
+  });
+
+  it("flags finding objects missing required fields from the shipped schema", () => {
+    const payload = validPayload({
+      findings: [{ severity: "high", title: "t", body: "b", file: "f", line_start: 1, line_end: 1 }]
+    });
+    const result = classifyReviewPayload(payload);
+    assert.equal(result.kind, "invalid_shape");
+    assert.match(result.message, /confidence/);
+    assert.match(result.message, /recommendation/);
+  });
+
+  it("flags malformed confidence_tier instead of accepting model-owned tier claims", () => {
+    const payload = validPayload({
+      findings: [validFinding({ confidence_tier: "not-a-tier" })]
+    });
+    const result = classifyReviewPayload(payload);
+    assert.equal(result.kind, "invalid_shape");
+    assert.match(result.message, /confidence_tier/);
+  });
+
+  it("flags validation_signals when the field is not an array", () => {
+    const payload = validPayload({
+      findings: [validFinding({ validation_signals: {} })]
+    });
+    const result = classifyReviewPayload(payload);
+    assert.equal(result.kind, "invalid_shape");
+    assert.match(result.message, /validation_signals/);
+  });
+
+  it("flags malformed validation_signals entries", () => {
+    const payload = validPayload({
+      findings: [validFinding({ validation_signals: [{ kind: "file_in_target", result: "maybe" }] })]
+    });
+    const result = classifyReviewPayload(payload);
+    assert.equal(result.kind, "invalid_shape");
+    assert.match(result.message, /result/);
   });
 });
 

@@ -157,6 +157,19 @@ function readStoredJobOrNull(workspaceRoot, jobId) {
   return readJobFile(jobFile);
 }
 
+export function buildTrackedJobPasses(startedAt, completedAt, finalStatus) {
+  const startedAtTs = Date.parse(startedAt ?? "");
+  const completedAtTs = Date.parse(completedAt ?? "");
+  const durationMs = Number.isFinite(startedAtTs) && Number.isFinite(completedAtTs)
+    ? Math.max(0, completedAtTs - startedAtTs)
+    : 0;
+  return {
+    model: { status: finalStatus === "completed" ? "completed" : "failed", durationMs },
+    validation: null,
+    rerank: null
+  };
+}
+
 export async function runTrackedJob(job, runner, options = {}) {
   const startedAt = nowIso();
   const runningRecord = {
@@ -174,13 +187,7 @@ export async function runTrackedJob(job, runner, options = {}) {
     const execution = await runner();
     const completionStatus = execution.exitStatus === 0 ? "completed" : "failed";
     const completedAt = nowIso();
-    const durationMs = Date.parse(completedAt) - Date.parse(startedAt);
-    // M0: passes scaffold — model pass timing + placeholders for M1/M5.
-    const passes = {
-      model: { status: completionStatus, durationMs: durationMs >= 0 ? durationMs : 0 },
-      validation: null,
-      rerank: null
-    };
+    const passes = buildTrackedJobPasses(startedAt, completedAt, completionStatus);
     writeJobFile(job.workspaceRoot, job.id, {
       ...runningRecord,
       status: completionStatus,
@@ -215,6 +222,7 @@ export async function runTrackedJob(job, runner, options = {}) {
       persistWarning = readError instanceof Error ? readError.message : String(readError);
     }
     const completedAt = nowIso();
+    const passes = buildTrackedJobPasses(startedAt, completedAt, "failed");
     try {
       writeJobFile(job.workspaceRoot, job.id, {
         ...existing,
@@ -223,7 +231,8 @@ export async function runTrackedJob(job, runner, options = {}) {
         errorMessage: persistWarning ? `${errorMessage} (state write warning: ${persistWarning})` : errorMessage,
         pid: null,
         completedAt,
-        logFile: options.logFile ?? job.logFile ?? existing.logFile ?? null
+        logFile: options.logFile ?? job.logFile ?? existing.logFile ?? null,
+        passes
       });
       upsertJob(job.workspaceRoot, {
         id: job.id,
