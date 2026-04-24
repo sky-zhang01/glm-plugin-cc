@@ -2,6 +2,22 @@
 
 ## v0.4.8 (unreleased)
 
+### M4 — Repo-owned checks v0.1
+
+**Repo-owned checks** (`.glm/checks/`, `scripts/lib/repo-checks.mjs`):
+adds an optional local policy surface with exactly two check kinds:
+`grep-exists` and `grep-notpresent`. Checks are hard-schema JSON/YAML
+objects, scan only files in the reviewed target set, and perform literal
+text matching. No shell commands, `test-passes`, arbitrary scripts, or
+free-form markdown execution enter the review path.
+
+**Runtime and rendering** (`scripts/glm-companion.mjs`, `scripts/lib/render.mjs`):
+`/glm:review` and `/glm:adversarial-review` now attach repo check output as a
+separate `repo_checks` section in the stored result and human render. Repo
+checks are not merged into model `findings`, do not rerank findings, and do
+not by themselves change the model verdict. Invalid check config is surfaced as
+repo-check config failure rather than silently ignored.
+
 ### M3 — Measurement parity and dogfood packet lane
 
 **Review-eval harness** (`test-automation/review-eval/scripts/run-experiment.mjs`):
