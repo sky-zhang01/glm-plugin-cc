@@ -182,6 +182,30 @@ export function buildTargetLabel(target, focusText) {
   return [target?.label, focus].filter(Boolean).join(" · ") || "working tree";
 }
 
+/**
+ * Compute M0 pass-level metadata for a completed review run.
+ *
+ * Shape matches runTrackedJob's tracked-jobs.mjs scaffolding so renderers
+ * and future M1/M5 consumers see a single stable contract regardless of
+ * which path wrote the stored job. See tests/run-review-pass-metadata
+ * for the structural guard that keeps this helper wired into runReview.
+ */
+export function buildPassesField(startedAt, completedAt, finalStatus) {
+  const startedAtTs = Date.parse(startedAt ?? "");
+  const completedAtTs = Date.parse(completedAt ?? "");
+  const durationMs = Number.isFinite(startedAtTs) && Number.isFinite(completedAtTs)
+    ? Math.max(0, completedAtTs - startedAtTs)
+    : 0;
+  return {
+    model: {
+      status: finalStatus === "completed" ? "completed" : "failed",
+      durationMs
+    },
+    validation: null, // M1 will populate
+    rerank: null // M5 will populate
+  };
+}
+
 async function buildSetupReport(cwd, actionsTaken = [], pingRequested = false) {
   const workspaceRoot = resolveWorkspaceRoot(cwd);
   const nodeDetail = `${process.version} (global fetch ${typeof fetch === "function" ? "present" : "missing"})`;
@@ -427,6 +451,7 @@ async function runReview(argv, { adversarial }) {
     focusText
   };
   const rendered = renderReviewResult(result, meta);
+  const passes = buildPassesField(jobRecord.startedAt, completedAt, finalStatus);
 
   writeJobFile(workspaceRoot, jobId, {
     ...jobRecord,
@@ -434,7 +459,8 @@ async function runReview(argv, { adversarial }) {
     completedAt,
     result,
     rendered,
-    meta
+    meta,
+    passes
   });
   upsertJob(workspaceRoot, {
     ...jobRecord,
