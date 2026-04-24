@@ -285,6 +285,46 @@ describe("sanitizeReviewResultForStorageM0 — pipeline evidence fields", () => 
     const failure = { parsed: null, parseError: "TRUNCATED_JSON", rawOutput: "{" };
     assert.equal(sanitizeReviewResultForStorageM0(failure), failure);
   });
+
+  it("leaves rejected parsed payloads unchanged instead of normalizing them as successful reviews", () => {
+    const rejected = {
+      rawOutput: "{...}",
+      failureMessage: "Review payload findings[0] missing required field(s): recommendation.",
+      errorCode: "INVALID_SHAPE",
+      parseError: null,
+      parsed: {
+        verdict: "needs-attention",
+        summary: "One finding.",
+        findings: [
+          { severity: "high", title: "Bad", body: "oops", file: "a.js", line_start: 1, line_end: 1, confidence: 0.9 }
+        ],
+        next_steps: []
+      }
+    };
+    assert.equal(sanitizeReviewResultForStorageM0(rejected), rejected);
+  });
+
+  it("renders rejected parsed payloads as schema failures, not normalized findings", () => {
+    const rejected = {
+      rawOutput: "{...}",
+      failureMessage: "Review payload findings[0] missing required field(s): recommendation.",
+      errorCode: "INVALID_SHAPE",
+      parseError: null,
+      parsed: {
+        verdict: "needs-attention",
+        summary: "One finding.",
+        findings: [
+          { severity: "high", title: "Bad", body: "oops", file: "a.js", line_start: 1, line_end: 1, confidence: 0.9 }
+        ],
+        next_steps: []
+      }
+    };
+    const rendered = renderReviewResult(rejected, baseMeta);
+    assert.match(rendered, /GLM did not return valid structured JSON/);
+    assert.match(rendered, /missing required field/);
+    assert.doesNotMatch(rendered, /Findings:/);
+    assert.doesNotMatch(rendered, /Recommendation:/);
+  });
 });
 
 // ── Schema additionalProperties guard ───────────────────────────────────────

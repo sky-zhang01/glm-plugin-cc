@@ -145,6 +145,9 @@ export function sanitizeReviewResultForStorageM0(parsedResult) {
   if (!parsedResult?.parsed) {
     return parsedResult;
   }
+  if (parsedResult.failureMessage || parsedResult.parseError) {
+    return parsedResult;
+  }
   const validationError = validateReviewResultShape(parsedResult.parsed);
   if (validationError) {
     return parsedResult;
@@ -312,6 +315,26 @@ export function renderSetupReport(report) {
 }
 
 export function renderReviewResult(parsedResult, meta) {
+  const failureDetail = parsedResult.failureMessage || parsedResult.parseError;
+  if (failureDetail) {
+    const lines = [
+      `# GLM ${meta.reviewLabel}`,
+      "",
+      `Target: ${meta.targetLabel}`,
+      "GLM did not return valid structured JSON.",
+      "",
+      `- Error: ${failureDetail}`
+    ];
+
+    if (parsedResult.rawOutput) {
+      lines.push("", "Raw final message:", "", "```text", parsedResult.rawOutput, "```");
+    }
+
+    appendReasoningSection(lines, meta.reasoningSummary ?? parsedResult.reasoningSummary);
+
+    return `${lines.join("\n").trimEnd()}\n`;
+  }
+
   if (!parsedResult.parsed) {
     const lines = [
       `# GLM ${meta.reviewLabel}`,

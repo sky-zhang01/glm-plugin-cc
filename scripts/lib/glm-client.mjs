@@ -370,18 +370,24 @@ function buildCorrectionHint(previousErrorCode) {
       "[CORRECTION] Your previous response returned the JSON schema definition " +
       "itself (with `$schema`, `type`, `properties` keys) instead of the actual " +
       "review output. Do NOT return the schema. Return a concrete JSON object " +
-      "with real values for `verdict`, `summary`, `findings`. Each finding must " +
-      "have real `severity`, `title`, `body`, `file`, `line_start`, `line_end`. " +
+      "with real values for `verdict`, `summary`, `findings`, and `next_steps`. " +
+      "Each finding must have real `severity`, `title`, `body`, `file`, " +
+      "`line_start`, `line_end`, `confidence`, and `recommendation`. " +
       "If there are no findings to report, return an empty `findings` array with " +
-      "`verdict: \"approve\"`.\n\n"
+      "`verdict: \"approve\"` and `next_steps: []`.\n\n"
     );
   }
   if (previousErrorCode === "INVALID_SHAPE") {
     return (
       "[CORRECTION] Your previous response was valid JSON but missing one or more " +
-      "required fields (`verdict`, `summary`, or `findings`). Include all three " +
-      "top-level fields in your response. If nothing notable was found, still " +
-      "include `verdict: \"approve\"` and `findings: []`.\n\n"
+      "required schema fields. Include all four top-level fields: `verdict`, " +
+      "`summary`, `findings`, and `next_steps`. Each finding must include " +
+      "`severity`, `title`, `body`, `file`, `line_start`, `line_end`, " +
+      "`confidence`, and `recommendation`; optional `confidence_tier` must be " +
+      "one of the documented enum values and optional `validation_signals` must " +
+      "be an array of `{kind, result, artifact?}` objects. If nothing notable " +
+      "was found, still include `verdict: \"approve\"`, `findings: []`, and " +
+      "`next_steps: []`.\n\n"
     );
   }
   if (previousErrorCode === "REASONING_LEAK") {

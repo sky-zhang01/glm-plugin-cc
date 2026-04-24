@@ -16,8 +16,14 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { classifyParseFailure, classifyReviewPayload, stripMarkdownFences } from "../scripts/lib/glm-client.mjs";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(here, "..");
 
 function validFinding(overrides = {}) {
   return {
@@ -258,6 +264,26 @@ describe("classifyReviewPayload — INVALID_SHAPE detection", () => {
     const result = classifyReviewPayload(payload);
     assert.equal(result.kind, "invalid_shape");
     assert.match(result.message, /result/);
+  });
+});
+
+describe("buildCorrectionHint — INVALID_SHAPE schema guidance", () => {
+  it("mentions the full top-level schema and M0 finding fields", () => {
+    const source = readFileSync(path.join(repoRoot, "scripts/lib/glm-client.mjs"), "utf8");
+    const invalidShapeStart = source.indexOf('if (previousErrorCode === "INVALID_SHAPE")');
+    assert.ok(invalidShapeStart !== -1, "INVALID_SHAPE correction branch must exist");
+    const invalidShapeBlock = source.slice(invalidShapeStart, invalidShapeStart + 1200);
+    for (const token of [
+      "verdict",
+      "summary",
+      "findings",
+      "next_steps",
+      "confidence",
+      "recommendation",
+      "validation_signals"
+    ]) {
+      assert.match(invalidShapeBlock, new RegExp(token), `correction hint must mention ${token}`);
+    }
   });
 });
 
