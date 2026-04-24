@@ -192,6 +192,34 @@ test("renderReviewResult OMITS confidence when value is null", () => {
   assert.match(rendered, /\[medium\] Test finding/);
 });
 
+test("renderReviewResult does not display reversed legacy line ranges", () => {
+  const rendered = renderReviewResult(
+    {
+      parsed: {
+        verdict: "needs-attention",
+        summary: "Legacy bad range.",
+        findings: [
+          {
+            severity: "medium",
+            title: "Reversed line range",
+            body: "body text",
+            file: "legacy.ts",
+            line_start: 10,
+            line_end: 3,
+            confidence: 0.8,
+            recommendation: ""
+          }
+        ],
+        next_steps: []
+      }
+    },
+    { reviewLabel: "Review", targetLabel: "stored legacy result" }
+  );
+
+  assert.match(rendered, /legacy\.ts:10\)/);
+  assert.doesNotMatch(rendered, /legacy\.ts:10-3/);
+});
+
 function makeValidatedResult(findings) {
   return {
     validationApplied: true,

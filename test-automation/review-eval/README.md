@@ -44,9 +44,11 @@ node test-automation/review-eval/scripts/run-experiment.mjs \
   --out test-automation/review-eval/results/v0.4.8/m3-measurement.csv
 ```
 
-`/glm:review` receives no trailing focus text. `/glm:adversarial-review`
-keeps a bounded focus string so the adversarial command contract is exercised
-without changing the target diff.
+By default, neither mode receives trailing focus text. This keeps balanced and
+adversarial rows comparable: the only planned variable is review mode. To
+exercise the adversarial focus-text contract intentionally, pass
+`--adversarial-focus "<focus text>"`; the value is recorded in the CSV's
+`adversarial_focus` column.
 
 ## Non-goals for v0.4.7 sanity sweep (original scope, superseded by expanded sweep)
 
@@ -59,6 +61,7 @@ without changing the target diff.
 
 | Metric | Source | Meaning |
 |---|---|---|
+| `adversarial_focus` | harness args | optional focus string supplied only through `--adversarial-focus`; empty by default for mode parity |
 | `schema_compliance` | parse check | JSON parseable AND has verdict/summary/findings |
 | `schema_echo` | `classifyReviewPayload` | returned the schema definition instead of findings |
 | `invalid_shape` | `classifyReviewPayload` | parseable but missing required fields |
