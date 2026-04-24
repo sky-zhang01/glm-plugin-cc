@@ -60,6 +60,7 @@ import {
   buildReviewValidationContext,
   validateStructuralReviewResult
 } from "./lib/validators/review-structural.mjs";
+import { runRepoChecks } from "./lib/repo-checks.mjs";
 
 const ROOT_DIR = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const REVIEW_SCHEMA_PATH = path.join(ROOT_DIR, "schemas", "review-output.schema.json");
@@ -453,7 +454,15 @@ async function runReview(argv, { adversarial }) {
     sanitizedResult,
     validationContext
   );
-  const failed = Boolean(storedResult.failureMessage) || Boolean(storedResult.parseError);
+  const repoChecks = runRepoChecks({
+    repoRoot: reviewContext.repoRoot,
+    changedFiles: reviewContext.changedFiles
+  });
+  const storedResultWithRepoChecks = {
+    ...storedResult,
+    repo_checks: repoChecks
+  };
+  const failed = Boolean(storedResultWithRepoChecks.failureMessage) || Boolean(storedResultWithRepoChecks.parseError);
   const finalStatus = failed ? "failed" : "completed";
   const targetLabel = buildTargetLabel(target, focusText);
   const meta = {
@@ -464,7 +473,7 @@ async function runReview(argv, { adversarial }) {
     baseRef: target.baseRef ?? null,
     focusText
   };
-  const rendered = renderReviewResult(storedResult, meta);
+  const rendered = renderReviewResult(storedResultWithRepoChecks, meta);
   const passes = buildPassesField(jobRecord.startedAt, completedAt, finalStatus);
   passes.validation = validationPass;
 
@@ -472,7 +481,7 @@ async function runReview(argv, { adversarial }) {
     ...jobRecord,
     status: finalStatus,
     completedAt,
-    result: storedResult,
+    result: storedResultWithRepoChecks,
     rendered,
     meta,
     passes
@@ -488,7 +497,7 @@ async function runReview(argv, { adversarial }) {
     {
       command: meta.reviewLabel.toLowerCase().replace(/\s+/g, "-"),
       jobId,
-      result: storedResult,
+      result: storedResultWithRepoChecks,
       rendered,
       meta,
       passes

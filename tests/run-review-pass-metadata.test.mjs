@@ -183,8 +183,8 @@ describe("runReview wiring — glm-companion.mjs writeJobFile path", () => {
     );
     assert.match(
       runReviewBody,
-      /renderReviewResult\s*\(\s*storedResult\s*,/,
-      "runReview must render the sanitized result, not the raw model result"
+      /renderReviewResult\s*\(\s*storedResultWithRepoChecks\s*,/,
+      "runReview must render the sanitized result with repo checks, not the raw model result"
     );
     assert.match(
       runReviewBody,
@@ -240,6 +240,37 @@ describe("runReview wiring — glm-companion.mjs writeJobFile path", () => {
       outputRegion,
       /\bpasses\b/,
       "runReview JSON payload must include the same passes metadata as the stored job"
+    );
+  });
+
+  it("runReview keeps repo-owned checks separate from model findings", () => {
+    const runReviewStart = companionSource.indexOf("async function runReview(");
+    const afterRunReview = companionSource.slice(runReviewStart + 1);
+    const nextTopLevel = afterRunReview.search(/\nasync function |\nfunction /);
+    const runReviewBody =
+      nextTopLevel === -1
+        ? companionSource.slice(runReviewStart)
+        : companionSource.slice(runReviewStart, runReviewStart + 1 + nextTopLevel);
+
+    assert.match(
+      runReviewBody,
+      /runRepoChecks\s*\(/,
+      "runReview must invoke repo-owned checks after structural validation"
+    );
+    assert.match(
+      runReviewBody,
+      /repo_checks:\s*repoChecks/,
+      "repo-owned check results must be stored under a separate repo_checks key"
+    );
+    assert.match(
+      runReviewBody,
+      /renderReviewResult\s*\(\s*storedResultWithRepoChecks\s*,/,
+      "renderer must receive the result object carrying repo_checks"
+    );
+    assert.doesNotMatch(
+      runReviewBody,
+      /findings:\s*\[\s*\.\.\.repoChecks/,
+      "repo-owned checks must not be merged into model findings"
     );
   });
 });

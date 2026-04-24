@@ -264,6 +264,42 @@ test("renderReviewResult applies balanced review default policy", () => {
   assert.match(rendered, /Findings hidden by Review default policy: 2 below tier\/severity policy/);
 });
 
+test("renderReviewResult renders repo checks as a separate section", () => {
+  const rendered = renderReviewResult(
+    {
+      ...makeValidatedResult([
+        policyFinding({ title: "Visible medium cross-checked" })
+      ]),
+      repo_checks: {
+        status: "completed",
+        durationMs: 2,
+        errors: [],
+        checks: [
+          {
+            id: "no-cross-project-token",
+            kind: "grep-notpresent",
+            result: "fail",
+            message: "No workflow-governor references.",
+            scanned_files: 1,
+            violations: [
+              {
+                file: "src/review.ts",
+                line: 81,
+                match: "workflow_governor"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    { reviewLabel: "Review", reviewMode: "review", targetLabel: "branch diff" }
+  );
+
+  assert.match(rendered, /Repo checks:/);
+  assert.match(rendered, /\[fail\] no-cross-project-token \(grep-notpresent, scanned 1 file\(s\)\)/);
+  assert.match(rendered, /src\/review\.ts:81 workflow_governor/);
+});
+
 test("renderReviewResult applies adversarial review broader default policy", () => {
   const rendered = renderReviewResult(
     makeValidatedResult([

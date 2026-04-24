@@ -76,6 +76,25 @@ function formatLineRange(finding) {
   return `:${finding.line_start}-${finding.line_end}`;
 }
 
+function appendRepoChecksSection(lines, repoChecks) {
+  if (!repoChecks || repoChecks.status === "skipped") {
+    return;
+  }
+  lines.push("", "Repo checks:");
+  if (Array.isArray(repoChecks.errors) && repoChecks.errors.length > 0) {
+    for (const error of repoChecks.errors) {
+      lines.push(`- [config-fail] ${error}`);
+    }
+  }
+  for (const check of repoChecks.checks ?? []) {
+    const message = check.message ? ` — ${check.message}` : "";
+    lines.push(`- [${check.result}] ${check.id} (${check.kind}, scanned ${check.scanned_files} file(s))${message}`);
+    for (const violation of check.violations ?? []) {
+      lines.push(`  - ${violation.file}:${violation.line} ${violation.match}`);
+    }
+  }
+}
+
 function validateReviewResultShape(data) {
   if (!data || typeof data !== "object" || Array.isArray(data)) {
     return "Expected a top-level JSON object.";
@@ -390,6 +409,7 @@ export function renderReviewResult(parsedResult, meta) {
       lines.push("", "Raw final message:", "", "```text", parsedResult.rawOutput, "```");
     }
 
+    appendRepoChecksSection(lines, parsedResult.repo_checks);
     appendReasoningSection(lines, meta.reasoningSummary ?? parsedResult.reasoningSummary);
 
     return `${lines.join("\n").trimEnd()}\n`;
@@ -408,6 +428,7 @@ export function renderReviewResult(parsedResult, meta) {
       lines.push("", "Raw final message:", "", "```text", parsedResult.rawOutput, "```");
     }
 
+    appendRepoChecksSection(lines, parsedResult.repo_checks);
     appendReasoningSection(lines, meta.reasoningSummary ?? parsedResult.reasoningSummary);
 
     return `${lines.join("\n").trimEnd()}\n`;
@@ -428,6 +449,7 @@ export function renderReviewResult(parsedResult, meta) {
       lines.push("", "Raw final message:", "", "```text", parsedResult.rawOutput, "```");
     }
 
+    appendRepoChecksSection(lines, parsedResult.repo_checks);
     appendReasoningSection(lines, meta.reasoningSummary ?? parsedResult.reasoningSummary);
 
     return `${lines.join("\n").trimEnd()}\n`;
@@ -499,6 +521,8 @@ export function renderReviewResult(parsedResult, meta) {
   if (rejectedCount > 0) {
     lines.push("", `Rejected findings hidden from default output: ${rejectedCount}. Use --json or /glm:result --json to inspect validation signals.`);
   }
+
+  appendRepoChecksSection(lines, parsedResult.repo_checks);
 
   if (data.next_steps.length > 0) {
     lines.push("", "Next steps:");
