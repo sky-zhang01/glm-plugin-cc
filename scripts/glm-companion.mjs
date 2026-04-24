@@ -61,6 +61,11 @@ import {
   validateStructuralReviewResult
 } from "./lib/validators/review-structural.mjs";
 import { runRepoChecks } from "./lib/repo-checks.mjs";
+import {
+  attachRerankMetadata,
+  buildReflectionPrompt,
+  buildRerankPassMetadata
+} from "./lib/review-rerank.mjs";
 
 const ROOT_DIR = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const REVIEW_SCHEMA_PATH = path.join(ROOT_DIR, "schemas", "review-output.schema.json");
@@ -70,8 +75,8 @@ function printUsage() {
     [
       "Usage:",
       "  node scripts/glm-companion.mjs setup [--preset ...] [--api-key <key>] [--ping] [--enable-review-gate|--disable-review-gate] [--json]",
-      "  node scripts/glm-companion.mjs review [--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--temperature <0-2>] [--top-p <0-1>] [--seed <int>] [--json]",
-      "  node scripts/glm-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--temperature <0-2>] [--top-p <0-1>] [--seed <int>] [--json] [focus text]",
+      "  node scripts/glm-companion.mjs review [--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--temperature <0-2>] [--top-p <0-1>] [--seed <int>] [--reflect] [--reflect-model <model>] [--json]",
+      "  node scripts/glm-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--temperature <0-2>] [--top-p <0-1>] [--seed <int>] [--reflect] [--reflect-model <model>] [--json] [focus text]",
       "  node scripts/glm-companion.mjs task [--system <text>] [--model <model>] [--thinking on|off] [--json] [prompt]",
       "  node scripts/glm-companion.mjs rescue [--system <text>] [--model <model>] [--thinking on|off] [--json] [prompt]",
       "  node scripts/glm-companion.mjs status [job-id] [--all] [--json]",
@@ -364,13 +369,13 @@ async function runReview(argv, { adversarial }) {
       // server-side default (current v0.4.6 behavior preserved). Ranges
       // are validated in glm-client's assignOptionalSamplingParam —
       // out-of-range values are silently dropped, not rejected.
-      "temperature", "top-p", "seed", "frequency-penalty", "presence-penalty"
+      "temperature", "top-p", "seed", "frequency-penalty", "presence-penalty", "reflect-model"
     ],
     // `wait` / `background` are no-ops here — declared so parseArgs consumes
     // them instead of leaking into positionals as focus text. Real detach
     // lives in Claude Code's `Bash(run_in_background: true)`. See
     // commands/review.md.
-    booleanOptions: ["json", "wait", "background"]
+    booleanOptions: ["json", "wait", "background", "reflect"]
   });
   const cwd = resolveCommandCwd(options);
   const workspaceRoot = resolveCommandWorkspace(options);
@@ -447,7 +452,7 @@ async function runReview(argv, { adversarial }) {
     onProgress: reporter
   });
 
-  const completedAt = nowIso();
+  const modelCompletedAt = nowIso();
   const validationContext = buildReviewValidationContext(reviewContext);
   const sanitizedResult = sanitizeReviewResultForStorageM0(result);
   const { result: storedResult, pass: validationPass } = validateStructuralReviewResult(
@@ -458,10 +463,104 @@ async function runReview(argv, { adversarial }) {
     repoRoot: reviewContext.repoRoot,
     changedFiles: reviewContext.changedFiles
   });
-  const storedResultWithRepoChecks = {
+  let storedResultWithRepoChecks = {
     ...storedResult,
     repo_checks: repoChecks
   };
+  let finalValidationPass = validationPass;
+
+  let rerankPass = null;
+  if (options.reflect || options["reflect-model"]) {
+    const canReflect =
+      Boolean(storedResultWithRepoChecks.parsed) &&
+      (storedResultWithRepoChecks.parsed.findings?.length ?? 0) > 0 &&
+      !storedResultWithRepoChecks.failureMessage &&
+      !storedResultWithRepoChecks.parseError;
+    if (!canReflect) {
+      rerankPass = buildRerankPassMetadata({
+        status: "skipped",
+        startedAtMs: Date.now(),
+        completedAtMs: Date.now(),
+        model: options["reflect-model"] || options.model || null,
+        initialResult: storedResultWithRepoChecks,
+        finalResult: storedResultWithRepoChecks,
+        failureMessage:
+          storedResultWithRepoChecks.parsed
+            ? "initial review had no findings to rerank"
+            : "initial review did not produce a usable parsed payload"
+      });
+      storedResultWithRepoChecks = attachRerankMetadata(storedResultWithRepoChecks, rerankPass);
+    } else {
+      const rerankStartedAt = Date.now();
+      const reflectModel = options["reflect-model"] || options.model || null;
+      reporter({
+        phase: "rerank",
+        message: `starting optional reflection/rerank pass${reflectModel ? ` with ${reflectModel}` : ""}`
+      });
+      const reflectionPrompt = buildReflectionPrompt({
+        targetLabel: buildTargetLabel(target, focusText),
+        reviewMode: adversarial ? "adversarial-review" : "review",
+        initialResult: storedResultWithRepoChecks,
+        validationPass,
+        repoChecks
+      });
+      const reflectionResult = await runGlmReview(cwd, {
+        prompt: reflectionPrompt,
+        systemPrompt,
+        model: reflectModel || options.model,
+        thinking,
+        temperature: parseFloatOrUndefined(options.temperature),
+        topP: parseFloatOrUndefined(options["top-p"]),
+        seed: parseIntOrUndefined(options.seed),
+        frequencyPenalty: parseFloatOrUndefined(options["frequency-penalty"]),
+        presencePenalty: parseFloatOrUndefined(options["presence-penalty"]),
+        expectJson: true,
+        onProgress: reporter
+      });
+      const sanitizedReflection = sanitizeReviewResultForStorageM0(reflectionResult);
+      const { result: reflectedResult, pass: reflectedValidationPass } = validateStructuralReviewResult(
+        sanitizedReflection,
+        validationContext
+      );
+      const reflectedWithRepoChecks = {
+        ...reflectedResult,
+        repo_checks: repoChecks
+      };
+      const reflectionFailed =
+        Boolean(reflectedWithRepoChecks.failureMessage) ||
+        Boolean(reflectedWithRepoChecks.parseError) ||
+        !reflectedWithRepoChecks.parsed;
+      const rerankCompletedAt = Date.now();
+      if (reflectionFailed) {
+        rerankPass = buildRerankPassMetadata({
+          status: "failed",
+          startedAtMs: rerankStartedAt,
+          completedAtMs: rerankCompletedAt,
+          model: reflectModel,
+          initialResult: storedResultWithRepoChecks,
+          finalResult: storedResultWithRepoChecks,
+          failureMessage:
+            reflectedWithRepoChecks.failureMessage ||
+            reflectedWithRepoChecks.parseError ||
+            "reflection pass did not return a usable parsed review"
+        });
+        storedResultWithRepoChecks = attachRerankMetadata(storedResultWithRepoChecks, rerankPass);
+      } else {
+        rerankPass = buildRerankPassMetadata({
+          status: "completed",
+          startedAtMs: rerankStartedAt,
+          completedAtMs: rerankCompletedAt,
+          model: reflectModel,
+          initialResult: storedResultWithRepoChecks,
+          finalResult: reflectedWithRepoChecks
+        });
+        storedResultWithRepoChecks = attachRerankMetadata(reflectedWithRepoChecks, rerankPass);
+        finalValidationPass = reflectedValidationPass;
+      }
+    }
+  }
+
+  const completedAt = nowIso();
   const failed = Boolean(storedResultWithRepoChecks.failureMessage) || Boolean(storedResultWithRepoChecks.parseError);
   const finalStatus = failed ? "failed" : "completed";
   const targetLabel = buildTargetLabel(target, focusText);
@@ -474,8 +573,9 @@ async function runReview(argv, { adversarial }) {
     focusText
   };
   const rendered = renderReviewResult(storedResultWithRepoChecks, meta);
-  const passes = buildPassesField(jobRecord.startedAt, completedAt, finalStatus);
-  passes.validation = validationPass;
+  const passes = buildPassesField(jobRecord.startedAt, modelCompletedAt, finalStatus);
+  passes.validation = finalValidationPass;
+  passes.rerank = rerankPass;
 
   writeJobFile(workspaceRoot, jobId, {
     ...jobRecord,
@@ -490,7 +590,10 @@ async function runReview(argv, { adversarial }) {
     ...jobRecord,
     status: finalStatus,
     completedAt,
-    summary: firstMeaningfulLine(storedResult.rawOutput, storedResult.failureMessage || "")
+    summary: firstMeaningfulLine(
+      storedResultWithRepoChecks.rawOutput,
+      storedResultWithRepoChecks.failureMessage || ""
+    )
   });
 
   outputCommandResult(

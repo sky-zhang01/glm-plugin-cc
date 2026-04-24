@@ -1,6 +1,6 @@
 ---
 description: Run a GLM review that challenges the implementation approach and design choices
-argument-hint: '[--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--temperature <0-2>] [--top-p <0-1>] [--seed <int>] [focus ...]'
+argument-hint: '[--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--temperature <0-2>] [--top-p <0-1>] [--seed <int>] [--reflect] [--reflect-model <model>] [focus ...]'
 disable-model-invocation: true
 allowed-tools: Read, Glob, Grep, Bash(node:*), Bash(git:*), AskUserQuestion
 ---
@@ -26,6 +26,10 @@ Raw slash-command arguments:
 - Stay inside bounded review challenge surfaces. This command may inspect
   security-relevant trust boundaries when the diff touches them, but it is not
   a pentest scanner or a general security platform.
+- `--reflect` is opt-in. It runs one additional GLM pass that can drop or
+  sharpen first-pass findings, then local structural validators run again. If
+  the second pass fails, the command keeps the first-pass result and records
+  failed rerank telemetry instead of overwriting evidence.
 
 ## Challenge surfaces
 
@@ -123,4 +127,9 @@ Bash({
   Plugin ships no opinionated default; `/glm:adversarial-review` uses
   BigModel's server-side default unless overridden.
 - `--wait` / `--background` — execution mode bypass. See "Execution mode rules" above.
+- `--reflect` — opt into one additional reflection/rerank pass. This is not
+  default behavior and will roughly double remote review cost for that
+  invocation.
+- `--reflect-model <model>` — run the reflection/rerank pass with an explicit
+  text model. Passing this flag also enables reflection.
 - Trailing tokens after flags are treated as free-form focus text.

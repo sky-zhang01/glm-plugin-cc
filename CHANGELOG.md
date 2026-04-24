@@ -2,6 +2,22 @@
 
 ## v0.4.8 (unreleased)
 
+### M5 — Optional reflection / rerank lane
+
+**Opt-in second pass** (`scripts/glm-companion.mjs`,
+`scripts/lib/review-rerank.mjs`): `/glm:review` and
+`/glm:adversarial-review` now accept `--reflect` plus optional
+`--reflect-model <model>`. The default review path remains one GLM review call
+plus local validation/repo checks. When enabled, the reflection pass sees the
+first-pass parsed result, validation telemetry, and repo-check output; it is
+asked to drop weak findings or sharpen evidence rather than broaden scope.
+
+**Auditability and fallback**: rerank metadata is stored under
+`passes.rerank` and `result.rerank`, including initial vs final finding counts,
+confidence scores, and confidence tiers. If the optional second pass fails or
+does not return a usable parsed payload, the command keeps the first-pass
+result and records the rerank failure instead of silently overwriting evidence.
+
 ### M4 — Repo-owned checks v0.1
 
 **Repo-owned checks** (`.glm/checks/`, `scripts/lib/repo-checks.mjs`):

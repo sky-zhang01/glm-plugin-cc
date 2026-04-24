@@ -214,8 +214,8 @@ describe("runReview wiring — glm-companion.mjs writeJobFile path", () => {
     );
     assert.match(
       runReviewBody,
-      /passes\.validation\s*=\s*validationPass/,
-      "runReview must persist validation pass telemetry in passes.validation"
+      /passes\.validation\s*=\s*finalValidationPass/,
+      "runReview must persist final validation pass telemetry in passes.validation"
     );
   });
 
