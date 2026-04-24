@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 /**
- * Run one (fixture, sampling-cell) combo N times against /glm:adversarial-review
+ * Run one (fixture, sampling-cell, review-mode) combo N times against
+ * /glm:review or /glm:adversarial-review
  * and append one row per run to a CSV.
  *
  * Usage:
  *   node run-experiment.mjs --fixture C2-v046-aftercare --temperature 0.2 \
- *        --top-p 0.85 --seed 42 --runs 3 --out ../results/v0.4.7/sanity-sweep.csv
+ *        --top-p 0.85 --seed 42 --runs 3 --out ../results/v0.4.8/m3-measurement.csv
  *
  * Philosophy (per Gitea issue #7):
  *   - Small, targeted experiments. 9 calls not 900.
@@ -15,6 +16,7 @@
  *   - No parameter defaults assumed. Missing knob = unset (server default).
  *
  * Metrics written per row:
+ *   mode (string)                  — review | adversarial-review
  *   schema_compliance (0/1)        — parsed JSON has verdict + summary + findings
  *   schema_echo (0/1)              — payload is the schema definition itself
  *   invalid_shape (0/1)            — parsed but missing required fields
@@ -24,6 +26,9 @@
  *   input_tokens (int)             — from BigModel usage block if present
  *   output_tokens (int)            — same
  *   latency_ms (int)               — wall-clock round-trip
+ *   model_duration_ms (int)        — stored pass duration for model call
+ *   validation_duration_ms (int)   — stored pass duration for validation pass
+ *   tier_* (int)                   — confidence_tier distribution after validation
  *   error_code (string)            — companion errorCode, or "" on success
  *   correction_attempted (0/1)     — whether runChatRequestWithCorrectionRetry fired
  */
@@ -42,6 +47,7 @@ const COMPANION = path.join(REPO_ROOT, "scripts", "glm-companion.mjs");
 const CSV_HEADER = [
   "timestamp_utc",
   "fixture_id",
+  "mode",
   "temperature",
   "top_p",
   "seed",
@@ -57,6 +63,14 @@ const CSV_HEADER = [
   "input_tokens",
   "output_tokens",
   "latency_ms",
+  "model_duration_ms",
+  "validation_status",
+  "validation_duration_ms",
+  "tier_proposed",
+  "tier_cross_checked",
+  "tier_deterministically_validated",
+  "tier_rejected",
+  "rejected_count",
   "error_code",
   "correction_attempted",
   "raw_payload_path"
@@ -144,11 +158,53 @@ function scoreCitations(findings, gt) {
   return { accuracy: ok / findings.length, falseFileHits };
 }
 
+function normalizeReviewMode(value) {
+  const mode = String(value || "adversarial-review").trim();
+  if (mode === "review" || mode === "adversarial-review") {
+    return mode;
+  }
+  throw new Error(`--mode must be review or adversarial-review, got: ${mode}`);
+}
+
+function emptyTierCounts() {
+  return {
+    proposed: 0,
+    cross_checked: 0,
+    deterministically_validated: 0,
+    rejected: 0
+  };
+}
+
+function countFindingTiers(findings) {
+  const counts = emptyTierCounts();
+  if (!Array.isArray(findings)) {
+    return counts;
+  }
+  for (const finding of findings) {
+    const tier = finding?.confidence_tier;
+    if (tier === "cross-checked") {
+      counts.cross_checked += 1;
+    } else if (tier === "deterministically-validated") {
+      counts.deterministically_validated += 1;
+    } else if (tier === "rejected") {
+      counts.rejected += 1;
+    } else {
+      counts.proposed += 1;
+    }
+  }
+  return counts;
+}
+
 function ensureCsv(outPath) {
   const dir = path.dirname(outPath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   if (!existsSync(outPath)) {
     writeFileSync(outPath, CSV_HEADER + "\n");
+    return;
+  }
+  const existingHeader = readFileSync(outPath, "utf8").split(/\r?\n/, 1)[0];
+  if (existingHeader !== CSV_HEADER) {
+    throw new Error(`CSV header mismatch for ${outPath}; choose a new --out path or migrate the existing file.`);
   }
 }
 
@@ -158,11 +214,12 @@ function csvEscape(value) {
   return s;
 }
 
-function buildPayloadSidecarPath(outPath, fixtureId, temperature, topP, seed, runIndex) {
+function buildPayloadSidecarPath(outPath, fixtureId, mode, temperature, topP, seed, runIndex) {
   const dir = path.join(path.dirname(outPath), "payloads");
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const cellTag = [
     fixtureId,
+    mode,
     `t${temperature ?? "unset"}`,
     `tp${topP ?? "unset"}`,
     `s${seed ?? "unset"}`,
@@ -172,10 +229,10 @@ function buildPayloadSidecarPath(outPath, fixtureId, temperature, topP, seed, ru
   return path.join(dir, `${cellTag}.json`);
 }
 
-function runOne({ fixtureId, base, temperature, topP, seed, thinking, runIndex, groundTruth, outPath }) {
+function runOne({ fixtureId, mode, base, temperature, topP, seed, thinking, runIndex, groundTruth, outPath }) {
   const companionArgs = [
     COMPANION,
-    "adversarial-review",
+    mode,
     "--base", base,
     "--scope", "branch",
     "--json",
@@ -185,7 +242,9 @@ function runOne({ fixtureId, base, temperature, topP, seed, thinking, runIndex, 
   if (temperature !== undefined) companionArgs.push("--temperature", String(temperature));
   if (topP !== undefined) companionArgs.push("--top-p", String(topP));
   if (seed !== undefined) companionArgs.push("--seed", String(seed));
-  companionArgs.push(`v0.4.7 sampling-sweep run ${runIndex} (${fixtureId})`);
+  if (mode === "adversarial-review") {
+    companionArgs.push(`v0.4.8 measurement sweep run ${runIndex} (${fixtureId})`);
+  }
 
   const started = Date.now();
   // Run from the repo root — companion expects cwd to be the target repo.
@@ -197,7 +256,7 @@ function runOne({ fixtureId, base, temperature, topP, seed, thinking, runIndex, 
   });
   const latencyMs = Date.now() - started;
 
-  const sidecarPath = buildPayloadSidecarPath(outPath, fixtureId, temperature, topP, seed, runIndex);
+  const sidecarPath = buildPayloadSidecarPath(outPath, fixtureId, mode, temperature, topP, seed, runIndex);
   const sidecarRelative = path.relative(path.dirname(outPath), sidecarPath);
 
   let payload;
@@ -224,6 +283,14 @@ function runOne({ fixtureId, base, temperature, topP, seed, thinking, runIndex, 
       input_tokens: 0,
       output_tokens: 0,
       latency_ms: latencyMs,
+      model_duration_ms: 0,
+      validation_status: "skipped",
+      validation_duration_ms: 0,
+      tier_proposed: 0,
+      tier_cross_checked: 0,
+      tier_deterministically_validated: 0,
+      tier_rejected: 0,
+      rejected_count: 0,
       error_code: "COMPANION_NON_JSON",
       correction_attempted: 0,
       raw_payload_path: sidecarRelative
@@ -260,6 +327,11 @@ function runOne({ fixtureId, base, temperature, topP, seed, thinking, runIndex, 
   const invalidShape = errorCode === "INVALID_SHAPE" ? 1 : 0;
   const findings = Array.isArray(parsed?.findings) ? parsed.findings : [];
   const citation = scoreCitations(findings, groundTruth);
+  const tierCounts = countFindingTiers(findings);
+  const passes = payload?.passes && typeof payload.passes === "object" ? payload.passes : {};
+  const modelDurationMs = Number(passes.model?.durationMs);
+  const validationDurationMs = Number(passes.validation?.durationMs);
+  const validationStatus = typeof passes.validation?.status === "string" ? passes.validation.status : "";
 
   // Usage extraction: companion doesn't currently pass through BigModel's
   // usage block, so these are often 0. Captured for future use if we
@@ -273,6 +345,7 @@ function runOne({ fixtureId, base, temperature, topP, seed, thinking, runIndex, 
   writeFileSync(sidecarPath, JSON.stringify({
     cell: {
       fixtureId,
+      mode,
       temperature: temperature ?? null,
       topP: topP ?? null,
       seed: seed ?? null,
@@ -288,8 +361,14 @@ function runOne({ fixtureId, base, temperature, topP, seed, thinking, runIndex, 
       citation_accuracy: Number(citation.accuracy.toFixed(3)),
       citation_false_file_hits: citation.falseFileHits,
       latency_ms: latencyMs,
+      model_duration_ms: Number.isFinite(modelDurationMs) ? modelDurationMs : 0,
+      validation_status: validationStatus,
+      validation_duration_ms: Number.isFinite(validationDurationMs) ? validationDurationMs : 0,
+      tier_distribution: tierCounts,
+      rejected_count: tierCounts.rejected,
       error_code: errorCode
     },
+    passes,
     parsed,
     rawOutputHead: rawOutput.slice(0, RAW_OUTPUT_HEAD_BYTES),
     rawOutputTruncated: rawOutput.length > RAW_OUTPUT_HEAD_BYTES,
@@ -310,6 +389,14 @@ function runOne({ fixtureId, base, temperature, topP, seed, thinking, runIndex, 
     input_tokens: inputTokens,
     output_tokens: outputTokens,
     latency_ms: latencyMs,
+    model_duration_ms: Number.isFinite(modelDurationMs) ? modelDurationMs : 0,
+    validation_status: validationStatus,
+    validation_duration_ms: Number.isFinite(validationDurationMs) ? validationDurationMs : 0,
+    tier_proposed: tierCounts.proposed,
+    tier_cross_checked: tierCounts.cross_checked,
+    tier_deterministically_validated: tierCounts.deterministically_validated,
+    tier_rejected: tierCounts.rejected,
+    rejected_count: tierCounts.rejected,
     error_code: errorCode,
     correction_attempted: correctionAttempted,
     raw_payload_path: sidecarRelative
@@ -319,26 +406,28 @@ function runOne({ fixtureId, base, temperature, topP, seed, thinking, runIndex, 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const fixtureId = args.fixture || "C2-v046-aftercare";
+  const mode = normalizeReviewMode(args.mode);
   const base = args.base || "main";
   const temperature = args.temperature !== undefined ? Number(args.temperature) : undefined;
   const topP = args["top-p"] !== undefined ? Number(args["top-p"]) : undefined;
   const seed = args.seed !== undefined ? Number(args.seed) : undefined;
   const thinking = args.thinking || "on";
   const runs = Number(args.runs || 3);
-  const outPath = path.resolve(args.out || path.join(__dirname, "../results/v0.4.7/sanity-sweep.csv"));
+  const outPath = path.resolve(args.out || path.join(__dirname, "../results/v0.4.8/m3-measurement.csv"));
 
   const groundTruth = loadGroundTruth(fixtureId);
   ensureCsv(outPath);
 
-  console.log(`[run-experiment] fixture=${fixtureId}, base=${base}, temp=${temperature ?? "unset"}, top_p=${topP ?? "unset"}, seed=${seed ?? "unset"}, thinking=${thinking}, runs=${runs}`);
+  console.log(`[run-experiment] fixture=${fixtureId}, mode=${mode}, base=${base}, temp=${temperature ?? "unset"}, top_p=${topP ?? "unset"}, seed=${seed ?? "unset"}, thinking=${thinking}, runs=${runs}`);
   console.log(`[run-experiment] output: ${outPath}`);
 
   for (let i = 1; i <= runs; i++) {
     process.stdout.write(`  run ${i}/${runs} ... `);
-    const metrics = runOne({ fixtureId, base, temperature, topP, seed, thinking, runIndex: i, groundTruth, outPath });
+    const metrics = runOne({ fixtureId, mode, base, temperature, topP, seed, thinking, runIndex: i, groundTruth, outPath });
     const row = [
       new Date().toISOString(),
       fixtureId,
+      mode,
       temperature ?? "",
       topP ?? "",
       seed ?? "",
@@ -354,6 +443,14 @@ async function main() {
       metrics.input_tokens,
       metrics.output_tokens,
       metrics.latency_ms,
+      metrics.model_duration_ms,
+      metrics.validation_status,
+      metrics.validation_duration_ms,
+      metrics.tier_proposed,
+      metrics.tier_cross_checked,
+      metrics.tier_deterministically_validated,
+      metrics.tier_rejected,
+      metrics.rejected_count,
       metrics.error_code,
       metrics.correction_attempted,
       metrics.raw_payload_path
