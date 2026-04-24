@@ -345,6 +345,15 @@ async function runReview(argv, { adversarial }) {
   const cwd = resolveCommandCwd(options);
   const workspaceRoot = resolveCommandWorkspace(options);
   const focusText = positionals.join(" ").trim();
+  // C4 (M0): /glm:review does not accept focus text — reject early with a
+  // clear usage error so the user knows to use /glm:adversarial-review instead.
+  // Runs before ensureGitRepository so the error is not shadowed by git checks.
+  if (!adversarial && focusText) {
+    process.stderr.write(
+      "/glm:review does not accept focus text. Use /glm:adversarial-review if you need custom framing on top of the base review.\n"
+    );
+    process.exit(1);
+  }
   // Global default ON — mirrors codex CLI's single model_reasoning_effort
   // = "medium" default on gpt-5.4 (no per-command split).
   const thinking = parseThinkingFlag(options.thinking, true);
