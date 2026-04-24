@@ -94,15 +94,15 @@ describe("buildPassesField — compute path", () => {
     assert.equal(passes.model.durationMs, 0);
   });
 
-  it("validation and rerank stay null as M1/M5 placeholders", async () => {
+  it("buildPassesField starts validation/rerank empty for callers to fill", async () => {
     const { buildPassesField } = await importCompanion("placeholders");
     const passes = buildPassesField(
       "2026-04-24T10:00:00.000Z",
       "2026-04-24T10:00:01.000Z",
       "completed"
     );
-    assert.equal(passes.validation, null, "M1 placeholder must stay null in M0");
-    assert.equal(passes.rerank, null, "M5 placeholder must stay null in M0");
+    assert.equal(passes.validation, null, "validation pass starts empty before runReview fills it");
+    assert.equal(passes.rerank, null, "M5 rerank placeholder must stay null");
   });
 });
 
@@ -190,6 +190,32 @@ describe("runReview wiring — glm-companion.mjs writeJobFile path", () => {
       runReviewBody,
       /result:\s*storedResult/,
       "runReview must store the sanitized result, not the raw model result"
+    );
+  });
+
+  it("runReview invokes structural validators after M0 sanitization", () => {
+    const runReviewStart = companionSource.indexOf("async function runReview(");
+    const afterRunReview = companionSource.slice(runReviewStart + 1);
+    const nextTopLevel = afterRunReview.search(/\nasync function |\nfunction /);
+    const runReviewBody =
+      nextTopLevel === -1
+        ? companionSource.slice(runReviewStart)
+        : companionSource.slice(runReviewStart, runReviewStart + 1 + nextTopLevel);
+
+    assert.match(
+      runReviewBody,
+      /buildReviewValidationContext\s*\(\s*reviewContext\s*\)/,
+      "runReview must build validation context from collected reviewContext"
+    );
+    assert.match(
+      runReviewBody,
+      /validateStructuralReviewResult\s*\(\s*sanitizedResult\s*,\s*validationContext\s*\)/,
+      "runReview must validate the sanitized result, not raw model output"
+    );
+    assert.match(
+      runReviewBody,
+      /passes\.validation\s*=\s*validationPass/,
+      "runReview must persist validation pass telemetry in passes.validation"
     );
   });
 

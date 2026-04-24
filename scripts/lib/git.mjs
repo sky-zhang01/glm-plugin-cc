@@ -20,6 +20,75 @@ function listUniqueFiles(...groups) {
   return [...new Set(groups.flat().filter(Boolean))].sort();
 }
 
+function parseDiffNameStatusEntries(output) {
+  const entries = [];
+  for (const line of output.trim().split("\n").filter(Boolean)) {
+    const [status, firstPath, secondPath] = line.split("\t");
+    if ((status.startsWith("R") || status.startsWith("C")) && secondPath) {
+      entries.push([firstPath, secondPath]);
+    } else if (firstPath) {
+      entries.push([firstPath]);
+    }
+  }
+  return entries;
+}
+
+function parseDiffNameStatusEntriesZ(output) {
+  const records = output.split("\0").filter(Boolean);
+  const entries = [];
+  for (let index = 0; index < records.length; index += 1) {
+    const status = records[index];
+    const firstPath = records[index + 1];
+    if (!firstPath) {
+      break;
+    }
+    if (status.startsWith("R") || status.startsWith("C")) {
+      const secondPath = records[index + 2];
+      if (secondPath) {
+        entries.push([firstPath, secondPath]);
+        index += 2;
+      } else {
+        entries.push([firstPath]);
+        index += 1;
+      }
+    } else {
+      entries.push([firstPath]);
+      index += 1;
+    }
+  }
+  return entries;
+}
+
+function withNullTerminatedNameStatus(args) {
+  const index = args.indexOf("--name-status");
+  if (index === -1 || args.includes("-z")) {
+    return args;
+  }
+  return [...args.slice(0, index + 1), "-z", ...args.slice(index + 1)];
+}
+
+function listDiffNameStatusFiles(cwd, args) {
+  return listUniqueFiles(readDiffNameStatusEntries(cwd, args).flat());
+}
+
+function readDiffNameStatusEntries(cwd, args) {
+  const zArgs = withNullTerminatedNameStatus(args);
+  const output = gitChecked(cwd, zArgs).stdout;
+  return zArgs.includes("-z") ? parseDiffNameStatusEntriesZ(output) : parseDiffNameStatusEntries(output);
+}
+
+function nameStatusEntryKey(entry) {
+  return entry.join("\0");
+}
+
+function countUniqueNameStatusEntries(...entryGroups) {
+  return new Set(entryGroups.flat().map(nameStatusEntryKey)).size;
+}
+
+function countDiffNameStatusRecords(cwd, args) {
+  return readDiffNameStatusEntries(cwd, args).length;
+}
+
 function normalizeMaxInlineFiles(value) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) {
@@ -119,14 +188,17 @@ export function getCurrentBranch(cwd) {
 }
 
 export function getWorkingTreeState(cwd) {
-  const staged = gitChecked(cwd, ["diff", "--cached", "--name-only"]).stdout.trim().split("\n").filter(Boolean);
-  const unstaged = gitChecked(cwd, ["diff", "--name-only"]).stdout.trim().split("\n").filter(Boolean);
+  const stagedEntries = readDiffNameStatusEntries(cwd, ["diff", "--cached", "--name-status"]);
+  const unstagedEntries = readDiffNameStatusEntries(cwd, ["diff", "--name-status"]);
+  const staged = listUniqueFiles(stagedEntries.flat());
+  const unstaged = listUniqueFiles(unstagedEntries.flat());
   const untracked = gitChecked(cwd, ["ls-files", "--others", "--exclude-standard"]).stdout.trim().split("\n").filter(Boolean);
 
   return {
     staged,
     unstaged,
     untracked,
+    changeCount: countUniqueNameStatusEntries(stagedEntries, unstagedEntries) + untracked.length,
     isDirty: staged.length > 0 || unstaged.length > 0 || untracked.length > 0
   };
 }
@@ -262,7 +334,7 @@ function collectBranchContext(cwd, baseRef, options = {}) {
   const includeDiff = options.includeDiff !== false;
   const comparison = options.comparison ?? buildBranchComparison(cwd, baseRef);
   const currentBranch = getCurrentBranch(cwd);
-  const changedFiles = gitChecked(cwd, ["diff", "--name-only", comparison.commitRange]).stdout.trim().split("\n").filter(Boolean);
+  const changedFiles = listDiffNameStatusFiles(cwd, ["diff", "--name-status", comparison.commitRange]);
   const logOutput = gitChecked(cwd, ["log", "--oneline", "--decorate", comparison.commitRange]).stdout.trim();
   const diffStat = gitChecked(cwd, ["diff", "--stat", comparison.commitRange]).stdout.trim();
 
@@ -317,18 +389,17 @@ export function collectReviewContext(cwd, target, options = {}) {
     );
     includeDiff =
       options.includeDiff ??
-      (listUniqueFiles(state.staged, state.unstaged, state.untracked).length <= maxInlineFiles &&
-        diffBytes <= maxInlineDiffBytes);
+      (state.changeCount <= maxInlineFiles && diffBytes <= maxInlineDiffBytes);
     details = collectWorkingTreeContext(repoRoot, state, { includeDiff });
   } else {
     const comparison = buildBranchComparison(repoRoot, target.baseRef);
-    const fileCount = gitChecked(repoRoot, ["diff", "--name-only", comparison.commitRange]).stdout.trim().split("\n").filter(Boolean).length;
+    const changeCount = countDiffNameStatusRecords(repoRoot, ["diff", "--name-status", comparison.commitRange]);
     diffBytes = measureGitOutputBytes(
       repoRoot,
       ["diff", "--binary", "--no-ext-diff", "--submodule=diff", comparison.commitRange],
       maxInlineDiffBytes
     );
-    includeDiff = options.includeDiff ?? (fileCount <= maxInlineFiles && diffBytes <= maxInlineDiffBytes);
+    includeDiff = options.includeDiff ?? (changeCount <= maxInlineFiles && diffBytes <= maxInlineDiffBytes);
     details = collectBranchContext(repoRoot, target.baseRef, { includeDiff, comparison });
   }
 
