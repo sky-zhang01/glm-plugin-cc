@@ -1,0 +1,169 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "mode": "adversarial-review",
+    "adversarialFocus": "",
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0,
+    "citation_false_file_hits": 0,
+    "latency_ms": 111263,
+    "model_duration_ms": 110383,
+    "validation_status": "completed",
+    "validation_duration_ms": 60,
+    "tier_distribution": {
+      "proposed": 2,
+      "cross_checked": 1,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 110383
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 60,
+      "totalFindings": 3,
+      "tierCounts": {
+        "proposed": 2,
+        "cross_checked": 1,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 10,
+        "fail": 2,
+        "skip": 0
+      }
+    },
+    "rerank": null
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The diff introduces ~6700 lines of new logic for review architecture, structural validation, and repo-owned checks. The inclusion of 'repo-owned checks' and 'structural validators' exposes a broad attack surface. Specifically, repo-owned checks present a potential Remote Code Execution (RCE) risk if not strictly sandboxed, and the large validation surface risks denial-of-service (DoS) via adversarial inputs. Additionally, breaking changes to the command contract around focus text could result in silent data loss for existing users.",
+    "findings": [
+      {
+        "severity": "critical",
+        "title": "Potential Arbitrary Code Execution via Repo-Owned Checks",
+        "body": "The new `scripts/lib/repo-checks.mjs` file implements 'bounded repo-owned review checks'. If this feature dynamically imports or evaluates untrusted code from the target repository (e.g., a configuration file modified in a PR) to run custom checks, it introduces a severe code execution vulnerability. An attacker could open a PR that modifies the repo check configuration to execute malicious code during the automated review process.",
+        "file": "scripts/lib/repo-checks.mjs",
+        "line_start": 1,
+        "line_end": 282,
+        "confidence": 0.7,
+        "recommendation": "Ensure that repo-owned checks are strictly declarative or executed within a sandboxed, ephemeral environment (like a Docker container with dropped capabilities). Do not dynamically `import` or `require` untrusted JavaScript from the repository under review.",
+        "confidence_tier": "cross-checked",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "scripts/lib/repo-checks.mjs"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 1-282 within 282"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "pass",
+            "artifact": "matched anchor: import"
+          }
+        ]
+      },
+      {
+        "severity": "medium",
+        "title": "Denial of Service risk in Structural Validators",
+        "body": "The addition of `scripts/lib/validators/review-structural.mjs` (381 lines) heavily implies complex parsing of model output or diffs. Without strict parsing budgets, adversarial or malformed inputs (either from the LLM or the repository diff) could trigger ReDoS (Regular Expression Denial of Service) or excessive memory consumption during validation, stalling the review pipeline.",
+        "file": "scripts/lib/validators/review-structural.mjs",
+        "line_start": 1,
+        "line_end": 381,
+        "confidence": 0.6,
+        "recommendation": "Verify that all regular expressions used in the structural validators are non-backtracking and that string parsing has strict length and depth limits to prevent runaway CPU or memory usage.",
+        "confidence_tier": "proposed",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "scripts/lib/validators/review-structural.mjs"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 1-381 within 381"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "fail",
+            "artifact": "no explicit anchor found near cited lines: scripts/lib/validators/review-structural.mjs"
+          }
+        ]
+      },
+      {
+        "severity": "high",
+        "title": "Breaking Change and Silent Failures in Command Contract",
+        "body": "Commit `e91c0e4` introduces a breaking change by rejecting focus text on `/glm:review`. If the implementation merely drops the focus text without throwing a user-facing error, users may continue to pass focus text assuming it is being considered, leading to inaccurate and potentially dangerous review blind spots. Additionally, commit `a4478ac` indicates the model attempts to claim confidence tiers which the system must clamp, risking malformed output if the model resists.",
+        "file": "commands/review.md",
+        "line_start": 1,
+        "line_end": 18,
+        "confidence": 0.8,
+        "recommendation": "Ensure that providing focus text to `/glm:review` throws an explicit, non-suppressible error that blocks execution, rather than silently ignoring the input. Confirm the structural validators robustly handle model outputs that fail to include the required confidence tier.",
+        "confidence_tier": "proposed",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "commands/review.md"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 1-18 within 156"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "fail",
+            "artifact": "no explicit anchor found near cited lines: e91c0e4, /glm:review, a4478ac"
+          }
+        ]
+      }
+    ],
+    "next_steps": [
+      "Audit `scripts/lib/repo-checks.mjs` for dynamic code evaluation (`eval`, `vm`, `import`) of untrusted repository files.",
+      "Review the regex and parsing logic in `scripts/lib/validators/review-structural.mjs` for ReDoS vulnerabilities and memory limits.",
+      "Verify behavior of the `/glm:review` command when focus text is provided to ensure it fails loudly rather than silently dropping context."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The diff introduces ~6700 lines of new logic for review architecture, structural validation, and repo-owned checks. The inclusion of 'repo-owned checks' and 'structural validators' exposes a broad attack surface. Specifically, repo-owned checks present a potential Remote Code Execution (RCE) risk if not strictly sandboxed, and the large validation surface risks denial-of-service (DoS) via adversarial inputs. Additionally, breaking changes to the command contract around focus text could result in silent data loss for existing users.\",\"findings\":[{\"severity\":\"critical\",\"title\":\"Potential Arbitrary Code Execution via Repo-Owned Checks\",\"body\":\"The new `scripts/lib/repo-checks.mjs` file implements 'bounded repo-owned review checks'. If this feature dynamically imports or evaluates untrusted code from the target repository (e.g., a configuration file modified in a PR) to run custom checks, it introduces a severe code execution vulnerability. An attacker could open a PR that modifies the repo check configuration to execute malicious code during the automated review process.\",\"file\":\"scripts/lib/repo-checks.mjs\",\"line_start\":1,\"line_end\":282,\"confidence\":0.7,\"recommendation\":\"Ensure that repo-owned checks are strictly declarative or executed within a sandboxed, ephemeral environment (like a Docker container with dropped capabilities). Do not dynamically `import` or `require` untrusted JavaScript from the repository under review.\",\"confidence_tier\":\"proposed\",\"validation_signals\":[{\"kind\":\"file_in_target\",\"result\":\"pass\",\"artifact\":\"scripts/lib/repo-checks.mjs\"}]},{\"severity\":\"medium\",\"title\":\"Denial of Service risk in Structural Validators\",\"body\":\"The addition of `scripts/lib/validators/review-structural.mjs` (381 lines) heavily implies complex parsing of model output or diffs. Without strict parsing budgets, adversarial or malformed inputs (either from the LLM or the repository diff) could trigger ReDoS (Regular Expression Denial of Service) or excessive memory consumption during validation, stalling the review pipeline.\",\"file\":\"scripts/lib/validators/review-structural.mjs\",\"line_start\":1,\"line_end\":381,\"confidence\":0.6,\"recommendation\":\"Verify that all regular expressions used in the structural validators are non-backtracking and that string parsing has strict length and depth limits to prevent runaway CPU or memory usage.\",\"confidence_tier\":\"proposed\",\"validation_signals\":[{\"kind\":\"file_in_target\",\"result\":\"pass\",\"artifact\":\"scripts/lib/validators/review-structural.mjs\"}]},{\"severity\":\"high\",\"title\":\"Breaking Change and Silent Failures in Command Contract\",\"body\":\"Commit `e91c0e4` introduces a breaking change by rejecting focus text on `/glm:review`. If the implementation merely drops the focus text without throwing a user-facing error, users may continue to pass focus text assuming it is being considered, leading to inaccurate and potentially dangerous review blind spots. Additionally, commit `a4478ac` indicates the model attempts to claim confidence tiers which the system must clamp, risking malformed output if the model resists.\",\"file\":\"commands/review.md\",\"line_start\":1,\"line_end\":18,\"confidence\":0.8,\"recommendation\":\"Ensure that providing focus text to `/glm:review` throws an explicit, non-suppressible error that blocks execution, rather than silently ignoring the input. Confirm the structural validators robustly handle model outputs that fail to include the required confidence tier.\",\"confidence_tier\":\"proposed\",\"validation_signals\":[{\"kind\":\"file_in_target\",\"result\":\"pass\",\"artifact\":\"commands/review.md\"}]}],\"next_steps\":[\"Audit `scripts/lib/repo-checks.mjs` for dynamic code evaluation (`eval`, `vm`, `import`) of untrusted repository files.\",\"Review the regex and parsing logic in `scripts/lib/validators/review-structural.mjs` for ReDoS vulnerabilities and memory limits.\",\"Verify behavior of the `/glm:review` command when focus text is provided to ensure it fails loudly rather than silently dropping context.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-24T17:11:04.962Z"
+}

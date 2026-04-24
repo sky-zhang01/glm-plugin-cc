@@ -1,0 +1,170 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "mode": "adversarial-review",
+    "adversarialFocus": "",
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "on",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.333,
+    "citation_false_file_hits": 0,
+    "latency_ms": 148520,
+    "model_duration_ms": 147941,
+    "validation_status": "completed",
+    "validation_duration_ms": 56,
+    "tier_distribution": {
+      "proposed": 3,
+      "cross_checked": 0,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 147941
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 56,
+      "totalFindings": 3,
+      "tierCounts": {
+        "proposed": 3,
+        "cross_checked": 0,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 9,
+        "fail": 3,
+        "skip": 0
+      }
+    },
+    "rerank": null
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The change introduces a massive 6,700-line diff that overhauls the AI review substrate, adding complex LLM output parsing, repo checks, and rendering logic. Because the actual diff content is unavailable for direct inspection, critical trust boundaries—specifically the parsing of untrusted LLM payloads in `review-structural.mjs` and the execution of 'repo-owned' checks in `repo-checks.mjs`—represent high-risk blind spots. The likelihood of silent crashes on malformed inputs or potential injection vulnerabilities is too high to defensibly approve without manual code inspection.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Untrusted LLM output parsing in structural validators poses crash and DoS risk",
+        "body": "Inferred from file name and diff stats: `scripts/lib/validators/review-structural.mjs` adds 381 lines of complex parsing logic for LLM outputs. LLM outputs are highly variable and often malformed. If this parser relies on regex or fragile string manipulation rather than strict AST-based parsing, it is vulnerable to catastrophic backtracking (ReDoS) or unhandled exceptions on truncated/malformed JSON. A crash here would halt the entire review process silently.",
+        "file": "scripts/lib/validators/review-structural.mjs",
+        "line_start": 1,
+        "line_end": 381,
+        "confidence": 0.7,
+        "recommendation": "Verify that the structural validator uses a strict JSON parser (like `JSON.parse` with a JSON schema validator) and does not use complex regex for parsing. Add fuzz tests with truncated or malformed payloads to the 695 lines of tests in `tests/structural-validators.test.mjs`.",
+        "confidence_tier": "proposed",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "scripts/lib/validators/review-structural.mjs"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 1-381 within 381"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "fail",
+            "artifact": "no explicit anchor found near cited lines: scripts/lib/validators/review-structural.mjs, JSON.parse, tests/structural-validators.test.mjs"
+          }
+        ]
+      },
+      {
+        "severity": "high",
+        "title": "Repo checks execution implies potential trust boundary violation",
+        "body": "Inferred from commit message 'add bounded repo-owned review checks' and file `scripts/lib/repo-checks.mjs` (282 lines). If 'repo-owned' checks mean reading and executing code or configurations from the target repository (e.g., a `.glm/` config file), this introduces a severe trust boundary issue. A malicious repository could craft this file to trigger arbitrary code execution or path traversal when the companion runs the review.",
+        "file": "scripts/lib/repo-checks.mjs",
+        "line_start": 1,
+        "line_end": 282,
+        "confidence": 0.6,
+        "recommendation": "Ensure that repo-owned checks are strictly data-driven (e.g., YAML/JSON configuration) and do not allow arbitrary script execution. If scripts are allowed, they must run in a sandboxed environment.",
+        "confidence_tier": "proposed",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "scripts/lib/repo-checks.mjs"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 1-282 within 282"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "fail",
+            "artifact": "no explicit anchor found near cited lines: scripts/lib/repo-checks.mjs, .glm/"
+          }
+        ]
+      },
+      {
+        "severity": "medium",
+        "title": "Rendering logic susceptible to Markdown/Terminal injection",
+        "body": "Inferred from file name: `scripts/lib/render.mjs` adds 247 lines of rendering logic. If this logic takes untrusted output from the LLM (which might contain terminal escape sequences or malicious markdown links) and renders it directly to the user's terminal or IDE, it could lead to cross-site scripting (in web views) or terminal escape injection.",
+        "file": "scripts/lib/render.mjs",
+        "line_start": 1,
+        "line_end": 247,
+        "confidence": 0.6,
+        "recommendation": "Ensure all untrusted strings from the LLM are sanitized for terminal escape sequences (like `\\x1b`) and that markdown rendering safely handles links and images.",
+        "confidence_tier": "proposed",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "scripts/lib/render.mjs"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 1-247 within 711"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "fail",
+            "artifact": "no explicit anchor found near cited lines: scripts/lib/render.mjs, \\x1b"
+          }
+        ]
+      }
+    ],
+    "next_steps": [
+      "Inspect the implementation of `scripts/lib/validators/review-structural.mjs` for strict JSON parsing and error handling.",
+      "Review `scripts/lib/repo-checks.mjs` to ensure it does not blindly trust or execute files from the target repository.",
+      "Check `scripts/lib/render.mjs` for output sanitization against terminal escape sequences and markdown injection.",
+      "Verify that state changes in `tracked-jobs.mjs` are atomic and handle partial failures gracefully."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The change introduces a massive 6,700-line diff that overhauls the AI review substrate, adding complex LLM output parsing, repo checks, and rendering logic. Because the actual diff content is unavailable for direct inspection, critical trust boundaries—specifically the parsing of untrusted LLM payloads in `review-structural.mjs` and the execution of 'repo-owned' checks in `repo-checks.mjs`—represent high-risk blind spots. The likelihood of silent crashes on malformed inputs or potential injection vulnerabilities is too high to defensibly approve without manual code inspection.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Untrusted LLM output parsing in structural validators poses crash and DoS risk\",\"body\":\"Inferred from file name and diff stats: `scripts/lib/validators/review-structural.mjs` adds 381 lines of complex parsing logic for LLM outputs. LLM outputs are highly variable and often malformed. If this parser relies on regex or fragile string manipulation rather than strict AST-based parsing, it is vulnerable to catastrophic backtracking (ReDoS) or unhandled exceptions on truncated/malformed JSON. A crash here would halt the entire review process silently.\",\"file\":\"scripts/lib/validators/review-structural.mjs\",\"line_start\":1,\"line_end\":381,\"confidence\":0.7,\"recommendation\":\"Verify that the structural validator uses a strict JSON parser (like `JSON.parse` with a JSON schema validator) and does not use complex regex for parsing. Add fuzz tests with truncated or malformed payloads to the 695 lines of tests in `tests/structural-validators.test.mjs`.\"},{\"severity\":\"high\",\"title\":\"Repo checks execution implies potential trust boundary violation\",\"body\":\"Inferred from commit message 'add bounded repo-owned review checks' and file `scripts/lib/repo-checks.mjs` (282 lines). If 'repo-owned' checks mean reading and executing code or configurations from the target repository (e.g., a `.glm/` config file), this introduces a severe trust boundary issue. A malicious repository could craft this file to trigger arbitrary code execution or path traversal when the companion runs the review.\",\"file\":\"scripts/lib/repo-checks.mjs\",\"line_start\":1,\"line_end\":282,\"confidence\":0.6,\"recommendation\":\"Ensure that repo-owned checks are strictly data-driven (e.g., YAML/JSON configuration) and do not allow arbitrary script execution. If scripts are allowed, they must run in a sandboxed environment.\"},{\"severity\":\"medium\",\"title\":\"Rendering logic susceptible to Markdown/Terminal injection\",\"body\":\"Inferred from file name: `scripts/lib/render.mjs` adds 247 lines of rendering logic. If this logic takes untrusted output from the LLM (which might contain terminal escape sequences or malicious markdown links) and renders it directly to the user's terminal or IDE, it could lead to cross-site scripting (in web views) or terminal escape injection.\",\"file\":\"scripts/lib/render.mjs\",\"line_start\":1,\"line_end\":247,\"confidence\":0.6,\"recommendation\":\"Ensure all untrusted strings from the LLM are sanitized for terminal escape sequences (like `\\\\x1b`) and that markdown rendering safely handles links and images.\"}],\"next_steps\":[\"Inspect the implementation of `scripts/lib/validators/review-structural.mjs` for strict JSON parsing and error handling.\",\"Review `scripts/lib/repo-checks.mjs` to ensure it does not blindly trust or execute files from the target repository.\",\"Check `scripts/lib/render.mjs` for output sanitization against terminal escape sequences and markdown injection.\",\"Verify that state changes in `tracked-jobs.mjs` are atomic and handle partial failures gracefully.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-24T17:09:13.687Z"
+}

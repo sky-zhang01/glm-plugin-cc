@@ -1,0 +1,104 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "mode": "adversarial-review",
+    "adversarialFocus": "",
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "on",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 1,
+    "citation_accuracy": 0,
+    "citation_false_file_hits": 0,
+    "latency_ms": 64750,
+    "model_duration_ms": 64198,
+    "validation_status": "completed",
+    "validation_duration_ms": 26,
+    "tier_distribution": {
+      "proposed": 1,
+      "cross_checked": 0,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 64198
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 26,
+      "totalFindings": 1,
+      "tierCounts": {
+        "proposed": 1,
+        "cross_checked": 0,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 3,
+        "fail": 1,
+        "skip": 0
+      }
+    },
+    "rerank": null
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The repository context provided contains only the commit log and diff stat, lacking the actual source code or patch text. A meaningful adversarial review of the new 282-line `scripts/lib/repo-checks.mjs` module and associated changes is impossible without the code. Shipping without a line-by-line review of repo-owning checks is high risk.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Missing diff content prevents code review",
+        "body": "The context includes file names and line counts but omits the actual code changes. The core implementation `scripts/lib/repo-checks.mjs` adds 282 lines of unreviewed logic. Without the diff, correctness, state integrity, and trust boundary checks cannot be evaluated. This is a blind spot that could allow silent failures or security flaws to merge.",
+        "file": "scripts/lib/repo-checks.mjs",
+        "line_start": 1,
+        "line_end": 282,
+        "confidence": 1,
+        "recommendation": "Provide the full git diff or patch content for the target branch so the code can be reviewed.",
+        "confidence_tier": "proposed",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "scripts/lib/repo-checks.mjs"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 1-282 within 282"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "fail",
+            "artifact": "no explicit anchor found near cited lines: scripts/lib/repo-checks.mjs"
+          }
+        ]
+      }
+    ],
+    "next_steps": [
+      "Re-run the review automation with the full git diff output included in the repository context.",
+      "Do not merge the branch until the actual implementation has been audited."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The repository context provided contains only the commit log and diff stat, lacking the actual source code or patch text. A meaningful adversarial review of the new 282-line `scripts/lib/repo-checks.mjs` module and associated changes is impossible without the code. Shipping without a line-by-line review of repo-owning checks is high risk.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Missing diff content prevents code review\",\"body\":\"The context includes file names and line counts but omits the actual code changes. The core implementation `scripts/lib/repo-checks.mjs` adds 282 lines of unreviewed logic. Without the diff, correctness, state integrity, and trust boundary checks cannot be evaluated. This is a blind spot that could allow silent failures or security flaws to merge.\",\"file\":\"scripts/lib/repo-checks.mjs\",\"line_start\":1,\"line_end\":282,\"confidence\":1,\"recommendation\":\"Provide the full git diff or patch content for the target branch so the code can be reviewed.\"}],\"next_steps\":[\"Re-run the review automation with the full git diff output included in the repository context.\",\"Do not merge the branch until the actual implementation has been audited.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-24T17:02:24.242Z"
+}

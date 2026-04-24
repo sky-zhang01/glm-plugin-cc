@@ -1,0 +1,71 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "mode": "review",
+    "adversarialFocus": "",
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "on",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 38982,
+    "model_duration_ms": 38121,
+    "validation_status": "completed",
+    "validation_duration_ms": 0,
+    "tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 0,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 38121
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 0,
+      "totalFindings": 0,
+      "tierCounts": {
+        "proposed": 0,
+        "cross_checked": 0,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 0,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    "rerank": null
+  },
+  "parsed": {
+    "verdict": "approve",
+    "summary": "The change introduces new review architecture, repo checks, and structural validators across 34 files. Based on the available repository context (file list and commit log), the scope is well-structured and targets a comprehensive update to the review system. No material issues can be identified without the actual diff content to inspect for logic, error handling, or security flaws. The change is defensible as-is and should proceed to CI and standard integration checks.",
+    "findings": [],
+    "next_steps": [
+      "Ensure CI pipelines pass across all newly added test files.",
+      "Conduct a focused review on the implementation of `repo-checks.mjs` and `review-structural.mjs` when the full diff is available to validate the core logic paths."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"approve\",\"summary\":\"The change introduces new review architecture, repo checks, and structural validators across 34 files. Based on the available repository context (file list and commit log), the scope is well-structured and targets a comprehensive update to the review system. No material issues can be identified without the actual diff content to inspect for logic, error handling, or security flaws. The change is defensible as-is and should proceed to CI and standard integration checks.\",\"findings\":[],\"next_steps\":[\"Ensure CI pipelines pass across all newly added test files.\",\"Conduct a focused review on the implementation of `repo-checks.mjs` and `review-structural.mjs` when the full diff is available to validate the core logic paths.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-24T16:59:53.807Z"
+}
