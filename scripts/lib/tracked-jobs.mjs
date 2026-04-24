@@ -158,10 +158,11 @@ function readStoredJobOrNull(workspaceRoot, jobId) {
 }
 
 export async function runTrackedJob(job, runner, options = {}) {
+  const startedAt = nowIso();
   const runningRecord = {
     ...job,
     status: "running",
-    startedAt: nowIso(),
+    startedAt,
     phase: "starting",
     pid: process.pid,
     logFile: options.logFile ?? job.logFile ?? null
@@ -173,6 +174,13 @@ export async function runTrackedJob(job, runner, options = {}) {
     const execution = await runner();
     const completionStatus = execution.exitStatus === 0 ? "completed" : "failed";
     const completedAt = nowIso();
+    const durationMs = Date.parse(completedAt) - Date.parse(startedAt);
+    // M0: passes scaffold — model pass timing + placeholders for M1/M5.
+    const passes = {
+      model: { status: completionStatus, durationMs: durationMs >= 0 ? durationMs : 0 },
+      validation: null,
+      rerank: null
+    };
     writeJobFile(job.workspaceRoot, job.id, {
       ...runningRecord,
       status: completionStatus,
@@ -180,7 +188,8 @@ export async function runTrackedJob(job, runner, options = {}) {
       phase: completionStatus === "completed" ? "done" : "failed",
       completedAt,
       result: execution.payload,
-      rendered: execution.rendered
+      rendered: execution.rendered,
+      passes
     });
     upsertJob(job.workspaceRoot, {
       id: job.id,
