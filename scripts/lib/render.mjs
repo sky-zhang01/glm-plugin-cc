@@ -51,10 +51,7 @@ const CONFIDENCE_TIER_VALUES = new Set([
 function normalizeReviewFinding(finding, index, options = {}) {
   const source = finding && typeof finding === "object" && !Array.isArray(finding) ? finding : {};
   const lineStart = Number.isInteger(source.line_start) && source.line_start > 0 ? source.line_start : null;
-  const lineEnd =
-    Number.isInteger(source.line_end) && source.line_end > 0 && (!lineStart || source.line_end >= lineStart)
-      ? source.line_end
-      : lineStart;
+  const lineEnd = Number.isInteger(source.line_end) && source.line_end > 0 ? source.line_end : lineStart;
   // Schema requires confidence ∈ [0, 1]. Keep it when GLM returned a valid
   // number; otherwise leave it null so renderers can flag the gap instead
   // of silently presenting findings without any confidence signal.
@@ -85,7 +82,7 @@ function normalizeReviewFinding(finding, index, options = {}) {
     severity: typeof source.severity === "string" && source.severity.trim() ? source.severity.trim() : "low",
     title: typeof source.title === "string" && source.title.trim() ? source.title.trim() : `Finding ${index + 1}`,
     body: typeof source.body === "string" && source.body.trim() ? source.body.trim() : "No details provided.",
-    file: typeof source.file === "string" && source.file.trim() ? source.file.trim() : "unknown",
+    file: typeof source.file === "string" && source.file.trim() ? source.file : "unknown",
     line_start: lineStart,
     line_end: lineEnd,
     confidence,
@@ -399,7 +396,7 @@ export function renderReviewResult(parsedResult, meta) {
   ];
 
   if (findings.length === 0) {
-    lines.push("No material findings.");
+    lines.push(rejectedCount > 0 ? "No material findings visible in default output." : "No material findings.");
   } else {
     lines.push("Findings:");
     for (const finding of findings) {

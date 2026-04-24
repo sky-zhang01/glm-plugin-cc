@@ -281,6 +281,21 @@ describe("sanitizeReviewResultForStorageM0 — pipeline evidence fields", () => 
     assert.equal(finding.validation_signals, undefined);
   });
 
+  it("preserves edge whitespace in file paths for downstream validators", () => {
+    const sanitized = sanitizeReviewResultForStorageM0(makeResult({ ...v047Finding, file: " lead.js" }));
+    const [finding] = sanitized.parsed.findings;
+    assert.equal(finding.file, " lead.js");
+  });
+
+  it("preserves invalid line range ordering for downstream validators", () => {
+    const sanitized = sanitizeReviewResultForStorageM0(
+      makeResult({ ...v047Finding, line_start: 42, line_end: 41 })
+    );
+    const [finding] = sanitized.parsed.findings;
+    assert.equal(finding.line_start, 42);
+    assert.equal(finding.line_end, 41);
+  });
+
   it("leaves parse-failure shaped results unchanged", () => {
     const failure = { parsed: null, parseError: "TRUNCATED_JSON", rawOutput: "{" };
     assert.equal(sanitizeReviewResultForStorageM0(failure), failure);
