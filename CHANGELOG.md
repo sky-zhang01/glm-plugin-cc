@@ -10,13 +10,15 @@ deterministically-validated / rejected) and `validation_signals` (array of
 `{kind, result, artifact?}` objects). Both fields are optional; all existing
 v0.4.7 findings remain valid without change.
 
-**Renderer** (`scripts/lib/render.mjs`): `normalizeReviewFinding` now
-passes through `confidence_tier` and `validation_signals` when present.
-`renderReviewResult` surfaces tier in the confidence suffix line when tier is
-present (e.g. `[high · conf 0.90 · tier cross-checked]`); when tier is
-absent rendering is byte-identical to v0.4.7 baseline. Exports
-`normalizeReviewFindingM0` alias and new `validateFindingWithNewFields`
-helper for test use.
+**Renderer/storage substrate** (`scripts/lib/render.mjs`): the schema accepts
+the new evidence fields, but M0 treats them as pipeline-owned rather than
+model-owned. `normalizeReviewFinding` clamps any model-supplied valid
+`confidence_tier` to `proposed` and drops model-supplied
+`validation_signals`; M1 is responsible for assigning real validator-backed
+tiers and signals. Findings without M0 fields remain byte-identical to the
+v0.4.7 render baseline. Exports `normalizeReviewFindingM0` alias,
+`sanitizeReviewResultForStorageM0`, and `validateFindingWithNewFields` helper
+for test use.
 
 **Pass-level metadata** (`scripts/lib/tracked-jobs.mjs`): `runTrackedJob`
 now records `passes.model = {status, durationMs}` on both success and failure
