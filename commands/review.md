@@ -15,6 +15,10 @@ Raw slash-command arguments:
 - This command is review-only.
 - Do not fix issues, apply patches, or suggest you are about to make changes.
 - Your only job is to run the review and return GLM's output verbatim.
+- The default human output is intentionally conservative: it shows findings
+  that are at least `medium` severity and at least `cross-checked` by the
+  structural validator, capped at 5 visible findings. The stored JSON still
+  retains the full result for `/glm:result --json`.
 
 ## Execution mode rules
 
@@ -108,6 +112,9 @@ Bash({
   is useful for A/B probing.
 - `--wait` / `--background` — execution mode bypass. See "Execution mode rules" above.
 - Trailing positional tokens after flags are **rejected** for `/glm:review` (see "Core constraint" above). For custom framing, use `/glm:adversarial-review`, which does accept trailing focus text.
+- This mode should feel like a normal code review: concise, ship/no-ship
+  oriented, and comfortable returning no visible findings when all findings are
+  below the balanced default policy.
 
 ## Diff size guidance
 

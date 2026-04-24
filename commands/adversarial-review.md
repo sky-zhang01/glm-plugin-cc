@@ -19,6 +19,24 @@ Raw slash-command arguments:
   assumptions it depends on, and where the design could fail under real
   conditions.
 - Return GLM's output verbatim.
+- The default human output is broader than `/glm:review`: it shows findings
+  from `low` severity upward and from `proposed` tier upward, capped at 15
+  visible findings. The stored JSON still retains the full result for
+  `/glm:result --json`.
+- Stay inside bounded review challenge surfaces. This command may inspect
+  security-relevant trust boundaries when the diff touches them, but it is not
+  a pentest scanner or a general security platform.
+
+## Challenge surfaces
+
+Use these as lenses, not as pack-level modules:
+
+- correctness under stress: retries, partial failure, empty state, stale state, and timeouts
+- state and data integrity: loss, duplication, corruption, migration drift, and irreversible writes
+- trust boundaries touched by the diff: auth, permissions, secrets, tenant isolation, and input validation
+- compatibility and version skew: schema changes, stored job formats, command contracts, and old data
+- operability: observability, recovery paths, actionable errors, and support/debug evidence
+- test strategy: risky-path coverage rather than happy-path coverage only
 
 ## Execution mode rules
 

@@ -144,3 +144,44 @@ test("no dead safeReadConfigOrNull lingering in preset-config.mjs (regression: M
     "safeReadConfigOrNull still defined — delete it so no future caller silently reintroduces M-A"
   );
 });
+
+test("runReview stores explicit reviewMode for renderer policy split", () => {
+  const companion = fs.readFileSync(
+    path.join(repoRoot, "scripts", "glm-companion.mjs"),
+    "utf8"
+  );
+  const runReviewIdx = companion.indexOf("async function runReview(");
+  assert.ok(runReviewIdx >= 0, "runReview not found in glm-companion.mjs");
+  const metaIdx = companion.indexOf("const meta = {", runReviewIdx);
+  assert.ok(metaIdx > runReviewIdx, "runReview meta object not found");
+  const endOfMeta = companion.indexOf("};", metaIdx);
+  const metaBlock = companion.slice(metaIdx, endOfMeta);
+  assert.match(metaBlock, /reviewMode:\s*adversarial\s*\?\s*"adversarial-review"\s*:\s*"review"/);
+});
+
+test("adversarial prompt declares bounded challenge surfaces without becoming a pentest platform", () => {
+  const prompt = fs.readFileSync(
+    path.join(repoRoot, "prompts", "adversarial-review.md"),
+    "utf8"
+  );
+  assert.match(prompt, /<challenge_surfaces>/);
+  assert.match(prompt, /correctness under stress/);
+  assert.match(prompt, /state and data integrity/);
+  assert.match(prompt, /trust boundaries touched by the diff/);
+  assert.match(prompt, /not a general pentest\/security platform/);
+});
+
+test("command docs declare the M2 renderer default split", () => {
+  const reviewCommand = fs.readFileSync(path.join(repoRoot, "commands", "review.md"), "utf8");
+  const adversarialCommand = fs.readFileSync(
+    path.join(repoRoot, "commands", "adversarial-review.md"),
+    "utf8"
+  );
+
+  assert.match(reviewCommand, /at least `medium` severity/);
+  assert.match(reviewCommand, /at least `cross-checked`/);
+  assert.match(reviewCommand, /capped at 5 visible findings/);
+  assert.match(adversarialCommand, /from `low` severity upward/);
+  assert.match(adversarialCommand, /from `proposed` tier upward/);
+  assert.match(adversarialCommand, /capped at 15\s+visible findings/);
+});

@@ -458,6 +458,7 @@ async function runReview(argv, { adversarial }) {
   const targetLabel = buildTargetLabel(target, focusText);
   const meta = {
     reviewLabel: adversarial ? "Adversarial Review" : "Review",
+    reviewMode: adversarial ? "adversarial-review" : "review",
     targetLabel,
     targetMode: target.mode,
     baseRef: target.baseRef ?? null,
