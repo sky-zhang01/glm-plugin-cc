@@ -2,6 +2,27 @@
 
 ## v0.4.8 (unreleased)
 
+### M1 — Structural validators and confidence-tier wiring
+
+**Structural validation** (`scripts/lib/validators/review-structural.mjs`):
+adds the first local deterministic validation pass for parsed review findings:
+`file_in_target`, `line_range_in_file`, `anchor_literal_found`, and
+`known_false_reference_absent`. File/line/known-false failures become
+`rejected`; anchor misses remain `proposed` with an explicit failed signal so
+soft grounding gaps are visible without over-dropping high-level findings.
+
+**Runtime wiring** (`scripts/glm-companion.mjs`): `/glm:review` and
+`/glm:adversarial-review` now validate the sanitized parsed payload before
+rendering, storing, or returning `--json`. Stored jobs include
+`passes.validation` telemetry with tier counts and signal counts. The default
+runtime still performs one remote GLM review call; validation is local and
+post-parse.
+
+**Renderer behavior** (`scripts/lib/render.mjs`): pipeline-assigned
+`cross-checked` / `proposed` tiers render in the finding suffix. `rejected`
+findings stay in stored JSON with their `validation_signals`, but are hidden
+from default human output with a count and a `--json` inspection hint.
+
 ### M0 — Evidence substrate (schema + renderer + focus-text enforcement)
 
 **Schema** (`schemas/review-output.schema.json`): add two optional finding

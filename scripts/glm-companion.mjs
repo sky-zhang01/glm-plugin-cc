@@ -56,6 +56,10 @@ import {
   sanitizeReviewResultForStorageM0,
   renderTaskResult
 } from "./lib/render.mjs";
+import {
+  buildReviewValidationContext,
+  validateStructuralReviewResult
+} from "./lib/validators/review-structural.mjs";
 
 const ROOT_DIR = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const REVIEW_SCHEMA_PATH = path.join(ROOT_DIR, "schemas", "review-output.schema.json");
@@ -443,7 +447,12 @@ async function runReview(argv, { adversarial }) {
   });
 
   const completedAt = nowIso();
-  const storedResult = sanitizeReviewResultForStorageM0(result);
+  const validationContext = buildReviewValidationContext(reviewContext);
+  const sanitizedResult = sanitizeReviewResultForStorageM0(result);
+  const { result: storedResult, pass: validationPass } = validateStructuralReviewResult(
+    sanitizedResult,
+    validationContext
+  );
   const failed = Boolean(storedResult.failureMessage) || Boolean(storedResult.parseError);
   const finalStatus = failed ? "failed" : "completed";
   const targetLabel = buildTargetLabel(target, focusText);
@@ -456,6 +465,7 @@ async function runReview(argv, { adversarial }) {
   };
   const rendered = renderReviewResult(storedResult, meta);
   const passes = buildPassesField(jobRecord.startedAt, completedAt, finalStatus);
+  passes.validation = validationPass;
 
   writeJobFile(workspaceRoot, jobId, {
     ...jobRecord,

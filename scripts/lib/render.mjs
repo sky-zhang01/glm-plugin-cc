@@ -48,7 +48,7 @@ const CONFIDENCE_TIER_VALUES = new Set([
   "rejected"
 ]);
 
-function normalizeReviewFinding(finding, index) {
+function normalizeReviewFinding(finding, index, options = {}) {
   const source = finding && typeof finding === "object" && !Array.isArray(finding) ? finding : {};
   const lineStart = Number.isInteger(source.line_start) && source.line_start > 0 ? source.line_start : null;
   const lineEnd =
@@ -63,7 +63,7 @@ function normalizeReviewFinding(finding, index) {
       ? source.confidence
       : null;
 
-  // M0: confidence_tier is a PIPELINE-ASSIGNED evidence state per
+  // M0 default: confidence_tier is a PIPELINE-ASSIGNED evidence state per
   // architecture doc §6.2. At M0 there is no structural validator pass
   // (M1 delivers it), so any tier the model self-reports is untrusted.
   // Clamp to `proposed` whenever the model returned a valid enum value;
@@ -71,10 +71,15 @@ function normalizeReviewFinding(finding, index) {
   // hallucinated `deterministically-validated` from rendering as if a
   // real validator had confirmed it. M1 will replace this clamp with a
   // post-normalization validator pass that sets tier from actual checks.
-  const confidenceTier =
+  const sourceTier =
     typeof source.confidence_tier === "string" && CONFIDENCE_TIER_VALUES.has(source.confidence_tier)
-      ? "proposed"
+      ? source.confidence_tier
       : undefined;
+  const confidenceTier = sourceTier
+    ? options.preserveEvidenceFields
+      ? sourceTier
+      : "proposed"
+    : undefined;
 
   const normalized = {
     severity: typeof source.severity === "string" && source.severity.trim() ? source.severity.trim() : "low",
@@ -89,6 +94,9 @@ function normalizeReviewFinding(finding, index) {
 
   if (confidenceTier !== undefined) {
     normalized.confidence_tier = confidenceTier;
+  }
+  if (options.preserveEvidenceFields && Array.isArray(source.validation_signals)) {
+    normalized.validation_signals = source.validation_signals;
   }
 
   return normalized;
@@ -130,11 +138,11 @@ export function validateFindingWithNewFields(finding) {
   return null;
 }
 
-function normalizeReviewResultData(data) {
+function normalizeReviewResultData(data, options = {}) {
   return {
     verdict: data.verdict.trim(),
     summary: data.summary.trim(),
-    findings: data.findings.map((finding, index) => normalizeReviewFinding(finding, index)),
+    findings: data.findings.map((finding, index) => normalizeReviewFinding(finding, index, options)),
     next_steps: data.next_steps
       .filter((step) => typeof step === "string" && step.trim())
       .map((step) => step.trim())
@@ -373,8 +381,13 @@ export function renderReviewResult(parsedResult, meta) {
     return `${lines.join("\n").trimEnd()}\n`;
   }
 
-  const data = normalizeReviewResultData(parsedResult.parsed);
-  const findings = [...data.findings].sort((left, right) => severityRank(left.severity) - severityRank(right.severity));
+  const data = normalizeReviewResultData(parsedResult.parsed, {
+    preserveEvidenceFields: parsedResult.validationApplied === true
+  });
+  const rejectedCount = data.findings.filter((finding) => finding.confidence_tier === "rejected").length;
+  const findings = data.findings
+    .filter((finding) => finding.confidence_tier !== "rejected")
+    .sort((left, right) => severityRank(left.severity) - severityRank(right.severity));
   const lines = [
     `# GLM ${meta.reviewLabel}`,
     "",
@@ -407,6 +420,9 @@ export function renderReviewResult(parsedResult, meta) {
         lines.push(`  Recommendation: ${finding.recommendation}`);
       }
     }
+  }
+  if (rejectedCount > 0) {
+    lines.push("", `Rejected findings hidden from default output: ${rejectedCount}. Use --json or /glm:result --json to inspect validation signals.`);
   }
 
   if (data.next_steps.length > 0) {
