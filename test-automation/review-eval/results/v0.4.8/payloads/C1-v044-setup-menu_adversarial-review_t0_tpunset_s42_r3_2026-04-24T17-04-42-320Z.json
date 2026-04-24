@@ -1,0 +1,68 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "mode": "adversarial-review",
+    "adversarialFocus": "",
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "on",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 70600,
+    "model_duration_ms": 70025,
+    "validation_status": "completed",
+    "validation_duration_ms": 0,
+    "tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 0,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 70025
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 0,
+      "totalFindings": 0,
+      "tierCounts": {
+        "proposed": 0,
+        "cross_checked": 0,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 0,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    "rerank": null
+  },
+  "parsed": {
+    "verdict": "approve",
+    "summary": "No substantive adversarial findings can be supported. The provided context only includes the commit log, diff statistics, and a list of changed files, but lacks the actual code diff required to trace code paths, analyze logic, or validate failure modes. The change is approved by default due to the absence of reviewable implementation details.",
+    "findings": [],
+    "next_steps": []
+  },
+  "rawOutputHead": "{\"verdict\":\"approve\",\"summary\":\"No substantive adversarial findings can be supported. The provided context only includes the commit log, diff statistics, and a list of changed files, but lacks the actual code diff required to trace code paths, analyze logic, or validate failure modes. The change is approved by default due to the absence of reviewable implementation details.\",\"findings\":[],\"next_steps\":[]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-24T17:04:42.320Z"
+}

@@ -1,0 +1,70 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "mode": "review",
+    "adversarialFocus": "",
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "on",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 44583,
+    "model_duration_ms": 44042,
+    "validation_status": "completed",
+    "validation_duration_ms": 0,
+    "tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 0,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 44042
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 0,
+      "totalFindings": 0,
+      "tierCounts": {
+        "proposed": 0,
+        "cross_checked": 0,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 0,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    "rerank": null
+  },
+  "parsed": {
+    "verdict": "approve",
+    "summary": "The provided context includes the commit log and diff statistics, but it does not contain the actual code diffs or file contents. Without the specific code changes, it is impossible to identify material findings, security issues, or logical defects. The change is approved by default as there is no evidence of defects in the provided metadata, but a true review requires the diff content.",
+    "findings": [],
+    "next_steps": [
+      "Provide the full diff content for the target branch to enable a substantive review of the code changes."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"approve\",\"summary\":\"The provided context includes the commit log and diff statistics, but it does not contain the actual code diffs or file contents. Without the specific code changes, it is impossible to identify material findings, security issues, or logical defects. The change is approved by default as there is no evidence of defects in the provided metadata, but a true review requires the diff content.\",\"findings\":[],\"next_steps\":[\"Provide the full diff content for the target branch to enable a substantive review of the code changes.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-24T17:06:45.087Z"
+}

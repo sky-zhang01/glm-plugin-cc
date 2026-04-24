@@ -1,0 +1,137 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "mode": "adversarial-review",
+    "adversarialFocus": "",
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "on",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 2,
+    "citation_accuracy": 0,
+    "citation_false_file_hits": 0,
+    "latency_ms": 112899,
+    "model_duration_ms": 112207,
+    "validation_status": "completed",
+    "validation_duration_ms": 38,
+    "tier_distribution": {
+      "proposed": 1,
+      "cross_checked": 1,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 112207
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 38,
+      "totalFindings": 2,
+      "tierCounts": {
+        "proposed": 1,
+        "cross_checked": 1,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 7,
+        "fail": 1,
+        "skip": 0
+      }
+    },
+    "rerank": null
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The change introduces massive surface area (~6000 lines) including new git subprocess execution and strict LLM structural validation. Without explicit guarantees on process timeouts and graceful parse failures, this branch is highly likely to cause silent hangs and pipeline crashes in production. Needs attention to harden error boundaries before shipping.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Subprocess execution in git.mjs may lack guaranteed timeouts",
+        "body": "The diff adds 85 lines to `scripts/lib/git.mjs` to support the new `repo-checks.mjs` module. Git operations are susceptible to hangs (e.g., waiting for credentials, large repository sizes, lock files). Without explicit process-level timeouts and stdin/stderr management, a stalled git process will block the review pipeline indefinitely. This would leave the tracked job in a stale, unrecoverable state without emitting a failure signal.",
+        "file": "scripts/lib/git.mjs",
+        "line_start": 1,
+        "line_end": 85,
+        "confidence": 0.6,
+        "recommendation": "Verify that all child_process spawns in git.mjs enforce a strict timeout (e.g., via setTimeout + process.kill), set stdin to 'ignore' to prevent interactive prompts, and capture stderr to prevent silent blocks.",
+        "confidence_tier": "proposed",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "scripts/lib/git.mjs"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 1-85 within 417"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "fail",
+            "artifact": "no explicit anchor found near cited lines: scripts/lib/git.mjs, repo-checks.mjs"
+          }
+        ]
+      },
+      {
+        "severity": "medium",
+        "title": "Strict LLM structural validators risk crashing the pipeline on malformed output",
+        "body": "The new `scripts/lib/validators/review-structural.mjs` (+381 lines) enforces strict validation on LLM responses. Because LLM outputs are frequently malformed (e.g., truncated JSON, missing fields, escaping errors), any unhandled exceptions during parsing will crash the pipeline instead of gracefully failing the validation. This can result in a loss of the review payload and an uninformative error for the end user.",
+        "file": "scripts/lib/validators/review-structural.mjs",
+        "line_start": 1,
+        "line_end": 381,
+        "confidence": 0.5,
+        "recommendation": "Ensure all JSON parsing and field access in the validator is wrapped in try-catch blocks, returning a structured `rejected` confidence tier rather than throwing an unhandled exception up the call stack.",
+        "confidence_tier": "cross-checked",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "scripts/lib/validators/review-structural.mjs"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 1-381 within 381"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "pass",
+            "artifact": "matched anchor: rejected"
+          }
+        ]
+      }
+    ],
+    "next_steps": [
+      "Inspect `scripts/lib/git.mjs` for subprocess timeout and stdin/stderr handling guarantees.",
+      "Confirm `scripts/lib/validators/review-structural.mjs` catches JSON parse errors gracefully without crashing the host process.",
+      "Add integration tests simulating a stalled git process and malformed LLM JSON to verify the system degrades gracefully."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The change introduces massive surface area (~6000 lines) including new git subprocess execution and strict LLM structural validation. Without explicit guarantees on process timeouts and graceful parse failures, this branch is highly likely to cause silent hangs and pipeline crashes in production. Needs attention to harden error boundaries before shipping.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Subprocess execution in git.mjs may lack guaranteed timeouts\",\"body\":\"The diff adds 85 lines to `scripts/lib/git.mjs` to support the new `repo-checks.mjs` module. Git operations are susceptible to hangs (e.g., waiting for credentials, large repository sizes, lock files). Without explicit process-level timeouts and stdin/stderr management, a stalled git process will block the review pipeline indefinitely. This would leave the tracked job in a stale, unrecoverable state without emitting a failure signal.\",\"file\":\"scripts/lib/git.mjs\",\"line_start\":1,\"line_end\":85,\"confidence\":0.6,\"recommendation\":\"Verify that all child_process spawns in git.mjs enforce a strict timeout (e.g., via setTimeout + process.kill), set stdin to 'ignore' to prevent interactive prompts, and capture stderr to prevent silent blocks.\"},{\"severity\":\"medium\",\"title\":\"Strict LLM structural validators risk crashing the pipeline on malformed output\",\"body\":\"The new `scripts/lib/validators/review-structural.mjs` (+381 lines) enforces strict validation on LLM responses. Because LLM outputs are frequently malformed (e.g., truncated JSON, missing fields, escaping errors), any unhandled exceptions during parsing will crash the pipeline instead of gracefully failing the validation. This can result in a loss of the review payload and an uninformative error for the end user.\",\"file\":\"scripts/lib/validators/review-structural.mjs\",\"line_start\":1,\"line_end\":381,\"confidence\":0.5,\"recommendation\":\"Ensure all JSON parsing and field access in the validator is wrapped in try-catch blocks, returning a structured `rejected` confidence tier rather than throwing an unhandled exception up the call stack.\"}],\"next_steps\":[\"Inspect `scripts/lib/git.mjs` for subprocess timeout and stdin/stderr handling guarantees.\",\"Confirm `scripts/lib/validators/review-structural.mjs` catches JSON parse errors gracefully without crashing the host process.\",\"Add integration tests simulating a stalled git process and malformed LLM JSON to verify the system degrades gracefully.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-24T16:59:14.743Z"
+}

@@ -1,0 +1,136 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "mode": "adversarial-review",
+    "adversarialFocus": "",
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "on",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 2,
+    "citation_accuracy": 0.5,
+    "citation_false_file_hits": 0,
+    "latency_ms": 128754,
+    "model_duration_ms": 128044,
+    "validation_status": "completed",
+    "validation_duration_ms": 37,
+    "tier_distribution": {
+      "proposed": 2,
+      "cross_checked": 0,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 128044
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 37,
+      "totalFindings": 2,
+      "tierCounts": {
+        "proposed": 2,
+        "cross_checked": 0,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 6,
+        "fail": 0,
+        "skip": 2
+      }
+    },
+    "rerank": null
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The changeset introduces significant modifications to foundational I/O modules (scripts/lib/glm-client.mjs and scripts/lib/git.mjs) without corresponding unit test files. While the core review logic has strong test parity, the absence of tests for the API client (a critical trust boundary) and Git utilities poses a risk of silent auth failures, unhandled network timeouts, and crashes on malformed git outputs.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Missing test coverage for API client trust boundary",
+        "body": "The diff adds 160 lines to scripts/lib/glm-client.mjs, which handles model communication, authentication, and likely retry logic. No dedicated test file exists in the changeset. Trust boundaries require rigorous testing for 4xx/5xx errors, rate limiting, and malformed responses to prevent silent data corruption or stalled review pipelines.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 1,
+        "line_end": 160,
+        "confidence": 0.8,
+        "recommendation": "Add a dedicated test file (e.g., tests/glm-client.test.mjs) to mock HTTP responses and assert behavior on network errors, authentication failures, and rate limits.",
+        "confidence_tier": "proposed",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "scripts/lib/glm-client.mjs"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 1-160 within 1158"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "skip",
+            "artifact": "no stable anchor candidate in finding text"
+          }
+        ]
+      },
+      {
+        "severity": "medium",
+        "title": "Missing test coverage for Git utility edge cases",
+        "body": "The diff adds 85 lines to scripts/lib/git.mjs without a corresponding test file. Git operations are vulnerable to edge cases such as empty diffs, binary files, and detached HEADs. Unhandled exceptions here will crash the review pipeline.",
+        "file": "scripts/lib/git.mjs",
+        "line_start": 1,
+        "line_end": 85,
+        "confidence": 0.7,
+        "recommendation": "Add a dedicated test file (e.g., tests/git.test.mjs) to mock child process execution and validate parsing of empty repositories, large diffs, and malformed SHAs.",
+        "confidence_tier": "proposed",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "scripts/lib/git.mjs"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 1-85 within 417"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "skip",
+            "artifact": "no stable anchor candidate in finding text"
+          }
+        ]
+      }
+    ],
+    "next_steps": [
+      "Request addition of unit tests for scripts/lib/glm-client.mjs before merging.",
+      "Request addition of unit tests for scripts/lib/git.mjs before merging."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The changeset introduces significant modifications to foundational I/O modules (scripts/lib/glm-client.mjs and scripts/lib/git.mjs) without corresponding unit test files. While the core review logic has strong test parity, the absence of tests for the API client (a critical trust boundary) and Git utilities poses a risk of silent auth failures, unhandled network timeouts, and crashes on malformed git outputs.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Missing test coverage for API client trust boundary\",\"body\":\"The diff adds 160 lines to scripts/lib/glm-client.mjs, which handles model communication, authentication, and likely retry logic. No dedicated test file exists in the changeset. Trust boundaries require rigorous testing for 4xx/5xx errors, rate limiting, and malformed responses to prevent silent data corruption or stalled review pipelines.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":1,\"line_end\":160,\"confidence\":0.8,\"recommendation\":\"Add a dedicated test file (e.g., tests/glm-client.test.mjs) to mock HTTP responses and assert behavior on network errors, authentication failures, and rate limits.\"},{\"severity\":\"medium\",\"title\":\"Missing test coverage for Git utility edge cases\",\"body\":\"The diff adds 85 lines to scripts/lib/git.mjs without a corresponding test file. Git operations are vulnerable to edge cases such as empty diffs, binary files, and detached HEADs. Unhandled exceptions here will crash the review pipeline.\",\"file\":\"scripts/lib/git.mjs\",\"line_start\":1,\"line_end\":85,\"confidence\":0.7,\"recommendation\":\"Add a dedicated test file (e.g., tests/git.test.mjs) to mock child process execution and validate parsing of empty repositories, large diffs, and malformed SHAs.\"}],\"next_steps\":[\"Request addition of unit tests for scripts/lib/glm-client.mjs before merging.\",\"Request addition of unit tests for scripts/lib/git.mjs before merging.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-24T17:13:13.725Z"
+}

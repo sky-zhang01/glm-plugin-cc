@@ -1,0 +1,105 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "mode": "adversarial-review",
+    "adversarialFocus": "",
+    "temperature": null,
+    "topP": null,
+    "seed": null,
+    "thinking": "on",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 1,
+    "citation_accuracy": 0,
+    "citation_false_file_hits": 0,
+    "latency_ms": 109967,
+    "model_duration_ms": 109274,
+    "validation_status": "completed",
+    "validation_duration_ms": 27,
+    "tier_distribution": {
+      "proposed": 1,
+      "cross_checked": 0,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 109274
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 27,
+      "totalFindings": 1,
+      "tierCounts": {
+        "proposed": 1,
+        "cross_checked": 0,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 3,
+        "fail": 1,
+        "skip": 0
+      }
+    },
+    "rerank": null
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The diff introduces a breaking change to the `/glm:review` command contract by explicitly rejecting focus text. While this aligns with architectural goals, the lack of a visible deprecation path poses a compatibility risk to existing workflows. Without the actual code diff, deeper adversarial analysis is constrained, but the breaking contract change warrants attention before shipping.",
+    "findings": [
+      {
+        "severity": "medium",
+        "title": "Breaking change in review command contract",
+        "body": "Commit `e91c0e4` introduces a breaking change by rejecting focus text on `/glm:review` to align with a command contract. This hard break in backwards compatibility may cause existing automated workflows or user habits that rely on passing focus text to fail unexpectedly or silently drop context. There is no evidence in the provided context of a deprecation phase or graceful fallback.",
+        "file": "commands/review.md",
+        "line_start": 1,
+        "line_end": 11,
+        "confidence": 0.85,
+        "recommendation": "Verify that no active users or downstream automation relies on the focus text parameter. Consider implementing a deprecation phase where focus text is ignored but emits a clear warning, rather than hard rejecting it, or ensure that the new contract is unambiguously communicated as a breaking change in release notes.",
+        "confidence_tier": "proposed",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "commands/review.md"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 1-11 within 156"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "fail",
+            "artifact": "no explicit anchor found near cited lines: e91c0e4, /glm:review"
+          }
+        ]
+      }
+    ],
+    "next_steps": [
+      "Inspect the implementation in `commands/review.md` and the corresponding handler to confirm how focus text rejection is implemented (e.g., hard error vs. silent ignore).",
+      "Review `scripts/lib/repo-checks.mjs` with tool access to verify trust boundaries, as it represents a significant new module interacting with repository data but cannot be fully validated from context alone.",
+      "Ensure the CHANGELOG.md explicitly highlights the breaking change regarding focus text rejection."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The diff introduces a breaking change to the `/glm:review` command contract by explicitly rejecting focus text. While this aligns with architectural goals, the lack of a visible deprecation path poses a compatibility risk to existing workflows. Without the actual code diff, deeper adversarial analysis is constrained, but the breaking contract change warrants attention before shipping.\",\"findings\":[{\"severity\":\"medium\",\"title\":\"Breaking change in review command contract\",\"body\":\"Commit `e91c0e4` introduces a breaking change by rejecting focus text on `/glm:review` to align with a command contract. This hard break in backwards compatibility may cause existing automated workflows or user habits that rely on passing focus text to fail unexpectedly or silently drop context. There is no evidence in the provided context of a deprecation phase or graceful fallback.\",\"file\":\"commands/review.md\",\"line_start\":1,\"line_end\":11,\"confidence\":0.85,\"recommendation\":\"Verify that no active users or downstream automation relies on the focus text parameter. Consider implementing a deprecation phase where focus text is ignored but emits a clear warning, rather than hard rejecting it, or ensure that the new contract is unambiguously communicated as a breaking change in release notes.\",\"confidence_tier\":\"proposed\",\"validation_signals\":[{\"kind\":\"file_in_target\",\"result\":\"pass\",\"artifact\":\"commands/review.md\"},{\"kind\":\"anchor_literal_found\",\"result\":\"pass\",\"artifact\":\"reject focus text\"}]}],\"next_steps\":[\"Inspect the implementation in `commands/review.md` and the corresponding handler to confirm how focus text rejection is implemented (e.g., hard error vs. silent ignore).\",\"Review `scripts/lib/repo-checks.mjs` with tool access to verify trust boundaries, as it represents a significant new module interacting with repository data but cannot be fully validated from context alone.\",\"Ensure the CHANGELOG.md explicitly highlights the breaking change regarding focus text rejection.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-24T16:51:49.587Z"
+}

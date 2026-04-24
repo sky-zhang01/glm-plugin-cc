@@ -1,0 +1,137 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "mode": "adversarial-review",
+    "adversarialFocus": "",
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 2,
+    "citation_accuracy": 0,
+    "citation_false_file_hits": 0,
+    "latency_ms": 137312,
+    "model_duration_ms": 136654,
+    "validation_status": "completed",
+    "validation_duration_ms": 37,
+    "tier_distribution": {
+      "proposed": 2,
+      "cross_checked": 0,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 136654
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 37,
+      "totalFindings": 2,
+      "tierCounts": {
+        "proposed": 2,
+        "cross_checked": 0,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 6,
+        "fail": 2,
+        "skip": 0
+      }
+    },
+    "rerank": null
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The branch introduces substantial new logic for LLM structural validation and repository checks. The high complexity and strict nature of these additions pose a significant risk of false-negative pipeline blocks due to model output drift and unbounded git operations. The system is likely fragile under real-world variability and lacks sufficient safeguards against hanging or resource exhaustion.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Fragile structural validators will likely block valid reviews on model output drift",
+        "body": "The addition of 381 lines of structural validation in `review-structural.mjs` suggests tight coupling to the exact format of LLM outputs. LLM outputs are inherently variable; even minor formatting drift (whitespace, markdown edge cases, unicode differences) can cause strict validators to fail. This risks silently dropping valid review feedback or blocking the review pipeline. Given the complexity, it is highly susceptible to breakage upon any model update or prompt tweak, acting as a brittle CI gate.",
+        "file": "scripts/lib/validators/review-structural.mjs",
+        "line_start": 1,
+        "line_end": 381,
+        "confidence": 0.8,
+        "recommendation": "Implement fuzzy matching or graceful degradation for non-critical structural elements. Add comprehensive logging for validation failures to distinguish between genuine errors and formatting drift. Consider a fallback parsing mode.",
+        "confidence_tier": "proposed",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "scripts/lib/validators/review-structural.mjs"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 1-381 within 381"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "fail",
+            "artifact": "no explicit anchor found near cited lines: review-structural.mjs"
+          }
+        ]
+      },
+      {
+        "severity": "medium",
+        "title": "Repo checks risk CI hangs or memory exhaustion on large repositories",
+        "body": "The introduction of `repo-checks.mjs` (282 lines) implies executing git commands to verify repository state. Git operations on large repositories, monorepos, or dirty states can take unpredictable amounts of time or produce massive outputs. Without explicit timeouts and output size limits, these checks can silently hang CI runners or cause out-of-memory crashes, impacting developer productivity.",
+        "file": "scripts/lib/repo-checks.mjs",
+        "line_start": 1,
+        "line_end": 282,
+        "confidence": 0.75,
+        "recommendation": "Ensure all spawned git processes in `repo-checks.mjs` have strict timeouts and bounded stdout/stderr buffers. Add negative tests for empty repositories, detached HEADs, and large binary diffs.",
+        "confidence_tier": "proposed",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "scripts/lib/repo-checks.mjs"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 1-282 within 282"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "fail",
+            "artifact": "no explicit anchor found near cited lines: repo-checks.mjs"
+          }
+        ]
+      }
+    ],
+    "next_steps": [
+      "Audit `review-structural.mjs` for hardcoded string matching and rigid assertions that would fail on valid but slightly varied LLM outputs.",
+      "Verify that `repo-checks.mjs` uses timeouts for all child processes and limits memory usage.",
+      "Check if validation failures provide actionable errors to the user rather than silent drops."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The branch introduces substantial new logic for LLM structural validation and repository checks. The high complexity and strict nature of these additions pose a significant risk of false-negative pipeline blocks due to model output drift and unbounded git operations. The system is likely fragile under real-world variability and lacks sufficient safeguards against hanging or resource exhaustion.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Fragile structural validators will likely block valid reviews on model output drift\",\"body\":\"The addition of 381 lines of structural validation in `review-structural.mjs` suggests tight coupling to the exact format of LLM outputs. LLM outputs are inherently variable; even minor formatting drift (whitespace, markdown edge cases, unicode differences) can cause strict validators to fail. This risks silently dropping valid review feedback or blocking the review pipeline. Given the complexity, it is highly susceptible to breakage upon any model update or prompt tweak, acting as a brittle CI gate.\",\"file\":\"scripts/lib/validators/review-structural.mjs\",\"line_start\":1,\"line_end\":381,\"confidence\":0.8,\"recommendation\":\"Implement fuzzy matching or graceful degradation for non-critical structural elements. Add comprehensive logging for validation failures to distinguish between genuine errors and formatting drift. Consider a fallback parsing mode.\",\"confidence_tier\":\"proposed\",\"validation_signals\":[{\"kind\":\"file_in_target\",\"result\":\"pass\",\"artifact\":\"scripts/lib/validators/review-structural.mjs\"}]},{\"severity\":\"medium\",\"title\":\"Repo checks risk CI hangs or memory exhaustion on large repositories\",\"body\":\"The introduction of `repo-checks.mjs` (282 lines) implies executing git commands to verify repository state. Git operations on large repositories, monorepos, or dirty states can take unpredictable amounts of time or produce massive outputs. Without explicit timeouts and output size limits, these checks can silently hang CI runners or cause out-of-memory crashes, impacting developer productivity.\",\"file\":\"scripts/lib/repo-checks.mjs\",\"line_start\":1,\"line_end\":282,\"confidence\":0.75,\"recommendation\":\"Ensure all spawned git processes in `repo-checks.mjs` have strict timeouts and bounded stdout/stderr buffers. Add negative tests for empty repositories, detached HEADs, and large binary diffs.\",\"confidence_tier\":\"proposed\",\"validation_signals\":[{\"kind\":\"file_in_target\",\"result\":\"pass\",\"artifact\":\"scripts/lib/repo-checks.mjs\"}]}],\"next_steps\":[\"Audit `review-structural.mjs` for hardcoded string matching and rigid assertions that would fail on valid but slightly varied LLM outputs.\",\"Verify that `repo-checks.mjs` uses timeouts for all child processes and limits memory usage.\",\"Check if validation failures provide actionable errors to the user rather than silent drops.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-24T16:57:21.843Z"
+}

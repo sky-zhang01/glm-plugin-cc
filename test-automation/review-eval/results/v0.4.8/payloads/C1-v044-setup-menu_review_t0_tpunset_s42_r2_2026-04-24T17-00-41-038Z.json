@@ -1,0 +1,70 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "mode": "review",
+    "adversarialFocus": "",
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 47230,
+    "model_duration_ms": 46597,
+    "validation_status": "completed",
+    "validation_duration_ms": 0,
+    "tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 0,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 46597
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 0,
+      "totalFindings": 0,
+      "tierCounts": {
+        "proposed": 0,
+        "cross_checked": 0,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 0,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    "rerank": null
+  },
+  "parsed": {
+    "verdict": "approve",
+    "summary": "The provided context only contains the commit log and a list of changed files, without the actual file diffs or source code. Consequently, no material findings regarding code correctness, security, or performance can be reported. Based on the available metadata, the commit history and file additions align logically with the stated architectural updates for review validation and repository checks.",
+    "findings": [],
+    "next_steps": [
+      "Provide the full textual diff in the prompt if a detailed code-level review is desired."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"approve\",\"summary\":\"The provided context only contains the commit log and a list of changed files, without the actual file diffs or source code. Consequently, no material findings regarding code correctness, security, or performance can be reported. Based on the available metadata, the commit history and file additions align logically with the stated architectural updates for review validation and repository checks.\",\"findings\":[],\"next_steps\":[\"Provide the full textual diff in the prompt if a detailed code-level review is desired.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-24T17:00:41.039Z"
+}
