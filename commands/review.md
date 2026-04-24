@@ -1,6 +1,6 @@
 ---
 description: Run a GLM code review against local git state
-argument-hint: '[--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--temperature <0-2>] [--top-p <0-1>] [--seed <int>]'
+argument-hint: '[--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--temperature <0-2>] [--top-p <0-1>] [--seed <int>] [--reflect] [--reflect-model <model>]'
 disable-model-invocation: true
 allowed-tools: Read, Glob, Grep, Bash(node:*), Bash(git:*), AskUserQuestion
 ---
@@ -19,6 +19,10 @@ Raw slash-command arguments:
   that are at least `medium` severity and at least `cross-checked` by the
   structural validator, capped at 5 visible findings. The stored JSON still
   retains the full result for `/glm:result --json`.
+- `--reflect` is opt-in. It runs one additional GLM pass that can drop or
+  sharpen first-pass findings, then the local validators run again. If that
+  second pass fails, the stored result falls back to the first-pass output and
+  records the failed rerank telemetry.
 
 ## Execution mode rules
 
@@ -111,6 +115,11 @@ Bash({
   explicit `--temperature` makes runs approximately reproducible and
   is useful for A/B probing.
 - `--wait` / `--background` — execution mode bypass. See "Execution mode rules" above.
+- `--reflect` — opt into one additional reflection/rerank pass. This is not
+  part of the default review path and will roughly double remote review cost
+  for that invocation.
+- `--reflect-model <model>` — run the reflection/rerank pass with an explicit
+  model. Passing this flag also enables reflection. Text models only.
 - Trailing positional tokens after flags are **rejected** for `/glm:review` (see "Core constraint" above). For custom framing, use `/glm:adversarial-review`, which does accept trailing focus text.
 - This mode should feel like a normal code review: concise, ship/no-ship
   oriented, and comfortable returning no visible findings when all findings are
