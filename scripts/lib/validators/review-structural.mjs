@@ -3,39 +3,14 @@ import fs from "node:fs";
 import path from "node:path";
 
 const DEFAULT_KNOWN_FALSE_REFERENCES = [
+  // Narrow sentinels from the v0.4.7 workflow-governor hallucination
+  // incident. This is not a generic hallucination detector; repo-specific
+  // wrong-project references should be supplied through validation options.
   "reference_runtime",
   "reference_runtime.py",
   "governance.py",
   "workflow_governor"
 ];
-
-const COMMON_ANCHOR_WORDS = new Set([
-  "about",
-  "after",
-  "against",
-  "because",
-  "before",
-  "between",
-  "change",
-  "changes",
-  "could",
-  "error",
-  "file",
-  "finding",
-  "function",
-  "instead",
-  "issue",
-  "line",
-  "lines",
-  "missing",
-  "should",
-  "there",
-  "these",
-  "this",
-  "through",
-  "value",
-  "would"
-]);
 
 function normalizeRepoPath(value) {
   if (typeof value !== "string" || value.length === 0 || value.trim().length === 0) {
@@ -151,12 +126,6 @@ function extractAnchorCandidates(finding) {
   const candidates = [];
   for (const match of text.matchAll(/`([^`\n]{3,80})`/g)) {
     candidates.push({ value: match[1].trim(), explicit: true });
-  }
-  for (const match of text.matchAll(/\b[A-Za-z_][A-Za-z0-9_./:-]{4,80}\b/g)) {
-    const token = match[0].trim();
-    if (!COMMON_ANCHOR_WORDS.has(token.toLowerCase())) {
-      candidates.push({ value: token, explicit: false });
-    }
   }
   const seen = new Set();
   const unique = [];

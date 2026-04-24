@@ -7,9 +7,12 @@
 **Review-eval harness** (`test-automation/review-eval/scripts/run-experiment.mjs`):
 adds `--mode review|adversarial-review` so the same fixture/cell sweep can
 exercise balanced review and adversarial review. Balanced mode intentionally
-sends no trailing focus text; adversarial mode keeps a bounded focus string to
-exercise its command contract without changing the target diff. CSV rows now
-record `mode`, post-validation `confidence_tier` distribution, rejected count,
+sends no trailing focus text, and adversarial mode now defaults to the same
+no-focus measurement input so mode comparisons are not contaminated by prompt
+asymmetry. The harness can still intentionally exercise the adversarial
+focus-text contract with `--adversarial-focus "<focus text>"`, recorded in the
+CSV's `adversarial_focus` column. CSV rows now record `mode`,
+post-validation `confidence_tier` distribution, rejected count,
 `passes.model.durationMs`, and `passes.validation` status/timing.
 
 **Summary and dogfood artifacts** (`test-automation/review-eval/scripts/summarize.mjs`):
@@ -305,8 +308,10 @@ failure mode at any temperature under the current model snapshot.
     issue #7 success criteria.
   - Each fixture ships `meta.json` (provenance: base/head refs,
     line/byte counts, touched-file list) and `ground-truth.json`
-    (`allowed_files` + `known_false_files` universal hallucination
-    signal list + `expected_bugs` curated for that diff scope).
+    (`allowed_files` + `known_false_files` wrong-project sentinel list
+    + `expected_bugs` curated for that diff scope). `known_false_files`
+    is deliberately narrow evidence from the workflow-governor incident,
+    not a generic hallucination detector.
 - **v0.4.7 sweep data artifacts**:
   - `results/v0.4.7/sanity-sweep.csv` — original 9-run v1-strictness
     data (preserved for reference; old `schema_compliance` used a

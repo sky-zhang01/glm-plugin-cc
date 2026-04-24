@@ -8,6 +8,10 @@
  *   node run-experiment.mjs --fixture C2-v046-aftercare --temperature 0.2 \
  *        --top-p 0.85 --seed 42 --runs 3 --out ../results/v0.4.8/m3-measurement.csv
  *
+ *   # Optional: exercise adversarial focus-text behavior intentionally.
+ *   node run-experiment.mjs --mode adversarial-review \
+ *        --adversarial-focus "stress risky-path tests" --runs 3
+ *
  * Philosophy (per Gitea issue #7):
  *   - Small, targeted experiments. 9 calls not 900.
  *   - Every row is self-describing: the CSV includes the parameter
@@ -48,6 +52,7 @@ const CSV_HEADER = [
   "timestamp_utc",
   "fixture_id",
   "mode",
+  "adversarial_focus",
   "temperature",
   "top_p",
   "seed",
@@ -229,7 +234,19 @@ function buildPayloadSidecarPath(outPath, fixtureId, mode, temperature, topP, se
   return path.join(dir, `${cellTag}.json`);
 }
 
-function runOne({ fixtureId, mode, base, temperature, topP, seed, thinking, runIndex, groundTruth, outPath }) {
+function runOne({
+  fixtureId,
+  mode,
+  base,
+  temperature,
+  topP,
+  seed,
+  thinking,
+  runIndex,
+  groundTruth,
+  outPath,
+  adversarialFocus
+}) {
   const companionArgs = [
     COMPANION,
     mode,
@@ -242,8 +259,8 @@ function runOne({ fixtureId, mode, base, temperature, topP, seed, thinking, runI
   if (temperature !== undefined) companionArgs.push("--temperature", String(temperature));
   if (topP !== undefined) companionArgs.push("--top-p", String(topP));
   if (seed !== undefined) companionArgs.push("--seed", String(seed));
-  if (mode === "adversarial-review") {
-    companionArgs.push(`v0.4.8 measurement sweep run ${runIndex} (${fixtureId})`);
+  if (mode === "adversarial-review" && adversarialFocus) {
+    companionArgs.push(adversarialFocus);
   }
 
   const started = Date.now();
@@ -346,6 +363,7 @@ function runOne({ fixtureId, mode, base, temperature, topP, seed, thinking, runI
     cell: {
       fixtureId,
       mode,
+      adversarialFocus: mode === "adversarial-review" ? adversarialFocus : "",
       temperature: temperature ?? null,
       topP: topP ?? null,
       seed: seed ?? null,
@@ -414,20 +432,34 @@ async function main() {
   const thinking = args.thinking || "on";
   const runs = Number(args.runs || 3);
   const outPath = path.resolve(args.out || path.join(__dirname, "../results/v0.4.8/m3-measurement.csv"));
+  const adversarialFocus = typeof args["adversarial-focus"] === "string" ? args["adversarial-focus"].trim() : "";
 
   const groundTruth = loadGroundTruth(fixtureId);
   ensureCsv(outPath);
 
-  console.log(`[run-experiment] fixture=${fixtureId}, mode=${mode}, base=${base}, temp=${temperature ?? "unset"}, top_p=${topP ?? "unset"}, seed=${seed ?? "unset"}, thinking=${thinking}, runs=${runs}`);
+  console.log(`[run-experiment] fixture=${fixtureId}, mode=${mode}, base=${base}, temp=${temperature ?? "unset"}, top_p=${topP ?? "unset"}, seed=${seed ?? "unset"}, thinking=${thinking}, runs=${runs}, adversarial_focus=${adversarialFocus ? "set" : "unset"}`);
   console.log(`[run-experiment] output: ${outPath}`);
 
   for (let i = 1; i <= runs; i++) {
     process.stdout.write(`  run ${i}/${runs} ... `);
-    const metrics = runOne({ fixtureId, mode, base, temperature, topP, seed, thinking, runIndex: i, groundTruth, outPath });
+    const metrics = runOne({
+      fixtureId,
+      mode,
+      base,
+      temperature,
+      topP,
+      seed,
+      thinking,
+      runIndex: i,
+      groundTruth,
+      outPath,
+      adversarialFocus
+    });
     const row = [
       new Date().toISOString(),
       fixtureId,
       mode,
+      mode === "adversarial-review" ? adversarialFocus : "",
       temperature ?? "",
       topP ?? "",
       seed ?? "",

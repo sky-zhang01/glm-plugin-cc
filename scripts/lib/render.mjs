@@ -70,7 +70,7 @@ function formatLineRange(finding) {
   if (!finding.line_start) {
     return "";
   }
-  if (!finding.line_end || finding.line_end === finding.line_start) {
+  if (!finding.line_end || finding.line_end <= finding.line_start) {
     return `:${finding.line_start}`;
   }
   return `:${finding.line_start}-${finding.line_end}`;

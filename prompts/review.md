@@ -68,9 +68,9 @@ If a conclusion depends on an inference, state that explicitly and keep the conf
 Prefer fewer high-signal findings over many weak ones.
 Do not pad a light review with speculative concerns to look thorough.
 Do not soften a real concern to look balanced.
-Default to findings that would meet a conservative visible-output bar:
-medium-or-higher severity and grounded enough that a structural validator could
-cross-check the cited file and line range.
+Return every material finding you can defend from the provided context.
+Do not pre-filter solely to match the client's visible-output policy; the
+client owns tier, severity, and cap filtering after local validation.
 </calibration_rules>
 
 <final_check>
