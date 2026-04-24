@@ -115,6 +115,31 @@ describe("review structural validators — finding tiers", () => {
     assert.equal(validated.validation_signals.find((s) => s.kind === "anchor_literal_found").result, "fail");
   });
 
+  it("keeps partial identifier anchor matches proposed instead of cross-checked", () => {
+    const repoRoot = makeRepo();
+    fs.writeFileSync(
+      path.join(repoRoot, "src/app.js"),
+      [
+        "export function initializeUser(id) {",
+        "  return initializeUserSession(id);",
+        "}",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+    const validated = validateReviewFinding(
+      baseFinding({
+        body: "The `init` call can run with invalid id.",
+        line_start: 2,
+        line_end: 2,
+        recommendation: "Guard before `init`."
+      }),
+      context(repoRoot)
+    );
+    assert.equal(validated.confidence_tier, "proposed");
+    assert.equal(validated.validation_signals.find((s) => s.kind === "anchor_literal_found").result, "fail");
+  });
+
   it("keeps skipped anchor checks as proposed instead of cross-checked", () => {
     const repoRoot = makeRepo();
     const validated = validateReviewFinding(

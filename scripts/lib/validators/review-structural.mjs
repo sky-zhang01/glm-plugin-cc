@@ -293,7 +293,7 @@ export function validateReviewFinding(finding, context) {
       signals.push(makeSignal("anchor_literal_found", "skip", "no stable anchor candidate in finding text"));
     } else {
       lineWindow = getLineWindow(fileText.text, finding.line_start, finding.line_end);
-      const matched = explicitCandidates.find((candidate) => lineWindow.includes(candidate.value));
+      const matched = explicitCandidates.find((candidate) => containsReferenceToken(lineWindow, candidate.value));
       anchorSoftFail = !matched;
       anchorResult = matched ? "pass" : "fail";
       matchedAnchor = matched?.value ?? null;
