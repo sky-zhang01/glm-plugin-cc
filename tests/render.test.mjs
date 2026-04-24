@@ -191,3 +191,98 @@ test("renderReviewResult OMITS confidence when value is null", () => {
   assert.doesNotMatch(rendered, /conf /);
   assert.match(rendered, /\[medium\] Test finding/);
 });
+
+function makeValidatedResult(findings) {
+  return {
+    validationApplied: true,
+    parsed: {
+      verdict: "needs-attention",
+      summary: "Policy test.",
+      findings,
+      next_steps: []
+    }
+  };
+}
+
+function policyFinding(overrides) {
+  return {
+    severity: "medium",
+    title: "Policy finding",
+    body: "body text",
+    file: "policy.ts",
+    line_start: 1,
+    line_end: 1,
+    confidence: 0.8,
+    confidence_tier: "cross-checked",
+    validation_signals: [{ kind: "file_in_target", result: "pass" }],
+    recommendation: "",
+    ...overrides
+  };
+}
+
+test("renderReviewResult applies balanced review default policy", () => {
+  const rendered = renderReviewResult(
+    makeValidatedResult([
+      policyFinding({ title: "Visible medium cross-checked" }),
+      policyFinding({ title: "Hidden proposed high", severity: "high", confidence_tier: "proposed" }),
+      policyFinding({ title: "Hidden low cross-checked", severity: "low" })
+    ]),
+    { reviewLabel: "Review", reviewMode: "review", targetLabel: "branch diff" }
+  );
+
+  assert.match(rendered, /Visible medium cross-checked/);
+  assert.doesNotMatch(rendered, /Hidden proposed high/);
+  assert.doesNotMatch(rendered, /Hidden low cross-checked/);
+  assert.match(rendered, /Findings hidden by Review default policy: 2 below tier\/severity policy/);
+});
+
+test("renderReviewResult applies adversarial review broader default policy", () => {
+  const rendered = renderReviewResult(
+    makeValidatedResult([
+      policyFinding({ title: "Visible proposed low", severity: "low", confidence_tier: "proposed" }),
+      policyFinding({ title: "Visible cross-checked critical", severity: "critical" })
+    ]),
+    { reviewLabel: "Adversarial Review", reviewMode: "adversarial-review", targetLabel: "branch diff" }
+  );
+
+  assert.match(rendered, /Visible proposed low/);
+  assert.match(rendered, /Visible cross-checked critical/);
+  assert.doesNotMatch(rendered, /Findings hidden by Adversarial Review default policy/);
+});
+
+test("renderReviewResult caps balanced review visible findings at 5", () => {
+  const findings = Array.from({ length: 7 }, (_, index) =>
+    policyFinding({ title: `Visible candidate ${index + 1}`, severity: "medium" })
+  );
+  const rendered = renderReviewResult(
+    makeValidatedResult(findings),
+    { reviewLabel: "Review", reviewMode: "review", targetLabel: "branch diff" }
+  );
+
+  assert.match(rendered, /Visible candidate 1/);
+  assert.match(rendered, /Visible candidate 5/);
+  assert.doesNotMatch(rendered, /Visible candidate 6/);
+  assert.match(rendered, /2 beyond cap 5/);
+});
+
+test("renderReviewResult keeps legacy behavior when reviewMode is absent", () => {
+  const rendered = renderReviewResult(
+    makeValidatedResult([
+      policyFinding({ title: "Legacy proposed low", severity: "low", confidence_tier: "proposed" })
+    ]),
+    { reviewLabel: "Review", targetLabel: "stored legacy result" }
+  );
+
+  assert.match(rendered, /Legacy proposed low/);
+  assert.doesNotMatch(rendered, /Findings hidden by Review default policy/);
+});
+
+test("renderReviewResult uses challenge-framed empty message for adversarial mode", () => {
+  const rendered = renderReviewResult(
+    makeValidatedResult([]),
+    { reviewLabel: "Adversarial Review", reviewMode: "adversarial-review", targetLabel: "branch diff" }
+  );
+
+  assert.match(rendered, /No adversarial findings met the default challenge threshold/);
+  assert.doesNotMatch(rendered, /No material findings\\./);
+});

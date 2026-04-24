@@ -11,6 +11,61 @@ function severityRank(severity) {
   }
 }
 
+const TIER_RANK = new Map([
+  ["proposed", 0],
+  ["cross-checked", 1],
+  ["deterministically-validated", 2]
+]);
+
+const REVIEW_RENDER_POLICIES = {
+  review: {
+    minTier: "cross-checked",
+    minSeverity: "medium",
+    cap: 5,
+    emptyMessage: "No material findings meet the balanced review default policy."
+  },
+  "adversarial-review": {
+    minTier: "proposed",
+    minSeverity: "low",
+    cap: 15,
+    emptyMessage: "No adversarial findings met the default challenge threshold."
+  }
+};
+
+function tierRank(tier) {
+  return TIER_RANK.has(tier) ? TIER_RANK.get(tier) : null;
+}
+
+function findingMeetsRenderPolicy(finding, policy) {
+  if (!policy) {
+    return true;
+  }
+  const minTierRank = tierRank(policy.minTier);
+  const findingTierRank = tierRank(finding.confidence_tier);
+  if (minTierRank !== null && (findingTierRank === null || findingTierRank < minTierRank)) {
+    return false;
+  }
+  if (severityRank(finding.severity) > severityRank(policy.minSeverity)) {
+    return false;
+  }
+  return true;
+}
+
+function applyReviewRenderPolicy(findings, policy) {
+  const eligible = [];
+  let policyHiddenCount = 0;
+  for (const finding of findings) {
+    if (findingMeetsRenderPolicy(finding, policy)) {
+      eligible.push(finding);
+    } else {
+      policyHiddenCount += 1;
+    }
+  }
+  const visible = policy ? eligible.slice(0, policy.cap) : eligible;
+  const capHiddenCount = policy ? Math.max(eligible.length - visible.length, 0) : 0;
+  return { visible, policyHiddenCount, capHiddenCount };
+}
+
 function formatLineRange(finding) {
   if (!finding.line_start) {
     return "";
@@ -382,9 +437,15 @@ export function renderReviewResult(parsedResult, meta) {
     preserveEvidenceFields: parsedResult.validationApplied === true
   });
   const rejectedCount = data.findings.filter((finding) => finding.confidence_tier === "rejected").length;
-  const findings = data.findings
+  const sortedFindings = data.findings
     .filter((finding) => finding.confidence_tier !== "rejected")
     .sort((left, right) => severityRank(left.severity) - severityRank(right.severity));
+  const renderPolicy = REVIEW_RENDER_POLICIES[meta.reviewMode] ?? null;
+  const {
+    visible: findings,
+    policyHiddenCount,
+    capHiddenCount
+  } = applyReviewRenderPolicy(sortedFindings, renderPolicy);
   const lines = [
     `# GLM ${meta.reviewLabel}`,
     "",
@@ -396,7 +457,11 @@ export function renderReviewResult(parsedResult, meta) {
   ];
 
   if (findings.length === 0) {
-    lines.push(rejectedCount > 0 ? "No material findings visible in default output." : "No material findings.");
+    if (renderPolicy) {
+      lines.push(renderPolicy.emptyMessage);
+    } else {
+      lines.push(rejectedCount > 0 ? "No material findings visible in default output." : "No material findings.");
+    }
   } else {
     lines.push("Findings:");
     for (const finding of findings) {
@@ -417,6 +482,19 @@ export function renderReviewResult(parsedResult, meta) {
         lines.push(`  Recommendation: ${finding.recommendation}`);
       }
     }
+  }
+  if (renderPolicy && (policyHiddenCount > 0 || capHiddenCount > 0)) {
+    const hiddenParts = [];
+    if (policyHiddenCount > 0) {
+      hiddenParts.push(`${policyHiddenCount} below tier/severity policy`);
+    }
+    if (capHiddenCount > 0) {
+      hiddenParts.push(`${capHiddenCount} beyond cap ${renderPolicy.cap}`);
+    }
+    lines.push(
+      "",
+      `Findings hidden by ${meta.reviewLabel} default policy: ${hiddenParts.join(", ")}. Use --json or /glm:result --json to inspect the full stored result.`
+    );
   }
   if (rejectedCount > 0) {
     lines.push("", `Rejected findings hidden from default output: ${rejectedCount}. Use --json or /glm:result --json to inspect validation signals.`);

@@ -2,6 +2,23 @@
 
 ## v0.4.8 (unreleased)
 
+### M2 — Real mode split for balanced vs adversarial review
+
+**Renderer defaults** (`scripts/lib/render.mjs`): `/glm:review` and
+`/glm:adversarial-review` now use distinct default human-output policies while
+preserving one shared stored result object. Balanced review shows findings at
+`cross-checked` or stronger confidence tier, `medium` or higher severity, and
+caps visible findings at 5. Adversarial review shows `proposed` or stronger,
+`low` or higher, and caps visible findings at 15. Findings hidden by tier,
+severity, or cap remain available in stored JSON via `/glm:result --json`.
+
+**Prompt and command contract** (`prompts/*.md`, `commands/*.md`): balanced
+review is now explicitly calibrated as a concise ship/no-ship review, while
+adversarial review declares bounded challenge surfaces for stress behavior,
+state/data integrity, trust boundaries touched by the diff, compatibility,
+operability, and risky-path test strategy. The adversarial mode remains a code
+review lens, not a general pentest or security-scanner surface.
+
 ### M1 — Structural validators and confidence-tier wiring
 
 **Structural validation** (`scripts/lib/validators/review-structural.mjs`):
