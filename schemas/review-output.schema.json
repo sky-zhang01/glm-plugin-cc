@@ -72,6 +72,52 @@
           },
           "recommendation": {
             "type": "string"
+          },
+          "confidence_tier": {
+            "type": "string",
+            "enum": [
+              "proposed",
+              "cross-checked",
+              "deterministically-validated",
+              "rejected"
+            ]
+          },
+          "validation_signals": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "result"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "initial_confidence_score",
+                    "file_in_target",
+                    "line_range_in_file",
+                    "anchor_literal_found",
+                    "known_false_reference_absent",
+                    "repo_check",
+                    "test_result",
+                    "command_result"
+                  ]
+                },
+                "result": {
+                  "type": "string",
+                  "enum": [
+                    "pass",
+                    "fail",
+                    "skip"
+                  ]
+                },
+                "artifact": {
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       }

@@ -1,6 +1,6 @@
 ---
 description: Run a GLM code review against local git state
-argument-hint: '[--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--temperature <0-2>] [--top-p <0-1>] [--seed <int>] [focus text]'
+argument-hint: '[--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--temperature <0-2>] [--top-p <0-1>] [--seed <int>]'
 disable-model-invocation: true
 allowed-tools: Read, Glob, Grep, Bash(node:*), Bash(git:*), AskUserQuestion
 ---
@@ -107,7 +107,7 @@ Bash({
   explicit `--temperature` makes runs approximately reproducible and
   is useful for A/B probing.
 - `--wait` / `--background` — execution mode bypass. See "Execution mode rules" above.
-- Trailing tokens after flags are treated as free-form focus text.
+- Trailing positional tokens after flags are **rejected** for `/glm:review` (see "Core constraint" above). For custom framing, use `/glm:adversarial-review`, which does accept trailing focus text.
 
 ## Diff size guidance
 

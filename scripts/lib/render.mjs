@@ -40,6 +40,14 @@ function validateReviewResultShape(data) {
   return null;
 }
 
+// Valid confidence_tier values per M0 schema extension.
+const CONFIDENCE_TIER_VALUES = new Set([
+  "proposed",
+  "cross-checked",
+  "deterministically-validated",
+  "rejected"
+]);
+
 function normalizeReviewFinding(finding, index) {
   const source = finding && typeof finding === "object" && !Array.isArray(finding) ? finding : {};
   const lineStart = Number.isInteger(source.line_start) && source.line_start > 0 ? source.line_start : null;
@@ -55,7 +63,20 @@ function normalizeReviewFinding(finding, index) {
       ? source.confidence
       : null;
 
-  return {
+  // M0: confidence_tier is a PIPELINE-ASSIGNED evidence state per
+  // architecture doc §6.2. At M0 there is no structural validator pass
+  // (M1 delivers it), so any tier the model self-reports is untrusted.
+  // Clamp to `proposed` whenever the model returned a valid enum value;
+  // drop entirely if the claim is missing or malformed. This prevents a
+  // hallucinated `deterministically-validated` from rendering as if a
+  // real validator had confirmed it. M1 will replace this clamp with a
+  // post-normalization validator pass that sets tier from actual checks.
+  const confidenceTier =
+    typeof source.confidence_tier === "string" && CONFIDENCE_TIER_VALUES.has(source.confidence_tier)
+      ? "proposed"
+      : undefined;
+
+  const normalized = {
     severity: typeof source.severity === "string" && source.severity.trim() ? source.severity.trim() : "low",
     title: typeof source.title === "string" && source.title.trim() ? source.title.trim() : `Finding ${index + 1}`,
     body: typeof source.body === "string" && source.body.trim() ? source.body.trim() : "No details provided.",
@@ -65,6 +86,48 @@ function normalizeReviewFinding(finding, index) {
     confidence,
     recommendation: typeof source.recommendation === "string" ? source.recommendation.trim() : ""
   };
+
+  if (confidenceTier !== undefined) {
+    normalized.confidence_tier = confidenceTier;
+  }
+
+  return normalized;
+}
+
+// Exported alias used by M0 tests to test normalization with new fields.
+// This is the same function — the alias exists so tests can import it
+// by name without coupling to the internal unexported name.
+export { normalizeReviewFinding as normalizeReviewFindingM0 };
+
+// Valid finding field names (all optional fields included) for additionalProperties guard.
+const VALID_FINDING_FIELDS = new Set([
+  "severity",
+  "title",
+  "body",
+  "file",
+  "line_start",
+  "line_end",
+  "confidence",
+  "recommendation",
+  "confidence_tier",
+  "validation_signals"
+]);
+
+/**
+ * Validate a single finding object against the known field set.
+ * Returns null when valid, or an error string naming the unknown field.
+ * This mirrors the `additionalProperties: false` constraint from the schema.
+ */
+export function validateFindingWithNewFields(finding) {
+  if (!finding || typeof finding !== "object" || Array.isArray(finding)) {
+    return "Finding must be a plain object.";
+  }
+  for (const key of Object.keys(finding)) {
+    if (!VALID_FINDING_FIELDS.has(key)) {
+      return `Unknown field in finding: ${key}`;
+    }
+  }
+  return null;
 }
 
 function normalizeReviewResultData(data) {
@@ -75,6 +138,23 @@ function normalizeReviewResultData(data) {
     next_steps: data.next_steps
       .filter((step) => typeof step === "string" && step.trim())
       .map((step) => step.trim())
+  };
+}
+
+export function sanitizeReviewResultForStorageM0(parsedResult) {
+  if (!parsedResult?.parsed) {
+    return parsedResult;
+  }
+  if (parsedResult.failureMessage || parsedResult.parseError) {
+    return parsedResult;
+  }
+  const validationError = validateReviewResultShape(parsedResult.parsed);
+  if (validationError) {
+    return parsedResult;
+  }
+  return {
+    ...parsedResult,
+    parsed: normalizeReviewResultData(parsedResult.parsed)
   };
 }
 
@@ -235,6 +315,26 @@ export function renderSetupReport(report) {
 }
 
 export function renderReviewResult(parsedResult, meta) {
+  const failureDetail = parsedResult.failureMessage || parsedResult.parseError;
+  if (failureDetail) {
+    const lines = [
+      `# GLM ${meta.reviewLabel}`,
+      "",
+      `Target: ${meta.targetLabel}`,
+      "GLM did not return valid structured JSON.",
+      "",
+      `- Error: ${failureDetail}`
+    ];
+
+    if (parsedResult.rawOutput) {
+      lines.push("", "Raw final message:", "", "```text", parsedResult.rawOutput, "```");
+    }
+
+    appendReasoningSection(lines, meta.reasoningSummary ?? parsedResult.reasoningSummary);
+
+    return `${lines.join("\n").trimEnd()}\n`;
+  }
+
   if (!parsedResult.parsed) {
     const lines = [
       `# GLM ${meta.reviewLabel}`,
@@ -295,8 +395,12 @@ export function renderReviewResult(parsedResult, meta) {
         typeof finding.confidence === "number"
           ? ` · conf ${finding.confidence.toFixed(2)}`
           : "";
+      const tierSuffix =
+        typeof finding.confidence_tier === "string"
+          ? ` · tier ${finding.confidence_tier}`
+          : "";
       lines.push(
-        `- [${finding.severity}${confidenceSuffix}] ${finding.title} (${finding.file}${lineSuffix})`
+        `- [${finding.severity}${confidenceSuffix}${tierSuffix}] ${finding.title} (${finding.file}${lineSuffix})`
       );
       lines.push(`  ${finding.body}`);
       if (finding.recommendation) {

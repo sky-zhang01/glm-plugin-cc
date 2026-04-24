@@ -53,6 +53,7 @@ import {
   renderSetupReport,
   renderStatusReport,
   renderStoredJobResult,
+  sanitizeReviewResultForStorageM0,
   renderTaskResult
 } from "./lib/render.mjs";
 
@@ -64,7 +65,7 @@ function printUsage() {
     [
       "Usage:",
       "  node scripts/glm-companion.mjs setup [--preset ...] [--api-key <key>] [--ping] [--enable-review-gate|--disable-review-gate] [--json]",
-      "  node scripts/glm-companion.mjs review [--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--temperature <0-2>] [--top-p <0-1>] [--seed <int>] [--json] [focus text]",
+      "  node scripts/glm-companion.mjs review [--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--temperature <0-2>] [--top-p <0-1>] [--seed <int>] [--json]",
       "  node scripts/glm-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--temperature <0-2>] [--top-p <0-1>] [--seed <int>] [--json] [focus text]",
       "  node scripts/glm-companion.mjs task [--system <text>] [--model <model>] [--thinking on|off] [--json] [prompt]",
       "  node scripts/glm-companion.mjs rescue [--system <text>] [--model <model>] [--thinking on|off] [--json] [prompt]",
@@ -180,6 +181,30 @@ export function buildTargetLabel(target, focusText) {
   // through to "working tree" regardless of the actual review target.
   const focus = focusText ? `focus=${shorten(focusText, 60)}` : null;
   return [target?.label, focus].filter(Boolean).join(" · ") || "working tree";
+}
+
+/**
+ * Compute M0 pass-level metadata for a completed review run.
+ *
+ * Shape matches runTrackedJob's tracked-jobs.mjs scaffolding so renderers
+ * and future M1/M5 consumers see a single stable contract regardless of
+ * which path wrote the stored job. See tests/run-review-pass-metadata
+ * for the structural guard that keeps this helper wired into runReview.
+ */
+export function buildPassesField(startedAt, completedAt, finalStatus) {
+  const startedAtTs = Date.parse(startedAt ?? "");
+  const completedAtTs = Date.parse(completedAt ?? "");
+  const durationMs = Number.isFinite(startedAtTs) && Number.isFinite(completedAtTs)
+    ? Math.max(0, completedAtTs - startedAtTs)
+    : 0;
+  return {
+    model: {
+      status: finalStatus === "completed" ? "completed" : "failed",
+      durationMs
+    },
+    validation: null, // M1 will populate
+    rerank: null // M5 will populate
+  };
 }
 
 async function buildSetupReport(cwd, actionsTaken = [], pingRequested = false) {
@@ -345,6 +370,17 @@ async function runReview(argv, { adversarial }) {
   const cwd = resolveCommandCwd(options);
   const workspaceRoot = resolveCommandWorkspace(options);
   const focusText = positionals.join(" ").trim();
+  // C4 (M0): /glm:review does not accept focus text — reject early with a
+  // clear usage error. Message leads with the actionable fix (remove the
+  // text) before offering adversarial-review as an alternative, so users
+  // who only wanted a balanced review are not pushed toward adversarial.
+  // Runs before ensureGitRepository so the error is not shadowed by git checks.
+  if (!adversarial && focusText) {
+    process.stderr.write(
+      "/glm:review does not accept focus text — remove the trailing text to run a balanced review. If you genuinely need custom framing, use /glm:adversarial-review instead.\n"
+    );
+    process.exit(1);
+  }
   // Global default ON — mirrors codex CLI's single model_reasoning_effort
   // = "medium" default on gpt-5.4 (no per-command split).
   const thinking = parseThinkingFlag(options.thinking, true);
@@ -407,7 +443,8 @@ async function runReview(argv, { adversarial }) {
   });
 
   const completedAt = nowIso();
-  const failed = Boolean(result.failureMessage) || Boolean(result.parseError);
+  const storedResult = sanitizeReviewResultForStorageM0(result);
+  const failed = Boolean(storedResult.failureMessage) || Boolean(storedResult.parseError);
   const finalStatus = failed ? "failed" : "completed";
   const targetLabel = buildTargetLabel(target, focusText);
   const meta = {
@@ -417,25 +454,34 @@ async function runReview(argv, { adversarial }) {
     baseRef: target.baseRef ?? null,
     focusText
   };
-  const rendered = renderReviewResult(result, meta);
+  const rendered = renderReviewResult(storedResult, meta);
+  const passes = buildPassesField(jobRecord.startedAt, completedAt, finalStatus);
 
   writeJobFile(workspaceRoot, jobId, {
     ...jobRecord,
     status: finalStatus,
     completedAt,
-    result,
+    result: storedResult,
     rendered,
-    meta
+    meta,
+    passes
   });
   upsertJob(workspaceRoot, {
     ...jobRecord,
     status: finalStatus,
     completedAt,
-    summary: firstMeaningfulLine(result.rawOutput, result.failureMessage || "")
+    summary: firstMeaningfulLine(storedResult.rawOutput, storedResult.failureMessage || "")
   });
 
   outputCommandResult(
-    { command: meta.reviewLabel.toLowerCase().replace(/\s+/g, "-"), jobId, result, rendered, meta },
+    {
+      command: meta.reviewLabel.toLowerCase().replace(/\s+/g, "-"),
+      jobId,
+      result: storedResult,
+      rendered,
+      meta,
+      passes
+    },
     rendered,
     Boolean(options.json)
   );

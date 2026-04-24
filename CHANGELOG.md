@@ -1,5 +1,37 @@
 # Changelog
 
+## v0.4.8 (unreleased)
+
+### M0 — Evidence substrate (schema + renderer + focus-text enforcement)
+
+**Schema** (`schemas/review-output.schema.json`): add two optional finding
+fields — `confidence_tier` (enum: proposed / cross-checked /
+deterministically-validated / rejected) and `validation_signals` (array of
+`{kind, result, artifact?}` objects). Both fields are optional; all existing
+v0.4.7 findings remain valid without change.
+
+**Renderer/storage substrate** (`scripts/lib/render.mjs`): the schema accepts
+the new evidence fields, but M0 treats them as pipeline-owned rather than
+model-owned. `normalizeReviewFinding` clamps any model-supplied valid
+`confidence_tier` to `proposed` and drops model-supplied
+`validation_signals`; M1 is responsible for assigning real validator-backed
+tiers and signals. Findings without M0 fields remain byte-identical to the
+v0.4.7 render baseline. Exports `normalizeReviewFindingM0` alias,
+`sanitizeReviewResultForStorageM0`, and `validateFindingWithNewFields` helper
+for test use.
+
+**Pass-level metadata** (`scripts/lib/tracked-jobs.mjs`): `runTrackedJob`
+now records `passes.model = {status, durationMs}` on both success and failure
+paths. `validation` and `rerank` pass slots initialized to `null` as M1/M5
+placeholders. Old stored jobs without `passes` replay via `/glm:result`
+without error.
+
+**Breaking change** (`scripts/glm-companion.mjs`): `/glm:review` now rejects
+trailing focus text with a usage error and non-zero exit. Previously the
+companion silently collected positionals and injected them into `USER_FOCUS`,
+contradicting the command contract documented in `commands/review.md`.
+`/glm:adversarial-review` behavior is unchanged (focus text still accepted).
+
 ## v0.4.7 — 2026-04-22
 
 **Release path**: v0.4.7-beta1 was cut on 2026-04-22 at commit
