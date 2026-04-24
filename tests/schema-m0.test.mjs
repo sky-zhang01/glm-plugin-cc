@@ -17,6 +17,7 @@ import path from "node:path";
 
 import {
   normalizeReviewFindingM0,
+  sanitizeReviewResultForStorageM0,
   validateFindingWithNewFields
 } from "../scripts/lib/render.mjs";
 import { renderReviewResult } from "../scripts/lib/render.mjs";
@@ -232,25 +233,21 @@ describe("renderReviewResult — confidence_tier M0 clamp", () => {
     assert.doesNotMatch(rendered, /tier /, "invalid tier must not render at all");
   });
 
-  it("normalizer preserves validation_signals while clamping tier", () => {
-    // Regression guard: fixing the tier clamp must not accidentally drop
-    // validation_signals pass-through.
+  it("normalizer drops model-supplied validation_signals while clamping tier", () => {
+    // At M0 validation_signals are pipeline-owned, like confidence_tier.
+    // Model-supplied signals must not be treated as audit evidence.
     const normalized = normalizeReviewFindingM0(m0Finding, 0);
     assert.equal(normalized.confidence_tier, "proposed", "tier must be clamped to proposed");
-    assert.ok(Array.isArray(normalized.validation_signals), "signals still passed through");
-    assert.equal(normalized.validation_signals.length, 2);
+    assert.equal(normalized.validation_signals, undefined);
   });
 });
 
-// ── New-shape finding: validation_signals pass-through ──────────────────────
+// ── New-shape finding: validation_signals are pipeline-owned ────────────────
 
-describe("normalizeReviewFinding — validation_signals pass-through", () => {
-  it("validation_signals array passes through normalizeReviewFinding", () => {
+describe("normalizeReviewFinding — validation_signals M0 clamp", () => {
+  it("validation_signals array is dropped by normalizeReviewFinding at M0", () => {
     const normalized = normalizeReviewFindingM0(m0Finding, 0);
-    assert.ok(Array.isArray(normalized.validation_signals), "validation_signals must be an array");
-    assert.equal(normalized.validation_signals.length, 2);
-    assert.equal(normalized.validation_signals[0].kind, "file_in_target");
-    assert.equal(normalized.validation_signals[1].artifact, "no literal 'null' found near line 42");
+    assert.equal(normalized.validation_signals, undefined);
   });
 
   it("finding without validation_signals has undefined/absent validation_signals after normalize", () => {
@@ -262,7 +259,7 @@ describe("normalizeReviewFinding — validation_signals pass-through", () => {
     );
   });
 
-  it("finding with mixed signal kinds validates (pass/fail/skip all present)", () => {
+  it("finding with mixed signal kinds is still schema-valid but ignored by M0 normalizer", () => {
     const mixed = {
       ...v047Finding,
       validation_signals: [
@@ -272,8 +269,21 @@ describe("normalizeReviewFinding — validation_signals pass-through", () => {
       ]
     };
     const normalized = normalizeReviewFindingM0(mixed, 0);
-    assert.equal(normalized.validation_signals.length, 3);
-    assert.equal(normalized.validation_signals[2].result, "skip");
+    assert.equal(normalized.validation_signals, undefined);
+  });
+});
+
+describe("sanitizeReviewResultForStorageM0 — pipeline evidence fields", () => {
+  it("stores model-claimed tier only as proposed and drops model-supplied signals", () => {
+    const sanitized = sanitizeReviewResultForStorageM0(makeResult(m0Finding));
+    const [finding] = sanitized.parsed.findings;
+    assert.equal(finding.confidence_tier, "proposed");
+    assert.equal(finding.validation_signals, undefined);
+  });
+
+  it("leaves parse-failure shaped results unchanged", () => {
+    const failure = { parsed: null, parseError: "TRUNCATED_JSON", rawOutput: "{" };
+    assert.equal(sanitizeReviewResultForStorageM0(failure), failure);
   });
 });
 

@@ -76,9 +76,6 @@ function normalizeReviewFinding(finding, index) {
       ? "proposed"
       : undefined;
 
-  // M0: pass through validation_signals array if present.
-  const validationSignals = Array.isArray(source.validation_signals) ? source.validation_signals : undefined;
-
   const normalized = {
     severity: typeof source.severity === "string" && source.severity.trim() ? source.severity.trim() : "low",
     title: typeof source.title === "string" && source.title.trim() ? source.title.trim() : `Finding ${index + 1}`,
@@ -92,9 +89,6 @@ function normalizeReviewFinding(finding, index) {
 
   if (confidenceTier !== undefined) {
     normalized.confidence_tier = confidenceTier;
-  }
-  if (validationSignals !== undefined) {
-    normalized.validation_signals = validationSignals;
   }
 
   return normalized;
@@ -144,6 +138,20 @@ function normalizeReviewResultData(data) {
     next_steps: data.next_steps
       .filter((step) => typeof step === "string" && step.trim())
       .map((step) => step.trim())
+  };
+}
+
+export function sanitizeReviewResultForStorageM0(parsedResult) {
+  if (!parsedResult?.parsed) {
+    return parsedResult;
+  }
+  const validationError = validateReviewResultShape(parsedResult.parsed);
+  if (validationError) {
+    return parsedResult;
+  }
+  return {
+    ...parsedResult,
+    parsed: normalizeReviewResultData(parsedResult.parsed)
   };
 }
 

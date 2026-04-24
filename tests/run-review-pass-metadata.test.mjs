@@ -166,4 +166,30 @@ describe("runReview wiring — glm-companion.mjs writeJobFile path", () => {
       "runReview's writeJobFile payload must include a `passes` key"
     );
   });
+
+  it("runReview sanitizes model-owned evidence fields before render/store", () => {
+    const runReviewStart = companionSource.indexOf("async function runReview(");
+    const afterRunReview = companionSource.slice(runReviewStart + 1);
+    const nextTopLevel = afterRunReview.search(/\nasync function |\nfunction /);
+    const runReviewBody =
+      nextTopLevel === -1
+        ? companionSource.slice(runReviewStart)
+        : companionSource.slice(runReviewStart, runReviewStart + 1 + nextTopLevel);
+
+    assert.match(
+      runReviewBody,
+      /sanitizeReviewResultForStorageM0\s*\(\s*result\s*\)/,
+      "runReview must sanitize model-owned confidence_tier/validation_signals before storage"
+    );
+    assert.match(
+      runReviewBody,
+      /renderReviewResult\s*\(\s*storedResult\s*,/,
+      "runReview must render the sanitized result, not the raw model result"
+    );
+    assert.match(
+      runReviewBody,
+      /result:\s*storedResult/,
+      "runReview must store the sanitized result, not the raw model result"
+    );
+  });
 });

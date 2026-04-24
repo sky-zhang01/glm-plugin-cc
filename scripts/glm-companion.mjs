@@ -53,6 +53,7 @@ import {
   renderSetupReport,
   renderStatusReport,
   renderStoredJobResult,
+  sanitizeReviewResultForStorageM0,
   renderTaskResult
 } from "./lib/render.mjs";
 
@@ -442,7 +443,8 @@ async function runReview(argv, { adversarial }) {
   });
 
   const completedAt = nowIso();
-  const failed = Boolean(result.failureMessage) || Boolean(result.parseError);
+  const storedResult = sanitizeReviewResultForStorageM0(result);
+  const failed = Boolean(storedResult.failureMessage) || Boolean(storedResult.parseError);
   const finalStatus = failed ? "failed" : "completed";
   const targetLabel = buildTargetLabel(target, focusText);
   const meta = {
@@ -452,14 +454,14 @@ async function runReview(argv, { adversarial }) {
     baseRef: target.baseRef ?? null,
     focusText
   };
-  const rendered = renderReviewResult(result, meta);
+  const rendered = renderReviewResult(storedResult, meta);
   const passes = buildPassesField(jobRecord.startedAt, completedAt, finalStatus);
 
   writeJobFile(workspaceRoot, jobId, {
     ...jobRecord,
     status: finalStatus,
     completedAt,
-    result,
+    result: storedResult,
     rendered,
     meta,
     passes
