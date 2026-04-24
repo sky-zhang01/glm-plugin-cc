@@ -2,6 +2,24 @@
 
 ## v0.4.8 (unreleased)
 
+### M3 — Measurement parity and dogfood packet lane
+
+**Review-eval harness** (`test-automation/review-eval/scripts/run-experiment.mjs`):
+adds `--mode review|adversarial-review` so the same fixture/cell sweep can
+exercise balanced review and adversarial review. Balanced mode intentionally
+sends no trailing focus text; adversarial mode keeps a bounded focus string to
+exercise its command contract without changing the target diff. CSV rows now
+record `mode`, post-validation `confidence_tier` distribution, rejected count,
+`passes.model.durationMs`, and `passes.validation` status/timing.
+
+**Summary and dogfood artifacts** (`test-automation/review-eval/scripts/summarize.mjs`):
+summaries now group by mode and print tier/pass-timing columns. A new
+`--dogfood-packet <markdown>` option writes a repeatable file-based review
+packet with the candidate git ref, per-mode summary cells, sampled findings
+from payload sidecars, and human spot-check notes. This gives later rerank /
+cross-model verifier decisions evidence from local artifacts instead of chat
+transcripts.
+
 ### M2 — Real mode split for balanced vs adversarial review
 
 **Renderer defaults** (`scripts/lib/render.mjs`): `/glm:review` and
