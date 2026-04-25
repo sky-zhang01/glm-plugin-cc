@@ -52,11 +52,12 @@ against that worktree with the fixture `base_ref`. This prevents PA1/M3
 measurement runs from accidentally reviewing the current development branch
 instead of the pinned fixture diff.
 
-**Evidence hygiene**: CSV rows now include `base_ref` and `head_ref`, and
-payload sidecars store the same refs in their `cell` metadata. Citation
-scoring also reads cited files from the fixture worktree rather than the
-current repository checkout, so the harness and validator inspect the same
-candidate code.
+**Evidence hygiene**: PA2 rows default to `m3-measurement-v2.csv` so they
+cannot append to the invalid PA1/M3 CSV shape. CSV rows now include
+`base_ref` and `head_ref`, and payload sidecars store the same refs in their
+`cell` metadata. Citation scoring also reads cited files from the fixture
+worktree rather than the current repository checkout, so the harness and
+validator inspect the same candidate code.
 
 ### M5 — Optional reflection / rerank lane
 

@@ -486,7 +486,7 @@ async function main() {
   const seed = args.seed !== undefined ? Number(args.seed) : undefined;
   const thinking = args.thinking || "on";
   const runs = Number(args.runs || 3);
-  const outPath = path.resolve(args.out || path.join(__dirname, "../results/v0.4.8/m3-measurement.csv"));
+  const outPath = path.resolve(args.out || path.join(__dirname, "../results/v0.4.8/m3-measurement-v2.csv"));
   const adversarialFocus = typeof args["adversarial-focus"] === "string" ? args["adversarial-focus"].trim() : "";
 
   const groundTruth = loadGroundTruth(fixtureId);

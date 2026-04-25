@@ -96,6 +96,12 @@ test("run-experiment allows explicit fixture base/head overrides", () => {
   assert.match(result.stdout, /base=eb47b5f, head=7766943/);
 });
 
+test("run-experiment defaults PA2 output to the v2 measurement CSV", () => {
+  const source = fs.readFileSync(runExperimentScript, "utf8");
+
+  assert.match(source, /m3-measurement-v2\.csv/);
+});
+
 test("run-experiment records explicit adversarial focus opt-in", () => {
   const tmp = makeTmpDir("glm-review-eval-adversarial-focus-optin-");
   const outPath = path.join(tmp, "measurement.csv");
