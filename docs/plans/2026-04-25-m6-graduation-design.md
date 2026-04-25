@@ -1,6 +1,6 @@
 ---
-Status: DRAFT
-Approval: PENDING
+Status: DECIDED
+Approval: DESIGN_OK — codex non-author review, 2026-04-25
 Authority: roadmap §5.7 M6 — Challenge-surface graduation
 Evidence: PA3 v2 baseline (post-PA2 fixture-worktree harness)
 Verdict: NO graduation. Keep all six challenge surfaces as adversarial-mode tags.
