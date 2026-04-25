@@ -1,0 +1,189 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "base": "eb47b5f",
+    "head": "7766943",
+    "mode": "adversarial-review",
+    "adversarialFocus": "",
+    "reflect": false,
+    "reflectModel": null,
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "off",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 36931,
+    "model_duration_ms": 36282,
+    "validation_status": "completed",
+    "validation_duration_ms": 69,
+    "rerank_status": "",
+    "rerank_duration_ms": 0,
+    "rerank_initial_findings": 0,
+    "rerank_final_findings": 0,
+    "rerank_initial_tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 0,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rerank_final_tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 0,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "tier_distribution": {
+      "proposed": 1,
+      "cross_checked": 2,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 36282
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 69,
+      "totalFindings": 3,
+      "tierCounts": {
+        "proposed": 1,
+        "cross_checked": 2,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 11,
+        "fail": 1,
+        "skip": 0
+      }
+    },
+    "rerank": null
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The change introduces significant surface area for credential mishandling and execution errors in a critical security-sensitive workflow (API key rotation). The setup command is now instructed to perform complex, multi-step conversational actions based on parsing a markdown file, while explicitly lacking corresponding test coverage or error guards for the new paths.",
+    "findings": [
+      {
+        "severity": "critical",
+        "title": "API key injection and shell execution risk via verbatim token extraction",
+        "body": "The diff introduces new conversational paths requiring the AI to extract an API key from user chat and execute a companion script via `node … setup --api-key \"<token>\" --`. Instructing an LLM to perform shell argument substitution based on raw user input is highly vulnerable to command injection (e.g., if the key contains `\"`, `$()`, or `; `). The prompt assumes a \"verbatim\" extraction and safe substitution, which is an unsafe assumption that violates trust boundaries between user input and command execution. There is no sanitization or escaping specified before the string is interpolated into the command.",
+        "file": "commands/setup.md",
+        "line_start": 28,
+        "line_end": 30,
+        "confidence": 0.85,
+        "recommendation": "The prompt should instruct the AI to pipe the extracted key via standard input (e.g., `echo \"<token>\" | node … setup --api-key-stdin --`) or use a secure temporary file mechanism to pass the secret, strictly avoiding direct string interpolation in command arguments. If `--api-key-stdin` is not implemented in the companion, it must be added.",
+        "confidence_tier": "proposed",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "commands/setup.md"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 28-30 within 48"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "fail",
+            "artifact": "no explicit anchor found near cited lines: node … setup --api-key \"<token>\" --, $(), echo \"<token>\" | node … setup --api-key-stdin --, --api-key-stdin"
+          }
+        ]
+      },
+      {
+        "severity": "high",
+        "title": "Unrecoverable state and silent failures in nested menu fallback",
+        "body": "The specification for the nested `Switch preset` -> `Custom endpoint` action asks the AI to prompt in plain chat for a URL, then run `--preset custom --base-url <url>`. If this command fails (e.g., invalid URL, network timeout, or companion crash), the prompt contains no failure recovery or rollback instructions. The user is left in an ambiguous state where their config might be partially mutated to `custom` but missing a valid `base_url`. This creates a high risk of silent state corruption or an unusable configuration that blocks the user.",
+        "file": "commands/setup.md",
+        "line_start": 33,
+        "line_end": 37,
+        "confidence": 0.75,
+        "recommendation": "Add explicit error handling and state validation guards to the prompt. For example: 'If the companion returns a non-zero exit code or stderr, DO NOT proceed. Report the exact error to the user and abort the preset switch, or revert to the previously known good preset.'",
+        "confidence_tier": "cross-checked",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "commands/setup.md"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 33-37 within 48"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "pass",
+            "artifact": "matched anchor: Switch preset"
+          }
+        ]
+      },
+      {
+        "severity": "medium",
+        "title": "Zero test coverage for complex new execution paths",
+        "body": "The release card explicitly rationalizes that 'no new tests needed; skill change is prompt-layer, not Node-layer'. However, the prompt-layer now orchestrates critical security operations (key rotation, config mutation) and complex state machines (nested `AskUserQuestion` menus). Relying solely on manual UAT for these paths is a significant operability and correctness gap. If the LLM fails to follow the specific instruction to 'stop' after a menu action, it could easily enter an infinite loop of menu re-prompts or repeat destructive operations.",
+        "file": "release_card.md",
+        "line_start": 82,
+        "line_end": 83,
+        "confidence": 0.9,
+        "recommendation": "Implement integration tests (even if mocked at the LLM response layer) to validate the exact sequence of tool calls and command executions for the new key rotation and preset switching paths, ensuring terminal states are reached without infinite loops.",
+        "confidence_tier": "cross-checked",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "release_card.md"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 82-83 within 232"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "pass",
+            "artifact": "matched anchor: AskUserQuestion"
+          }
+        ]
+      }
+    ],
+    "next_steps": [
+      "Redact or completely refactor the command execution instructions in `commands/setup.md` to avoid direct string interpolation of user-provided secrets into shell commands.",
+      "Add explicit failure handling and rollback instructions to the prompt for companion script execution failures.",
+      "Implement automated tests for the new orchestration logic rather than deferring entirely to manual UAT."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The change introduces significant surface area for credential mishandling and execution errors in a critical security-sensitive workflow (API key rotation). The setup command is now instructed to perform complex, multi-step conversational actions based on parsing a markdown file, while explicitly lacking corresponding test coverage or error guards for the new paths.\",\"findings\":[{\"severity\":\"critical\",\"title\":\"API key injection and shell execution risk via verbatim token extraction\",\"body\":\"The diff introduces new conversational paths requiring the AI to extract an API key from user chat and execute a companion script via `node … setup --api-key \\\"<token>\\\" --`. Instructing an LLM to perform shell argument substitution based on raw user input is highly vulnerable to command injection (e.g., if the key contains `\\\"`, `$()`, or `; `). The prompt assumes a \\\"verbatim\\\" extraction and safe substitution, which is an unsafe assumption that violates trust boundaries between user input and command execution. There is no sanitization or escaping specified before the string is interpolated into the command.\",\"file\":\"commands/setup.md\",\"line_start\":28,\"line_end\":30,\"confidence\":0.85,\"recommendation\":\"The prompt should instruct the AI to pipe the extracted key via standard input (e.g., `echo \\\"<token>\\\" | node … setup --api-key-stdin --`) or use a secure temporary file mechanism to pass the secret, strictly avoiding direct string interpolation in command arguments. If `--api-key-stdin` is not implemented in the companion, it must be added.\"},{\"severity\":\"high\",\"title\":\"Unrecoverable state and silent failures in nested menu fallback\",\"body\":\"The specification for the nested `Switch preset` -> `Custom endpoint` action asks the AI to prompt in plain chat for a URL, then run `--preset custom --base-url <url>`. If this command fails (e.g., invalid URL, network timeout, or companion crash), the prompt contains no failure recovery or rollback instructions. The user is left in an ambiguous state where their config might be partially mutated to `custom` but missing a valid `base_url`. This creates a high risk of silent state corruption or an unusable configuration that blocks the user.\",\"file\":\"commands/setup.md\",\"line_start\":33,\"line_end\":37,\"confidence\":0.75,\"recommendation\":\"Add explicit error handling and state validation guards to the prompt. For example: 'If the companion returns a non-zero exit code or stderr, DO NOT proceed. Report the exact error to the user and abort the preset switch, or revert to the previously known good preset.'\"},{\"severity\":\"medium\",\"title\":\"Zero test coverage for complex new execution paths\",\"body\":\"The release card explicitly rationalizes that 'no new tests needed; skill change is prompt-layer, not Node-layer'. However, the prompt-layer now orchestrates critical security operations (key rotation, config mutation) and complex state machines (nested `AskUserQuestion` menus). Relying solely on manual UAT for these paths is a significant operability and correctness gap. If the LLM fails to follow the specific instruction to 'stop' after a menu action, it could easily enter an infinite loop of menu re-prompts or repeat destructive operations.\",\"file\":\"release_card.md\",\"line_start\":82,\"line_end\":83,\"confidence\":0.9,\"recommendation\":\"Implement integration tests (even if mocked at the LLM response layer) to validate the exact sequence of tool calls and command executions for the new key rotation and preset switching paths, ensuring terminal states are reached without infinite loops.\"}],\"next_steps\":[\"Redact or completely refactor the command execution instructions in `commands/setup.md` to avoid direct string interpolation of user-provided secrets into shell commands.\",\"Add explicit failure handling and rollback instructions to the prompt for companion script execution failures.\",\"Implement automated tests for the new orchestration logic rather than deferring entirely to manual UAT.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-25T08:30:25.511Z"
+}

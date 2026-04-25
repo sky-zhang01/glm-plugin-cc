@@ -1,0 +1,231 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "base": "8fc1b98",
+    "head": "d5fa754",
+    "mode": "adversarial-review",
+    "adversarialFocus": "",
+    "reflect": true,
+    "reflectModel": null,
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "off",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 2,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 69187,
+    "model_duration_ms": 45402,
+    "validation_status": "completed",
+    "validation_duration_ms": 38,
+    "rerank_status": "completed",
+    "rerank_duration_ms": 23048,
+    "rerank_initial_findings": 3,
+    "rerank_final_findings": 2,
+    "rerank_initial_tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 2,
+      "deterministically_validated": 0,
+      "rejected": 1
+    },
+    "rerank_final_tier_distribution": {
+      "proposed": 1,
+      "cross_checked": 1,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "tier_distribution": {
+      "proposed": 1,
+      "cross_checked": 1,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 45402
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 38,
+      "totalFindings": 2,
+      "tierCounts": {
+        "proposed": 1,
+        "cross_checked": 1,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 7,
+        "fail": 1,
+        "skip": 0
+      }
+    },
+    "rerank": {
+      "status": "completed",
+      "durationMs": 23048,
+      "model": "glm-5.1",
+      "initial": {
+        "verdict": "needs-attention",
+        "summary": "The v0.4.6 release introduces a BigModel error classifier and automatic retry wrapper. While the implementation is generally robust and well-tested, it contains a critical semantic flaw in the retry budget enforcement. The budget check is performed *before* the sleep delay, allowing the cumulative wall-clock time (including the final sleep) to silently exceed the configured budget. It also allows a new API call to be scheduled if the time *before* the sleep is under budget, even if that new call itself will push the total time far beyond the limit. Fixing this timing invariant is necessary to prevent unpredictable hang times in user sessions.",
+        "totalFindings": 3,
+        "tierCounts": {
+          "proposed": 0,
+          "cross_checked": 2,
+          "deterministically_validated": 0,
+          "rejected": 1
+        },
+        "findings": [
+          {
+            "severity": "high",
+            "title": "Retry budget enforcement allows overshooting the wall-clock limit",
+            "file": "scripts/lib/retry.mjs",
+            "line_start": 155,
+            "line_end": 166,
+            "confidence": 0.92,
+            "confidence_tier": "cross-checked"
+          },
+          {
+            "severity": "medium",
+            "title": "Pre-push hook uses fragile while-read loop without stdin redirection",
+            "file": "scripts/hooks/pre-push",
+            "line_start": 42,
+            "line_end": 56,
+            "confidence": 0.85,
+            "confidence_tier": "rejected"
+          },
+          {
+            "severity": "medium",
+            "title": "Vendor code classifier bypasses HTTP-status handling even when body parsing is misleading",
+            "file": "scripts/lib/glm-client.mjs",
+            "line_start": 388,
+            "line_end": 396,
+            "confidence": 0.75,
+            "confidence_tier": "cross-checked"
+          }
+        ]
+      },
+      "final": {
+        "verdict": "needs-attention",
+        "summary": "The v0.4.6 release introduces an automatic retry wrapper that contains a critical timing flaw in its budget enforcement. By checking the retry budget before the sleep delay and failing to verify it afterward, the implementation allows cumulative wall-clock time to silently exceed the configured limit, potentially causing unpredictable hangs in user sessions. Additionally, the API client prioritizes parsing vendor-specific error codes from the response body over checking HTTP status codes, which risks misclassifying transient 5xx gateway errors as non-retryable vendor errors.",
+        "totalFindings": 2,
+        "tierCounts": {
+          "proposed": 1,
+          "cross_checked": 1,
+          "deterministically_validated": 0,
+          "rejected": 0
+        },
+        "findings": [
+          {
+            "severity": "high",
+            "title": "Retry budget enforcement allows overshooting the wall-clock limit",
+            "file": "scripts/lib/retry.mjs",
+            "line_start": 155,
+            "line_end": 166,
+            "confidence": 0.95,
+            "confidence_tier": "proposed"
+          },
+          {
+            "severity": "medium",
+            "title": "Vendor code classifier bypasses transient HTTP-status handling",
+            "file": "scripts/lib/glm-client.mjs",
+            "line_start": 388,
+            "line_end": 396,
+            "confidence": 0.85,
+            "confidence_tier": "cross-checked"
+          }
+        ]
+      }
+    }
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 release introduces an automatic retry wrapper that contains a critical timing flaw in its budget enforcement. By checking the retry budget before the sleep delay and failing to verify it afterward, the implementation allows cumulative wall-clock time to silently exceed the configured limit, potentially causing unpredictable hangs in user sessions. Additionally, the API client prioritizes parsing vendor-specific error codes from the response body over checking HTTP status codes, which risks misclassifying transient 5xx gateway errors as non-retryable vendor errors.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retry budget enforcement allows overshooting the wall-clock limit",
+        "body": "In `scripts/lib/retry.mjs`, the budget check evaluates whether to enter the `await sleeper(delayMs)` block. Because the budget is checked *before* the sleep delay and never verified afterward, any concurrent or scheduling delays during the sleep are unaccounted for. This allows the final cumulative time to overshoot the `totalBudgetMs`, and might still schedule a subsequent API call that pushes execution time far beyond the configured limit.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 155,
+        "line_end": 166,
+        "confidence": 0.95,
+        "recommendation": "Strictly enforce the budget immediately after waking up from the sleep delay. Add a post-sleep budget check after `await sleeper(delayMs);` to ensure the actual elapsed time has not exceeded the policy limit before initiating the next API call.",
+        "confidence_tier": "proposed",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "scripts/lib/retry.mjs"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 155-166 within 203"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "fail",
+            "artifact": "no explicit anchor found near cited lines: scripts/lib/retry.mjs, await sleeper(delayMs), totalBudgetMs, await sleeper(delayMs);"
+          }
+        ]
+      },
+      {
+        "severity": "medium",
+        "title": "Vendor code classifier bypasses transient HTTP-status handling",
+        "body": "In `scripts/lib/glm-client.mjs`, the vendor code is extracted from the response body and immediately returned as a failure, bypassing subsequent HTTP status checks. If BigModel's gateway returns an HTTP 500 with a generic or cached error body containing an `error.code` field, it will be misclassified as a non-retryable vendor error instead of a transient HTTP 500 error, preventing the auto-retry logic from functioning.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 388,
+        "line_end": 396,
+        "confidence": 0.85,
+        "recommendation": "Change the order of validation to prioritize the HTTP status code first. If the status code indicates a transient server error (500, 502, 503, 504), treat it as `HTTP_ERROR_TRANSIENT` and trigger the retry path, regardless of the application-level error code in the body. Only parse the vendor error code from the body if the HTTP status is not a transient 5xx error.",
+        "confidence_tier": "cross-checked",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "scripts/lib/glm-client.mjs"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 388-396 within 608"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "pass",
+            "artifact": "matched anchor: error.code"
+          }
+        ]
+      }
+    ],
+    "next_steps": [
+      "Refactor `scripts/lib/retry.mjs` to enforce the wall-clock budget check immediately after the sleep delay completes, preventing subsequent API calls that definitively breach the time limit.",
+      "Reorder the error classification in `scripts/lib/glm-client.mjs` to check for transient HTTP status codes (500/502/503/504) before attempting to parse vendor-specific error codes from the response body."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.6 release introduces an automatic retry wrapper that contains a critical timing flaw in its budget enforcement. By checking the retry budget before the sleep delay and failing to verify it afterward, the implementation allows cumulative wall-clock time to silently exceed the configured limit, potentially causing unpredictable hangs in user sessions. Additionally, the API client prioritizes parsing vendor-specific error codes from the response body over checking HTTP status codes, which risks misclassifying transient 5xx gateway errors as non-retryable vendor errors.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Retry budget enforcement allows overshooting the wall-clock limit\",\"body\":\"In `scripts/lib/retry.mjs`, the budget check evaluates whether to enter the `await sleeper(delayMs)` block. Because the budget is checked *before* the sleep delay and never verified afterward, any concurrent or scheduling delays during the sleep are unaccounted for. This allows the final cumulative time to overshoot the `totalBudgetMs`, and might still schedule a subsequent API call that pushes execution time far beyond the configured limit.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":155,\"line_end\":166,\"confidence\":0.95,\"recommendation\":\"Strictly enforce the budget immediately after waking up from the sleep delay. Add a post-sleep budget check after `await sleeper(delayMs);` to ensure the actual elapsed time has not exceeded the policy limit before initiating the next API call.\",\"confidence_tier\":\"cross-checked\",\"validation_signals\":[{\"kind\":\"file_in_target\",\"result\":\"pass\",\"artifact\":\"scripts/lib/retry.mjs\"},{\"kind\":\"known_false_reference_absent\",\"result\":\"pass\"},{\"kind\":\"line_range_in_file\",\"result\":\"pass\",\"artifact\":\"lines 155-166 within 203\"},{\"kind\":\"anchor_literal_found\",\"result\":\"pass\",\"artifact\":\"matched anchor: const withinBudget = elapsedSoFarMs + delayMs <= policy.totalBudgetMs\"}]},{\"severity\":\"medium\",\"title\":\"Vendor code classifier bypasses transient HTTP-status handling\",\"body\":\"In `scripts/lib/glm-client.mjs`, the vendor code is extracted from the response body and immediately returned as a failure, bypassing subsequent HTTP status checks. If BigModel's gateway returns an HTTP 500 with a generic or cached error body containing an `error.code` field, it will be misclassified as a non-retryable vendor error instead of a transient HTTP 500 error, preventing the auto-retry logic from functioning.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":388,\"line_end\":396,\"confidence\":0.85,\"recommendation\":\"Change the order of validation to prioritize the HTTP status code first. If the status code indicates a transient server error (500, 502, 503, 504), treat it as `HTTP_ERROR_TRANSIENT` and trigger the retry path, regardless of the application-level error code in the body. Only parse the vendor error code from the body if the HTTP status is not a transient 5xx error.\",\"confidence_tier\":\"cross-checked\",\"validation_signals\":[{\"kind\":\"file_in_target\",\"result\":\"pass\",\"artifact\":\"scripts/lib/glm-client.mjs\"},{\"kind\":\"known_false_reference_absent\",\"result\":\"pass\"},{\"kind\":\"line_range_in_file\",\"result\":\"pass\",\"artifact\":\"lines 388-396 within 608\"},{\"kind\":\"anchor_literal_found\",\"result\":\"pass\",\"artifact\":\"matched anchor: error.code\"}]}],\"next_steps\":[\"Refactor `scripts/lib/retry.mjs` to enforce the wall-clock budget check immediately after the sleep delay completes, preventing subsequent API calls that definitively breach the time limit.\",\"Reorder the error classification in `scripts/lib/glm-client.mjs` to check for transient HTTP status codes (500/502/503/504) before attempting to parse vendor-specific error codes from the response body.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-25T08:37:41.888Z"
+}

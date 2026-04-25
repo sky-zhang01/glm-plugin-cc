@@ -1,0 +1,231 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "base": "8fc1b98",
+    "head": "d5fa754",
+    "mode": "adversarial-review",
+    "adversarialFocus": "",
+    "reflect": true,
+    "reflectModel": null,
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "off",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 2,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 63606,
+    "model_duration_ms": 42557,
+    "validation_status": "completed",
+    "validation_duration_ms": 33,
+    "rerank_status": "completed",
+    "rerank_duration_ms": 20310,
+    "rerank_initial_findings": 3,
+    "rerank_final_findings": 2,
+    "rerank_initial_tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 3,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rerank_final_tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 2,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 2,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 42557
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 33,
+      "totalFindings": 2,
+      "tierCounts": {
+        "proposed": 0,
+        "cross_checked": 2,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 8,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    "rerank": {
+      "status": "completed",
+      "durationMs": 20310,
+      "model": "glm-5.1",
+      "initial": {
+        "verdict": "needs-attention",
+        "summary": "The retry/backoff mechanism contains a critical semantic flaw: it does not discriminate between partial and fully failed network requests. If a network error occurs mid-stream, `glm-client.mjs` silently retries the request, potentially duplicating expensive and irreversible LLM operations. Additionally, the `pre-push` hook implementation contains a classical bash stdin race condition that will fail to validate multi-ref pushes under standard Git clients. Combined with a mismatch between the documented and actual default retry budget (30s in docs vs 90s in code), the release introduces observable regressions in reliability and correctness.",
+        "totalFindings": 3,
+        "tierCounts": {
+          "proposed": 0,
+          "cross_checked": 3,
+          "deterministically_validated": 0,
+          "rejected": 0
+        },
+        "findings": [
+          {
+            "severity": "critical",
+            "title": "Retry of partial failures creates risk of duplicate actions",
+            "file": "scripts/lib/retry.mjs",
+            "line_start": 97,
+            "line_end": 99,
+            "confidence": 0.9,
+            "confidence_tier": "cross-checked"
+          },
+          {
+            "severity": "high",
+            "title": "pre-push hook fails to execute release-ready gate on multi-ref pushes",
+            "file": "scripts/hooks/pre-push",
+            "line_start": 19,
+            "line_end": 41,
+            "confidence": 0.8,
+            "confidence_tier": "cross-checked"
+          },
+          {
+            "severity": "medium",
+            "title": "Documented default budget (30s) mismatches implemented default (90s)",
+            "file": "scripts/lib/retry.mjs",
+            "line_start": 48,
+            "line_end": 56,
+            "confidence": 1,
+            "confidence_tier": "cross-checked"
+          }
+        ]
+      },
+      "final": {
+        "verdict": "needs-attention",
+        "summary": "The retry/backoff mechanism and pre-push hooks contain actionable flaws that risk silent failures and incorrect state mutations. Specifically, classifying generic network errors as retriable risks duplicating expensive LLM operations, and the pre-push hook suffers from a stdin race condition that silently skips CI validation during multi-ref pushes.",
+        "totalFindings": 2,
+        "tierCounts": {
+          "proposed": 0,
+          "cross_checked": 2,
+          "deterministically_validated": 0,
+          "rejected": 0
+        },
+        "findings": [
+          {
+            "severity": "critical",
+            "title": "Retry of partial failures creates risk of duplicate actions",
+            "file": "scripts/lib/retry.mjs",
+            "line_start": 97,
+            "line_end": 99,
+            "confidence": 0.95,
+            "confidence_tier": "cross-checked"
+          },
+          {
+            "severity": "high",
+            "title": "pre-push hook fails to execute release-ready gate on multi-ref pushes",
+            "file": "scripts/hooks/pre-push",
+            "line_start": 19,
+            "line_end": 41,
+            "confidence": 0.9,
+            "confidence_tier": "cross-checked"
+          }
+        ]
+      }
+    }
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The retry/backoff mechanism and pre-push hooks contain actionable flaws that risk silent failures and incorrect state mutations. Specifically, classifying generic network errors as retriable risks duplicating expensive LLM operations, and the pre-push hook suffers from a stdin race condition that silently skips CI validation during multi-ref pushes.",
+    "findings": [
+      {
+        "severity": "critical",
+        "title": "Retry of partial failures creates risk of duplicate actions",
+        "body": "The `classifyResultForRetry` function unconditionally maps `NETWORK_ERROR` and `HTTP_ERROR_TRANSIENT` to `\"retry\"`. If a physical network connection drops or a transient gateway timeout occurs AFTER the server has received and processed the request, the client will silently attempt the request again. This creates a retry amplification risk where one user action results in multiple completions on the server, violating idempotency. The system lacks an `Idempotency-Key` header or check to guard against this.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 97,
+        "line_end": 99,
+        "confidence": 0.95,
+        "recommendation": "Implement and transmit a standard `Idempotency-Key` (or similar request UUID) in the headers for calls routed through `withRetry`. Failing that, if network errors cannot be safely discerned as pre-flight vs. post-acceptance, the `classifyResultForRetry` should conservatively default to `\"stop\"` for network errors to prevent unintended duplicate side-effects, forcing the user to explicitly retry.",
+        "confidence_tier": "cross-checked",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "scripts/lib/retry.mjs"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 97-99 within 203"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "pass",
+            "artifact": "matched anchor: \"retry\""
+          }
+        ]
+      },
+      {
+        "severity": "high",
+        "title": "pre-push hook fails to execute release-ready gate on multi-ref pushes",
+        "body": "The `pre-push` hook contains a classical stdin race condition. It executes subprocesses (like `check-all.sh`) before completely reading the standard input provided by Git. Standard `git push origin main v0.4.6` delivers all refs as a single stdin batch. By the time the `while read` loop executes, stdin is often already closed or fully consumed by prior subprocesses, causing the tag validation logic to silently skip. This defeats the purpose of the CI replacement gate for multi-ref pushes.",
+        "file": "scripts/hooks/pre-push",
+        "line_start": 19,
+        "line_end": 41,
+        "confidence": 0.9,
+        "recommendation": "Buffer standard input to a variable before executing any subprocesses that might interfere with stdin. For example: `refs=$(cat)` or `while read ... done < <(git rev-list ...)`. Refactor to ensure `stdin` is safely consumed completely by the hook before being iterated over.",
+        "confidence_tier": "cross-checked",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "scripts/hooks/pre-push"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 19-41 within 46"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "pass",
+            "artifact": "matched anchor: pre-push"
+          }
+        ]
+      }
+    ],
+    "next_steps": [
+      "Audit `glm-client.mjs` to determine if network/timeout errors can safely guarantee pre-flight status before deciding on auto-retry for `NETWORK_ERROR`.",
+      "Fix the `pre-push` hook stdin consumption race condition to ensure tag refs are actually validated on multi-ref pushes."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The retry/backoff mechanism and pre-push hooks contain actionable flaws that risk silent failures and incorrect state mutations. Specifically, classifying generic network errors as retriable risks duplicating expensive LLM operations, and the pre-push hook suffers from a stdin race condition that silently skips CI validation during multi-ref pushes.\",\"findings\":[{\"severity\":\"critical\",\"title\":\"Retry of partial failures creates risk of duplicate actions\",\"body\":\"The `classifyResultForRetry` function unconditionally maps `NETWORK_ERROR` and `HTTP_ERROR_TRANSIENT` to `\\\"retry\\\"`. If a physical network connection drops or a transient gateway timeout occurs AFTER the server has received and processed the request, the client will silently attempt the request again. This creates a retry amplification risk where one user action results in multiple completions on the server, violating idempotency. The system lacks an `Idempotency-Key` header or check to guard against this.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":97,\"line_end\":99,\"confidence\":0.95,\"recommendation\":\"Implement and transmit a standard `Idempotency-Key` (or similar request UUID) in the headers for calls routed through `withRetry`. Failing that, if network errors cannot be safely discerned as pre-flight vs. post-acceptance, the `classifyResultForRetry` should conservatively default to `\\\"stop\\\"` for network errors to prevent unintended duplicate side-effects, forcing the user to explicitly retry.\",\"confidence_tier\":\"cross-checked\",\"validation_signals\":[{\"kind\":\"file_in_target\",\"result\":\"pass\",\"artifact\":\"scripts/lib/retry.mjs\"},{\"kind\":\"line_range_in_file\",\"result\":\"pass\",\"artifact\":\"lines 97-99 within 203\"},{\"kind\":\"anchor_literal_found\",\"result\":\"pass\",\"artifact\":\"matched anchor: \\\"retry\\\"\"},{\"kind\":\"known_false_reference_absent\",\"result\":\"pass\"}]},{\"severity\":\"high\",\"title\":\"pre-push hook fails to execute release-ready gate on multi-ref pushes\",\"body\":\"The `pre-push` hook contains a classical stdin race condition. It executes subprocesses (like `check-all.sh`) before completely reading the standard input provided by Git. Standard `git push origin main v0.4.6` delivers all refs as a single stdin batch. By the time the `while read` loop executes, stdin is often already closed or fully consumed by prior subprocesses, causing the tag validation logic to silently skip. This defeats the purpose of the CI replacement gate for multi-ref pushes.\",\"file\":\"scripts/hooks/pre-push\",\"line_start\":19,\"line_end\":41,\"confidence\":0.9,\"recommendation\":\"Buffer standard input to a variable before executing any subprocesses that might interfere with stdin. For example: `refs=$(cat)` or `while read ... done < <(git rev-list ...)`. Refactor to ensure `stdin` is safely consumed completely by the hook before being iterated over.\",\"confidence_tier\":\"cross-checked\",\"validation_signals\":[{\"kind\":\"file_in_target\",\"result\":\"pass\",\"artifact\":\"scripts/hooks/pre-push\"},{\"kind\":\"line_range_in_file\",\"result\":\"pass\",\"artifact\":\"lines 19-41 within 46\"},{\"kind\":\"anchor_literal_found\",\"result\":\"pass\",\"artifact\":\"matched anchor: pre-push\"},{\"kind\":\"known_false_reference_absent\",\"result\":\"pass\"}]}],\"next_steps\":[\"Audit `glm-client.mjs` to determine if network/timeout errors can safely guarantee pre-flight status before deciding on auto-retry for `NETWORK_ERROR`.\",\"Fix the `pre-push` hook stdin consumption race condition to ensure tag refs are actually validated on multi-ref pushes.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-25T08:36:32.683Z"
+}

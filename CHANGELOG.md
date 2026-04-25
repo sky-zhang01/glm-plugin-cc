@@ -129,6 +129,17 @@ status/timing, and initial vs final rerank tier distributions. This lets issue
 #31 evaluate M5 ROI on corrected PA2/PA3 fixtures instead of relying on the
 invalid pre-PA2 measurement.
 
+**ROI evidence** (`test-automation/review-eval/results/v0.4.8/m5-reflection-roi.csv`,
+`test-automation/review-eval/results/v0.4.8/m5-reflection-roi-dogfood.md`):
+the corrected PA2 harness was run on C1 and C2 adversarial review cells with
+reflection off/on (N=3 each, temperature=0, seed=42, thinking=off). Reflection
+completed in all 6 reflected runs, but the outcome is mixed: C1 citation
+accuracy moved **0.78 → 0.67**, cross-checked findings moved **5 → 3**, and
+average latency moved **37.7s → 62.3s**; C2 citation accuracy stayed **1.00**,
+cross-checked findings moved **3 → 4**, proposed findings moved **0 → 1**, and
+average latency moved **38.6s → 69.2s**. M5 therefore remains opt-in for
+v0.4.8 and is not promoted to default-on review behavior.
+
 ### M4 — Repo-owned checks v0.1
 
 **Repo-owned checks** (`.glm/checks/`, `scripts/lib/repo-checks.mjs`):
