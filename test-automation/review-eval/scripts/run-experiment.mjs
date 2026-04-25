@@ -37,8 +37,9 @@
  *   correction_attempted (0/1)     — whether runChatRequestWithCorrectionRetry fired
  */
 
-import { execSync, spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync, execSync, spawnSync } from "node:child_process";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -51,6 +52,8 @@ const COMPANION = path.join(REPO_ROOT, "scripts", "glm-companion.mjs");
 const CSV_HEADER = [
   "timestamp_utc",
   "fixture_id",
+  "base_ref",
+  "head_ref",
   "mode",
   "adversarial_focus",
   "temperature",
@@ -109,6 +112,48 @@ function loadGroundTruth(fixtureId) {
   return JSON.parse(readFileSync(gtPath, "utf8"));
 }
 
+function loadFixtureMeta(fixtureId) {
+  const metaPath = path.join(CORPUS_ROOT, fixtureId, "meta.json");
+  return JSON.parse(readFileSync(metaPath, "utf8"));
+}
+
+function normalizeFixtureRef(value, fieldName) {
+  const ref = String(value || "").trim();
+  if (!ref) {
+    throw new Error(`Fixture meta missing ${fieldName}`);
+  }
+  // C3 records refs as "v0.4.0 (137234b)" for human context.
+  // Git needs the actual ref token.
+  return ref.split(/\s+/, 1)[0];
+}
+
+function createFixtureWorktree({ fixtureId, headRef }) {
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), `glm-review-${fixtureId}-`));
+  const worktreePath = path.join(tempDir, "worktree");
+  try {
+    execFileSync("git", ["worktree", "add", "--detach", worktreePath, headRef], {
+      cwd: REPO_ROOT,
+      stdio: ["ignore", "ignore", "pipe"]
+    });
+    return { tempDir, worktreePath };
+  } catch (err) {
+    rmSync(tempDir, { recursive: true, force: true });
+    throw err;
+  }
+}
+
+function removeFixtureWorktree({ tempDir, worktreePath }) {
+  try {
+    execFileSync("git", ["worktree", "remove", "--force", worktreePath], {
+      cwd: REPO_ROOT,
+      stdio: "ignore"
+    });
+  } catch {
+    // Best-effort cleanup: git may already consider the worktree gone.
+  }
+  rmSync(tempDir, { recursive: true, force: true });
+}
+
 function extractDistinctiveTokens(body, limit = 3) {
   const stopwords = new Set([
     "the", "and", "for", "with", "that", "this", "from", "into",
@@ -122,7 +167,7 @@ function extractDistinctiveTokens(body, limit = 3) {
     .slice(0, limit);
 }
 
-function scoreCitation(finding, gt) {
+function scoreCitation(finding, gt, workspaceRoot) {
   if (!finding || typeof finding.file !== "string") {
     return { ok: false, falseFile: false };
   }
@@ -133,7 +178,7 @@ function scoreCitation(finding, gt) {
   if (!allowed) return { ok: false, falseFile: false };
   // File is allowed; check that distinctive tokens from body appear in
   // the cited file within line_start-line_end ± 20 lines.
-  const absPath = path.join(REPO_ROOT, cited);
+  const absPath = path.join(workspaceRoot, cited);
   if (!existsSync(absPath)) return { ok: false, falseFile: false };
   const tokens = extractDistinctiveTokens(finding.body);
   if (tokens.length === 0) return { ok: true, falseFile: false }; // no claim to verify
@@ -149,14 +194,14 @@ function scoreCitation(finding, gt) {
   }
 }
 
-function scoreCitations(findings, gt) {
+function scoreCitations(findings, gt, workspaceRoot) {
   if (!Array.isArray(findings) || findings.length === 0) {
     return { accuracy: 1.0, falseFileHits: 0 };
   }
   let ok = 0;
   let falseFileHits = 0;
   for (const f of findings) {
-    const r = scoreCitation(f, gt);
+    const r = scoreCitation(f, gt, workspaceRoot);
     if (r.ok) ok++;
     if (r.falseFile) falseFileHits++;
   }
@@ -244,12 +289,15 @@ function runOne({
   thinking,
   runIndex,
   groundTruth,
+  workspaceRoot,
+  head,
   outPath,
   adversarialFocus
 }) {
   const companionArgs = [
     COMPANION,
     mode,
+    "--cwd", workspaceRoot,
     "--base", base,
     "--scope", "branch",
     "--json",
@@ -264,7 +312,8 @@ function runOne({
   }
 
   const started = Date.now();
-  // Run from the repo root — companion expects cwd to be the target repo.
+  // The companion implementation comes from REPO_ROOT, but the target
+  // repo under review is the fixture worktree passed via --cwd.
   const proc = spawnSync("node", companionArgs, {
     cwd: REPO_ROOT,
     encoding: "utf8",
@@ -343,7 +392,7 @@ function runOne({
   const schemaEcho = errorCode === "SCHEMA_ECHO" ? 1 : 0;
   const invalidShape = errorCode === "INVALID_SHAPE" ? 1 : 0;
   const findings = Array.isArray(parsed?.findings) ? parsed.findings : [];
-  const citation = scoreCitations(findings, groundTruth);
+  const citation = scoreCitations(findings, groundTruth, workspaceRoot);
   const tierCounts = countFindingTiers(findings);
   const passes = payload?.passes && typeof payload.passes === "object" ? payload.passes : {};
   const modelDurationMs = Number(passes.model?.durationMs);
@@ -362,6 +411,8 @@ function runOne({
   writeFileSync(sidecarPath, JSON.stringify({
     cell: {
       fixtureId,
+      base,
+      head,
       mode,
       adversarialFocus: mode === "adversarial-review" ? adversarialFocus : "",
       temperature: temperature ?? null,
@@ -425,71 +476,85 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const fixtureId = args.fixture || "C2-v046-aftercare";
   const mode = normalizeReviewMode(args.mode);
-  const base = args.base || "main";
+  const fixtureMeta = loadFixtureMeta(fixtureId);
+  const fixtureBase = normalizeFixtureRef(fixtureMeta.base_ref, "base_ref");
+  const fixtureHead = normalizeFixtureRef(fixtureMeta.head_ref, "head_ref");
+  const base = normalizeFixtureRef(args.base || fixtureBase, "base");
+  const head = normalizeFixtureRef(args.head || fixtureHead, "head");
   const temperature = args.temperature !== undefined ? Number(args.temperature) : undefined;
   const topP = args["top-p"] !== undefined ? Number(args["top-p"]) : undefined;
   const seed = args.seed !== undefined ? Number(args.seed) : undefined;
   const thinking = args.thinking || "on";
   const runs = Number(args.runs || 3);
-  const outPath = path.resolve(args.out || path.join(__dirname, "../results/v0.4.8/m3-measurement.csv"));
+  const outPath = path.resolve(args.out || path.join(__dirname, "../results/v0.4.8/m3-measurement-v2.csv"));
   const adversarialFocus = typeof args["adversarial-focus"] === "string" ? args["adversarial-focus"].trim() : "";
 
   const groundTruth = loadGroundTruth(fixtureId);
   ensureCsv(outPath);
 
-  console.log(`[run-experiment] fixture=${fixtureId}, mode=${mode}, base=${base}, temp=${temperature ?? "unset"}, top_p=${topP ?? "unset"}, seed=${seed ?? "unset"}, thinking=${thinking}, runs=${runs}, adversarial_focus=${adversarialFocus ? "set" : "unset"}`);
-  console.log(`[run-experiment] output: ${outPath}`);
+  const fixtureWorktree = createFixtureWorktree({ fixtureId, headRef: head });
+  try {
+    console.log(`[run-experiment] fixture=${fixtureId}, mode=${mode}, base=${base}, head=${head}, temp=${temperature ?? "unset"}, top_p=${topP ?? "unset"}, seed=${seed ?? "unset"}, thinking=${thinking}, runs=${runs}, adversarial_focus=${adversarialFocus ? "set" : "unset"}`);
+    console.log(`[run-experiment] worktree: ${fixtureWorktree.worktreePath}`);
+    console.log(`[run-experiment] output: ${outPath}`);
 
-  for (let i = 1; i <= runs; i++) {
-    process.stdout.write(`  run ${i}/${runs} ... `);
-    const metrics = runOne({
-      fixtureId,
-      mode,
-      base,
-      temperature,
-      topP,
-      seed,
-      thinking,
-      runIndex: i,
-      groundTruth,
-      outPath,
-      adversarialFocus
-    });
-    const row = [
-      new Date().toISOString(),
-      fixtureId,
-      mode,
-      mode === "adversarial-review" ? adversarialFocus : "",
-      temperature ?? "",
-      topP ?? "",
-      seed ?? "",
-      thinking,
-      i,
-      metrics.schema_compliance,
-      metrics.schema_empty_string,
-      metrics.schema_echo,
-      metrics.invalid_shape,
-      metrics.findings_count,
-      metrics.citation_accuracy,
-      metrics.citation_false_file_hits,
-      metrics.input_tokens,
-      metrics.output_tokens,
-      metrics.latency_ms,
-      metrics.model_duration_ms,
-      metrics.validation_status,
-      metrics.validation_duration_ms,
-      metrics.tier_proposed,
-      metrics.tier_cross_checked,
-      metrics.tier_deterministically_validated,
-      metrics.tier_rejected,
-      metrics.rejected_count,
-      metrics.error_code,
-      metrics.correction_attempted,
-      metrics.raw_payload_path
-    ].map(csvEscape).join(",");
-    appendFileSync(outPath, row + "\n");
-    const emptyFlag = metrics.schema_empty_string ? " [empty-str]" : "";
-    console.log(`schema=${metrics.schema_compliance}${emptyFlag} echo=${metrics.schema_echo} cite=${metrics.citation_accuracy} err=${metrics.error_code || "ok"} ${metrics.latency_ms}ms`);
+    for (let i = 1; i <= runs; i++) {
+      process.stdout.write(`  run ${i}/${runs} ... `);
+      const metrics = runOne({
+        fixtureId,
+        mode,
+        base,
+        temperature,
+        topP,
+        seed,
+        thinking,
+        runIndex: i,
+        groundTruth,
+        workspaceRoot: fixtureWorktree.worktreePath,
+        head,
+        outPath,
+        adversarialFocus
+      });
+      const row = [
+        new Date().toISOString(),
+        fixtureId,
+        base,
+        head,
+        mode,
+        mode === "adversarial-review" ? adversarialFocus : "",
+        temperature ?? "",
+        topP ?? "",
+        seed ?? "",
+        thinking,
+        i,
+        metrics.schema_compliance,
+        metrics.schema_empty_string,
+        metrics.schema_echo,
+        metrics.invalid_shape,
+        metrics.findings_count,
+        metrics.citation_accuracy,
+        metrics.citation_false_file_hits,
+        metrics.input_tokens,
+        metrics.output_tokens,
+        metrics.latency_ms,
+        metrics.model_duration_ms,
+        metrics.validation_status,
+        metrics.validation_duration_ms,
+        metrics.tier_proposed,
+        metrics.tier_cross_checked,
+        metrics.tier_deterministically_validated,
+        metrics.tier_rejected,
+        metrics.rejected_count,
+        metrics.error_code,
+        metrics.correction_attempted,
+        metrics.raw_payload_path
+      ].map(csvEscape).join(",");
+      appendFileSync(outPath, row + "\n");
+      const emptyFlag = metrics.schema_empty_string ? " [empty-str]" : "";
+      console.log(`schema=${metrics.schema_compliance}${emptyFlag} echo=${metrics.schema_echo} cite=${metrics.citation_accuracy} err=${metrics.error_code || "ok"} ${metrics.latency_ms}ms`);
+    }
+  } finally {
+    removeFixtureWorktree(fixtureWorktree);
   }
 }
 

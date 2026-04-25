@@ -43,6 +43,22 @@ file-cap throw, byte-cap throw, override widening, non-finite override
 clamping, dual-cap exceeded message, and the
 `inputMode != "self-collect"` invariant.
 
+### PA2 — Fixture-aware measurement harness checkout
+
+**Measurement target fix** (`test-automation/review-eval/scripts/run-experiment.mjs`):
+the review-eval harness now reads each fixture's `meta.json`, checks out the
+fixture `head_ref` in a temporary detached git worktree, and runs the companion
+against that worktree with the fixture `base_ref`. This prevents PA1/M3
+measurement runs from accidentally reviewing the current development branch
+instead of the pinned fixture diff.
+
+**Evidence hygiene**: PA2 rows default to `m3-measurement-v2.csv` so they
+cannot append to the invalid PA1/M3 CSV shape. CSV rows now include
+`base_ref` and `head_ref`, and payload sidecars store the same refs in their
+`cell` metadata. Citation scoring also reads cited files from the fixture
+worktree rather than the current repository checkout, so the harness and
+validator inspect the same candidate code.
+
 ### M5 — Optional reflection / rerank lane
 
 **Opt-in second pass** (`scripts/glm-companion.mjs`,
