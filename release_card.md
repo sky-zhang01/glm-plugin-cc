@@ -2,12 +2,12 @@
 
 Status: READY — manifests bumped 0.4.7 → 0.4.8 (3 files); CHANGELOG header de-`(unreleased)`; release_card finalized.
 
-Approval Mode: maintainer admin-bypass (solo-maintainer repo; same pattern as v0.4.4 / v0.4.5 / v0.4.6 / v0.4.7). Branch protection on `develop` requires 1 non-author approval; admin-bypass is documented and deliberate. Cross-AI review (claude-code session reviewing codex-authored PRs and vice versa) explicitly downgraded to **dual-token user-bypass** label per L0/L1 governance landed during this cycle (see `~/.claude/scripts/gitea_rest_common.sh` + Gitea issue #26). v0.4.8 is not promoted into CONTRIBUTING.md as standing policy; it is the current observed pattern.
+Approval Mode: `release/v0.4.8` is authored by claude-code and reviewed/merged by codex as the non-author reviewer. Later `develop` → `main`, tag, and release-object actions remain maintainer-controlled release actions. Cross-AI review (claude-code session reviewing codex-authored PRs and vice versa) is explicitly downgraded to **dual-token user-bypass** label per L0/L1 governance landed during this cycle (see `~/.claude/scripts/gitea_rest_common.sh` + Gitea issue #26). v0.4.8 is not promoted into CONTRIBUTING.md as standing policy; it is the current observed pattern.
 
 ## Intended Ref (v0.4.8)
 
 - Pre-tag commit on `develop`: `2080924d7fdcc9e0fdace1ee0d070c9829ea5994` (= PR #36 merge by sky, post-mirror to GitHub)
-- Manifest bump branch: `release/v0.4.8` off `develop`@`2080924` — bumps 3 manifests + CHANGELOG header. PR `release/v0.4.8` → `develop` (admin-bypass merge).
+- Manifest bump branch: `release/v0.4.8` off `develop`@`2080924` — bumps 3 manifests + CHANGELOG header. PR `release/v0.4.8` → `develop` (codex non-author review + merge).
 - PR: `develop` → `main` (Gitea, admin-bypass merge).
 - Tag: `v0.4.8` annotated, on the `develop → main` merge commit.
 - **Gitea release**: marked `Latest` (promotes past v0.4.7).
@@ -98,7 +98,7 @@ Review-eval harness (`test-automation/review-eval/scripts/run-experiment.mjs`) g
 15. M5 ROI evidence (#36 merged 2026-04-25 by sky admin-bypass). ✓
 16. **(pending)** Manifest bump: `package.json` + `.claude-plugin/plugin.json` + `.claude-plugin/marketplace.json` 0.4.7 → 0.4.8.
 17. **(pending)** CHANGELOG header change `## v0.4.8 (unreleased)` → `## v0.4.8` (release-day cut).
-18. **(pending)** Open `release/v0.4.8` PR → `develop` (Gitea) with steps 16–17. Admin-bypass merge.
+18. **(pending)** Open `release/v0.4.8` PR → `develop` (Gitea) with steps 16–17. Codex non-author review + merge.
 19. **(pending)** Open `develop` → `main` PR (Gitea). Admin-bypass merge.
 20. **(pending)** Tag `v0.4.8` annotated on the `develop → main` merge commit. Pre-push hook runs `bash scripts/ci/check-release-ready.sh v0.4.8`.
 21. **(pending)** Publish Gitea release `v0.4.8`, mark `Latest` (promotes past v0.4.7).
