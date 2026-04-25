@@ -27,9 +27,9 @@ adoption shift to security-sensitive workloads, or a recurring class
 unencodable as `.glm/checks/`.
 
 **Out of scope (separate tracks)**:
-- balanced-mode 0-findings problem → issue #32 / M2.1
-- M5 reflection ROI revalidation on PA2 harness → issue #31
-- v0.4.8 release tag + GitHub mirror
+- balanced-mode 0-findings problem → M2.1 follow-up
+- M5 reflection ROI revalidation on the fixture-aware harness
+- release publication and mirror operations
 
 ### PA1 — Production review-context fix (fail-closed on big diff)
 
@@ -252,8 +252,8 @@ contradicting the command contract documented in `commands/review.md`.
 the Phase 7d power-up sweep was still running. This v0.4.7 final tag
 refreshes all outcome tables below with the complete 457-run sweep
 (N=81-84 per C3 cell, N=42-44 per C1 cell), bumps the three manifests
-from `0.4.7-beta1 → 0.4.7`, and is marked `Latest` on both Gitea and
-GitHub. Behavior is identical between beta1 and final — only the
+from `0.4.7-beta1 → 0.4.7`, and is marked `Latest` on public releases.
+Behavior is identical between beta1 and final — only the
 empirical numbers moved.
 
 Review reliability pass. Addresses the v0.4.5 SCHEMA_ECHO dogfood
@@ -270,7 +270,7 @@ significance (p = **0.5348 / 0.7466 / 0.7812**), observed rates are
 all three temperatures. The exact power depends on the assumed
 alternative; the supported release claim is "no detected effect in
 this sweep", so the release ships no sampling-parameter default.
-Closes Gitea issue #7.
+This closes the v0.4.7 review-reliability investigation.
 
 The initial 9-run sanity sweep on C2 (medium diff) was too thin to
 justify any default change. Per user push-back, the sweep was expanded
@@ -459,7 +459,7 @@ failure mode at any temperature under the current model snapshot.
     Accepts `--base <ref>` for pinning the reviewed diff baseline.
   - `summarize.mjs` — aggregates CSVs by cell (fixture × temp × top_p ×
     seed × thinking), prints a markdown-compatible table, applies the
-    issue #7 success criteria.
+    review-eval success criteria.
   - Each fixture ships `meta.json` (provenance: base/head refs,
     line/byte counts, touched-file list) and `ground-truth.json`
     (`allowed_files` + `known_false_files` wrong-project sentinel list
@@ -765,10 +765,9 @@ actionable wins in v0.4.7 are:
       content-faithfulness mitigations (deterministic claim verifier
       + typed claim anchors in schema).
 
-Gitea issue #7 is closed by this changelog with the properly-
-powered temperature null documented. A follow-up issue is not
-opened for temperature default — the 457-run sweep cannot support
-one. If a future investigation wants to detect per-step effects
+The properly powered temperature null is documented here. A follow-up for
+temperature default change is not opened because the 457-run sweep cannot
+support one. If a future investigation wants to detect per-step effects
 smaller than ~10pct, N ≥ ~200 per cell would be required.
 
 ### Unchanged
@@ -1256,11 +1255,8 @@ input`; now uses `"./"` (matches `planning-with-files` and
 
 **Breaking auth change**: API key now persists to
 `~/.config/glm-plugin-cc/config.json` (mode 0600) via `/glm:setup`
-instead of reading from the `ZAI_API_KEY` environment variable.
-Mirrors codex CLI's `~/.codex/auth.json` pattern (confirmed by [Issue
-openai/codex#5212](https://github.com/openai/codex/issues/5212) closed
-as "not planned" — codex rejected env-var-only mode, keeps auth.json
-the single source).
+instead of reading from the `ZAI_API_KEY` environment variable. The plugin
+uses a local config file as its single source of runtime credentials.
 
 Earlier releases (v0.1.0 → v0.3.4) advertised "API key never on disk"
 as a red line. That rule was stricter than codex itself and created a

@@ -1,15 +1,12 @@
 # glm-plugin-cc
 
 Claude Code plugin: use 智谱 GLM models as an external reviewer or rescue
-backend via **OpenAI-compatible HTTP**. Scaffold derived from
-[openai/codex-plugin-cc](https://github.com/openai/codex-plugin-cc) (Apache-2.0).
+backend via **OpenAI-compatible HTTP**.
 
 ## Why this plugin exists
 
-This plugin is one of the external reviewers feeding into an internal
-SEV harness's `/verify` Layer 3 orchestration. When the primary codex
-reviewer is rate-limited or unavailable, GLM is the secondary provider
-in the fallback chain.
+This plugin is for teams that want a GLM-powered second opinion inside a
+Claude Code session without replacing their primary Claude workflow.
 
 It does **not** replace GLM as a provider in the Claude Code CLI itself —
 it's a plugin that calls GLM over OpenAI-compatible HTTP from inside a
@@ -19,10 +16,8 @@ second opinion.
 Design constraints:
 
 - **Stateless HTTP.** No persistent sessions, no broker subprocess.
-- **No Stop hook.** Orchestration and Stop-gate logic live in the SEV
-  harness (`completion-stop-guard.sh`), not in plugins. This separation
-  is documented in the internal harness's
-  `docs/quality-loop-v3-boundary-crosswalk.md §4.4`.
+- **No Stop hook.** Review orchestration stays explicit; this plugin does not
+  install hidden stop-gate behaviour.
 - **Zero runtime npm deps.** Only Node stdlib (global `fetch` since 18.18).
 - **OpenAI-compatible schema.** Works with 智谱 BigModel's
   `https://open.bigmodel.cn/api/.../chat/completions` endpoints out of the box;
@@ -43,8 +38,7 @@ Add to your Claude Code plugin marketplace:
 GLM is API-key based. There is no `glm login` OAuth and no external CLI
 to install — the plugin itself is the runtime. Both the endpoint
 preset and the API key persist to `~/.config/glm-plugin-cc/config.json`
-(dir 0700 / file 0600), mirroring the codex CLI pattern
-(`~/.codex/auth.json`).
+(dir 0700 / file 0600).
 
 1. **Endpoint preset** (all OpenAI-compatible):
    - `coding-plan` — `https://open.bigmodel.cn/api/coding/paas/v4`
@@ -56,8 +50,8 @@ preset and the API key persist to `~/.config/glm-plugin-cc/config.json`
 2. **API key** — persisted to the same config file (field `api_key`,
    file mode 0600). Set / rotate via `/glm:setup --api-key <key>` or
    the interactive paste flow. There is no environment-variable
-   fallback (`/glm:setup` is the single entry point, matching
-   `codex login --api-key <key>`).
+fallback (`/glm:setup` is the single entry point, matching
+the plugin's local config-file model).
 
 ### First-time setup
 
@@ -118,8 +112,7 @@ Priority for model + endpoint: CLI flag > config file > built-in default
 
 ## Model configuration
 
-Default model is **`glm-5.1`** — the flagship tier on 智谱 BigModel.
-Picked to match codex CLI's default tier (`gpt-5.4`):
+Default model is **`glm-5.1`** — the flagship tier on 智谱 BigModel:
 
 - Artificial Analysis Intelligence Index: `gpt-5.4` = 57, `glm-5.1` = 51
   (closest open-weights model)
@@ -129,8 +122,8 @@ Picked to match codex CLI's default tier (`gpt-5.4`):
 - Available to all 智谱 Coding Plan tiers (Max/Pro/Lite) since
   2026-03-28
 
-This mirrors the codex-plugin-cc pattern of a single default (no
-per-command model split) — override per-invocation with `--model <name>`
+The plugin intentionally uses a single default model. Override per invocation
+with `--model <name>`
 or project-wide via `default_model` in the config file. See 智谱 BigModel's
 text-model catalog for available names.
 
@@ -150,9 +143,8 @@ are **rejected** — this plugin only sends text messages.
 ### Thinking / reasoning
 
 Thinking is **on by default across all commands**, mirroring codex
-CLI's single `model_reasoning_effort = "medium"` default on `gpt-5.4`
-(codex applies `medium` reasoning uniformly, not per-task — we do the
-same). Pass `--thinking off` on any command to disable for quick /
+Thinking is **on by default across all commands**. Pass `--thinking off` on
+any command to disable for quick /
 light calls. GLM routes this via the `thinking: {"type": "enabled" |
 "disabled"}` request field.
 
@@ -171,7 +163,7 @@ Claude Code session
    │               ├─ lib/preset-config.mjs (XDG config)
    │               └─ lib/render.mjs       (schema-validated output)
    │
-   └─ harness SEV /verify Layer 3 (external orchestration, stop-gate)
+   └─ optional external orchestration / review workflow
 ```
 
 ## License
@@ -181,3 +173,7 @@ Apache-2.0. See [LICENSE](./LICENSE) and [NOTICE](./NOTICE).
 ## Changelog
 
 See [CHANGELOG.md](./CHANGELOG.md).
+
+## Distribution
+
+See [docs/distribution.md](./docs/distribution.md).

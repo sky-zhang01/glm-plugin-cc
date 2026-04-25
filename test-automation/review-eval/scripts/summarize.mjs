@@ -20,7 +20,7 @@
  * Prints a plain-text table suitable for pasting into a PR body or
  * CHANGELOG. NOT commit-formatted — this is operator-facing output.
  *
- * Decision helper: highlights cells that meet the issue #7 success
+ * Decision helper: highlights cells that meet the review-eval success
  * criteria (schema_compliance >= 0.95, schema_echo = 0,
  * citation_accuracy >= 0.90).
  */
@@ -288,7 +288,7 @@ function main() {
         ? `C${rerankCompleted}/F${rerankFailed}/S${rerankSkipped}; ${rerankInitial}->${rerankFinal}; ${formatMeanStd(rerankMean, 0, true)}`
         : "off";
 
-    // Success criteria (issue #7): schema_compliance is aligned with
+    // Success criteria: schema_compliance is aligned with
     // classifyReviewPayload (type-valid). schema_empty_string is tracked
     // but does NOT block PASS — empty-content payloads are a content-
     // quality concern, not a plugin-level validity failure.

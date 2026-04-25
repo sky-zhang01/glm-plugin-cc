@@ -1841,8 +1841,8 @@ index 4a15b94..cc3bdca 100644
 -Out of Scope: GitHub public mirror (separate card / snapshot flow); multi-provider fallback; CI pipeline (v0.5+); cancel atomicity (M3 from v0.3.4 codex review, still deferred).
 +Intended Ref
 +- Feature branch: `fix/v046-hardening-aftercare` off `develop`
-+- PR #5: `fix/v046-hardening-aftercare` → `develop` (Gitea)
-+- PR #6: `develop` → `main` (Gitea)
++- Feature review: `fix/v046-hardening-aftercare` → `develop`
++- Release review: `develop` → `main`
 +- Tag: `v0.4.6` annotated, on the `develop → main` merge commit
 +- Mirrored: GitHub public repo (main + tag + release, marked Latest)
  
@@ -1902,7 +1902,7 @@ index 4a15b94..cc3bdca 100644
 +   pre-push hook on tag pushes — catching issues BEFORE `git push`
 +   reaches GitHub rather than after.
  
--Codex-alignment Evidence: [Issue openai/codex#5212](https://github.com/openai/codex/issues/5212) explicitly closed "not planned" — codex maintainers rejected "use OPENAI_API_KEY env var without writing to auth.json". Official [Authentication docs](https://developers.openai.com/codex/auth) confirm auth.json is the single source. v0.4.0 adopts the same posture.
+-Auth Evidence: local config file is the single runtime credential source for v0.4.0.
 +## Out of Scope
  
 -CI Evidence: no CI pipeline in v0.4.0 (planned v0.5+); ref-bound verification is local-only.
@@ -1939,10 +1939,10 @@ index 4a15b94..cc3bdca 100644
 +11. `npm run ci:local`
 +12. Adversarial review (Codex primary if quota allows, else GLM fallback
 +    with explicit waiver acknowledging limitations)
-+13. Push to Gitea only. Open PR #5 → `develop`. Paste adversarial
-+    verdict in PR body.
-+14. Gitea CI green → auto-merge PR #5 to develop
-+15. Open Gitea PR #6: develop → main. Merge.
++13. Push the feature branch. Open feature review → `develop`. Paste
++    adversarial verdict in the review body.
++14. CI green → merge feature review to develop
++15. Open release review: develop → main. Merge.
 +16. Tag v0.4.6 annotated on main merge commit (pre-push will run
 +    check-release-ready.sh automatically). Push tag.
 +17. Publish Gitea release v0.4.6 (Latest auto-set)
@@ -2016,7 +2016,7 @@ index 4a15b94..cc3bdca 100644
 +
 +## CI Evidence
 +
-+To be populated after Gitea PR #5 + PR #6 CI runs complete.
++To be populated after feature + release CI runs complete.
 +
 +## Rollback
 +

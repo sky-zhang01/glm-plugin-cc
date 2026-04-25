@@ -6,7 +6,7 @@ Scope: implementation roadmap and milestone plan, no code changes in this docume
 Depends on:
   - docs/plans/2026-04-24-review-architecture-v1.md
   - docs/plans/2026-04-24-review-design-external-baseline.md
-  - docs/plans/2026-04-22-review-fabrication-root-cause-design.md
+  - docs/anti-hallucination-roadmap.md
   - docs/anti-hallucination-roadmap.md
 Issue: #12
 ```

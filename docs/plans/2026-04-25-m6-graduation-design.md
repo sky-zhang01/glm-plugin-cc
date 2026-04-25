@@ -136,7 +136,7 @@ each surface needs without introducing surface-specific code paths.
 
 The conservative outcome is consistent with the roadmap warning ("cargo-cult
 risk is highest"). It also explains why review-mode-on-real-fixture-diff
-keeps producing zero findings (M2.1 negative result, issue #32): the
+keeps producing zero findings (M2.1 negative result): the
 problem is not surface coverage gaps; it is balanced-mode prompt /
 render-policy calibration, which is its own track.
 
@@ -170,10 +170,9 @@ Without one of those, M6 stays closed.
 ## Out of scope
 
 - Any new prompt surface, validator kind, or context-collection step.
-- The balanced-mode 0-findings problem (issue #32 / M2.1 follow-up).
-- M5 reflection ROI re-validation (issue #31).
-- v0.4.8 release tag mechanics (release_card.md and GitHub mirror are
-  separate workstreams).
+- The balanced-mode 0-findings problem (M2.1 follow-up).
+- M5 reflection ROI re-validation.
+- v0.4.8 release mechanics.
 
 ## References
 

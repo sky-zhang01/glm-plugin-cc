@@ -2,11 +2,11 @@
 
 > **Purpose**: empirical characterization of GLM-5.1 behavior on `/glm:review` + `/glm:adversarial-review` under different sampling parameters. Tracks whether changing defaults (temperature / top_p / seed / thinking) materially improves schema compliance, citation accuracy, and self-consistency.
 >
-> Tracking: Gitea issue #7 (private instance — not linked from public repo).
+> Tracking: release-local evaluation criteria for review reliability.
 
 ## Principle
 
-The maintainer's directive (issue #7 comment 2026-04-21):
+Maintainer directive:
 
 > 模型也会更新的比较快 测了用了一堆 token 后 也是模型一更新就没啥用了
 
@@ -52,7 +52,7 @@ exercise the adversarial focus-text contract intentionally, pass
 
 ## Non-goals for v0.4.7 sanity sweep (original scope, superseded by expanded sweep)
 
-- No top_p / thinking / seed parameter sweep (scope reduction per issue #7 comment).
+- No top_p / thinking / seed parameter sweep in the original sanity scope.
 - ~~No C1 (small) / C3 (large) fixtures (single-diff sweep only).~~ **Superseded** — expanded-sweep added both in commit 7a971a7; v0.4.7 ships all three fixtures and a 457-run five-phase sweep.
 - No context-packing variant comparison (P1-P4 deferred).
 - No in-release default change unless sanity data shows strong signal. (Outcome: no default change; final effective model-N is C3 81/83/84 and C1 44/43/42, with no significant C3 temperature contrast.)
@@ -82,7 +82,7 @@ exercise the adversarial focus-text contract intentionally, pass
 
 This is identical to the spot-check I ran manually against workflow-governor — now automated so we can score many runs quickly.
 
-## Success criteria (from issue #7)
+## Success criteria
 
 Before any default sampling change ships, the chosen combo must achieve on C2:
 

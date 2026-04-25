@@ -858,10 +858,9 @@ async function runChatRequest(cwd, options = {}) {
     // Default body = existing v0.4.6 shape (no sampling params). We only
     // include temperature / top_p / seed / frequency_penalty / presence_penalty
     // when the caller explicitly passes them. Rationale documented in
-    // Gitea issue #7: no empirical basis for a default choice yet; the CLI
-    // exposes the knobs so power users can opt in. Default change will
-    // happen in a later release after the sanity-sweep data lands in
-    // test-automation/review-eval/results/.
+    // There is no empirical basis for a default sampling choice yet; the CLI
+    // exposes the knobs so power users can opt in. A future default change
+    // should be based on review-eval evidence rather than preference.
     const body = buildChatRequestBody(options, {
       model,
       maxTokens,

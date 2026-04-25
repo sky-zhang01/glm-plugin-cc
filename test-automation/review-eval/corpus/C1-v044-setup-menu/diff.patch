@@ -222,8 +222,8 @@ index 73a7505..454b9c3 100644
 +
 +Intended Ref
 +- Feature branch: `fix/setup-interactive-menu` off `develop`
-+- PR #1: `fix/setup-interactive-menu` → `develop` (Gitea)
-+- PR #2: `develop` → `main` (Gitea)
++- Feature review: `fix/setup-interactive-menu` → `develop`
++- Release review: `develop` → `main`
 +- Tag: `v0.4.4` annotated, on the `develop → main` merge commit
 +- Mirrored: GitHub public repo (main + tag + release)
 +

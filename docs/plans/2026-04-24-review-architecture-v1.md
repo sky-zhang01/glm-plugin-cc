@@ -6,7 +6,7 @@ Approval: DESIGN_OK (reviewed by Claude, 2026-04-24)
 Scope: design only, no implementation in this document
 Depends on:
   - docs/plans/2026-04-24-review-design-external-baseline.md
-  - docs/plans/2026-04-22-review-fabrication-root-cause-design.md
+  - docs/anti-hallucination-roadmap.md
 Issue: #12
 ```
 

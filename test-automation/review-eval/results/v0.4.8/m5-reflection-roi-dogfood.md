@@ -41,4 +41,4 @@ Evidence:
 Decision:
 - Keep `/glm:review --reflect` and `/glm:adversarial-review --reflect` available for targeted dogfood and difficult reviews.
 - Do not make reflection default-on in v0.4.8.
-- Close issue #31 as evidence-backed opt-in, not as a promotion-to-default result.
+- Record the result as evidence-backed opt-in, not as a promotion-to-default result.

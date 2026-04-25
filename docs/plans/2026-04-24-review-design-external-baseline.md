@@ -48,7 +48,7 @@ review prompt than a grounded review agent.
 The most relevant existing design artifacts remain:
 
 - `docs/anti-hallucination-roadmap.md`
-- `docs/plans/2026-04-22-review-fabrication-root-cause-design.md`
+- `docs/anti-hallucination-roadmap.md`
 
 The key carry-forward point is that the repo already recognized the main gap:
 parse-layer robustness is necessary but insufficient without post-parse,

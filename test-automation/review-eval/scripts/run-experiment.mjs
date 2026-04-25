@@ -12,7 +12,7 @@
  *   node run-experiment.mjs --mode adversarial-review \
  *        --adversarial-focus "stress risky-path tests" --runs 3
  *
- * Philosophy (per Gitea issue #7):
+ * Philosophy:
  *   - Small, targeted experiments. 9 calls not 900.
  *   - Every row is self-describing: the CSV includes the parameter
  *     cell + the metrics + a timestamp, so future releases can diff
