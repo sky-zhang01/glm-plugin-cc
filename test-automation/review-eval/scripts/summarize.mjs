@@ -5,7 +5,7 @@
  * Usage:
  *   node summarize.mjs ../results/v0.4.7/sanity-sweep.csv
  *
- * Aggregation key: (mode, fixture_id, temperature, top_p, seed, thinking).
+ * Aggregation key: (mode, fixture_id, temperature, top_p, seed, thinking, reflect, reflect_model).
  * For each cell, reports:
  *   - N: number of runs
  *   - schema_compliance rate (mean)
@@ -176,12 +176,12 @@ function writeDogfoodPacket({ outPath, csvFiles, rows, summaryRows }) {
     "",
     "## Summary Cells",
     "",
-    "| mode | fixture | N | schema | rejected | tiers | latency_ms | validation_ms | pass |",
-    "|---|---|---:|---:|---:|---|---:|---:|---|"
+    "| mode | fixture | reflect | N | schema | rejected | tiers | rerank | latency_ms | validation_ms | pass |",
+    "|---|---|---|---:|---:|---:|---|---|---:|---:|---|"
   ];
   for (const row of summaryRows) {
     lines.push(
-      `| ${row.mode} | ${row.fixture} | ${row.N} | ${row.schema.toFixed(2)} | ${row.rejected} | ${row.tierSummary} | ${Math.round(row.latencyMean)} | ${Math.round(row.validationMean)} | ${row.passes ? "yes" : "no"} |`
+      `| ${row.mode} | ${row.fixture} | ${row.reflect} | ${row.N} | ${row.schema.toFixed(2)} | ${row.rejected} | ${row.tierSummary} | ${row.rerankSummary} | ${Math.round(row.latencyMean)} | ${Math.round(row.validationMean)} | ${row.passes ? "yes" : "no"} |`
     );
   }
 
@@ -232,7 +232,9 @@ function main() {
       row.temperature || "unset",
       row.top_p || "unset",
       row.seed || "unset",
-      row.thinking
+      row.thinking,
+      row.reflect || "off",
+      row.reflect_model || "unset"
     ].join("|");
     if (!cells.has(key)) cells.set(key, []);
     cells.get(key).push(row);
@@ -243,15 +245,15 @@ function main() {
   console.log("====================");
   console.log("");
   console.log(
-    "fixture | mode | temp | top_p | seed | think | N | schema | empty_str | echo | invalid | cite_acc (±sd) | false_file | tiers | rejected | model_ms (±sd) | validation_ms (±sd) | latency_ms (±sd) | PASS?"
+    "fixture | mode | temp | top_p | seed | think | reflect | refl_model | N | schema | empty_str | echo | invalid | cite_acc (±sd) | false_file | tiers | rejected | rerank | model_ms (±sd) | validation_ms (±sd) | latency_ms (±sd) | PASS?"
   );
   console.log(
-    "--------|------|------|-------|------|-------|---|--------|-----------|------|---------|----------------|-----------|-------|----------|---------------|--------------------|-----------------|------"
+    "--------|------|------|-------|------|-------|---------|------------|---|--------|-----------|------|---------|----------------|-----------|-------|----------|--------|---------------|--------------------|-----------------|------"
   );
 
   const summaryRows = [];
   for (const [key, rows] of cells) {
-    const [mode, fixture, temp, topP, seed, thinking] = key.split("|");
+    const [mode, fixture, temp, topP, seed, thinking, reflect, reflectModel] = key.split("|");
     const N = rows.length;
     const sc = mean(rows.map((r) => Number(r.schema_compliance)));
     // schema_empty_string column may be absent in older CSVs; treat NaN as 0
@@ -270,11 +272,21 @@ function main() {
     const modelStd = stdev(rows.map((r) => numberOrZero(r.model_duration_ms)));
     const validationMean = mean(rows.map((r) => numberOrZero(r.validation_duration_ms)));
     const validationStd = stdev(rows.map((r) => numberOrZero(r.validation_duration_ms)));
+    const rerankMean = mean(rows.map((r) => numberOrZero(r.rerank_duration_ms)));
+    const rerankCompleted = rows.filter((r) => r.rerank_status === "completed").length;
+    const rerankFailed = rows.filter((r) => r.rerank_status === "failed").length;
+    const rerankSkipped = rows.filter((r) => r.rerank_status === "skipped").length;
     const proposed = rows.reduce((a, r) => a + numberOrZero(r.tier_proposed), 0);
     const crossChecked = rows.reduce((a, r) => a + numberOrZero(r.tier_cross_checked), 0);
     const deterministic = rows.reduce((a, r) => a + numberOrZero(r.tier_deterministically_validated), 0);
     const rejected = rows.reduce((a, r) => a + numberOrZero(r.tier_rejected || r.rejected_count), 0);
     const tierSummary = `P${proposed}/C${crossChecked}/D${deterministic}/R${rejected}`;
+    const rerankInitial = rows.reduce((a, r) => a + numberOrZero(r.rerank_initial_findings), 0);
+    const rerankFinal = rows.reduce((a, r) => a + numberOrZero(r.rerank_final_findings), 0);
+    const rerankSummary =
+      reflect === "on"
+        ? `C${rerankCompleted}/F${rerankFailed}/S${rerankSkipped}; ${rerankInitial}->${rerankFinal}; ${formatMeanStd(rerankMean, 0, true)}`
+        : "off";
 
     // Success criteria (issue #7): schema_compliance is aligned with
     // classifyReviewPayload (type-valid). schema_empty_string is tracked
@@ -294,6 +306,8 @@ function main() {
         topP,
         seed,
         thinking,
+        reflect,
+        reflectModel,
         N,
         sc.toFixed(2),
         emptyStr.toFixed(2),
@@ -303,6 +317,7 @@ function main() {
         ff,
         tierSummary,
         rejected,
+        rerankSummary,
         formatMeanStd(modelMean, modelStd, true),
         formatMeanStd(validationMean, validationStd, true),
         `${Math.round(latMean)} (±${Math.round(latStd)})`,
@@ -313,6 +328,8 @@ function main() {
       key,
       mode,
       fixture,
+      reflect,
+      reflectModel,
       N,
       passes,
       schema: sc,
@@ -322,6 +339,7 @@ function main() {
       ff,
       tierSummary,
       rejected,
+      rerankSummary,
       modelMean,
       validationMean,
       latencyMean: latMean

@@ -60,6 +60,8 @@ const CSV_HEADER = [
   "top_p",
   "seed",
   "thinking",
+  "reflect",
+  "reflect_model",
   "run_index",
   "schema_compliance",
   "schema_empty_string",
@@ -74,6 +76,18 @@ const CSV_HEADER = [
   "model_duration_ms",
   "validation_status",
   "validation_duration_ms",
+  "rerank_status",
+  "rerank_duration_ms",
+  "rerank_initial_findings",
+  "rerank_final_findings",
+  "rerank_initial_proposed",
+  "rerank_initial_cross_checked",
+  "rerank_initial_deterministically_validated",
+  "rerank_initial_rejected",
+  "rerank_final_proposed",
+  "rerank_final_cross_checked",
+  "rerank_final_deterministically_validated",
+  "rerank_final_rejected",
   "tier_proposed",
   "tier_cross_checked",
   "tier_deterministically_validated",
@@ -264,12 +278,13 @@ function csvEscape(value) {
   return s;
 }
 
-function buildPayloadSidecarPath(outPath, fixtureId, mode, temperature, topP, seed, runIndex) {
+function buildPayloadSidecarPath(outPath, fixtureId, mode, temperature, topP, seed, runIndex, reflect) {
   const dir = path.join(path.dirname(outPath), "payloads");
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const cellTag = [
     fixtureId,
     mode,
+    reflect ? "reflect-on" : "reflect-off",
     `t${temperature ?? "unset"}`,
     `tp${topP ?? "unset"}`,
     `s${seed ?? "unset"}`,
@@ -292,7 +307,9 @@ function runOne({
   workspaceRoot,
   head,
   outPath,
-  adversarialFocus
+  adversarialFocus,
+  reflect,
+  reflectModel
 }) {
   const companionArgs = [
     COMPANION,
@@ -307,6 +324,8 @@ function runOne({
   if (temperature !== undefined) companionArgs.push("--temperature", String(temperature));
   if (topP !== undefined) companionArgs.push("--top-p", String(topP));
   if (seed !== undefined) companionArgs.push("--seed", String(seed));
+  if (reflect) companionArgs.push("--reflect");
+  if (reflectModel) companionArgs.push("--reflect-model", reflectModel);
   if (mode === "adversarial-review" && adversarialFocus) {
     companionArgs.push(adversarialFocus);
   }
@@ -322,7 +341,7 @@ function runOne({
   });
   const latencyMs = Date.now() - started;
 
-  const sidecarPath = buildPayloadSidecarPath(outPath, fixtureId, mode, temperature, topP, seed, runIndex);
+  const sidecarPath = buildPayloadSidecarPath(outPath, fixtureId, mode, temperature, topP, seed, runIndex, reflect);
   const sidecarRelative = path.relative(path.dirname(outPath), sidecarPath);
 
   let payload;
@@ -398,6 +417,13 @@ function runOne({
   const modelDurationMs = Number(passes.model?.durationMs);
   const validationDurationMs = Number(passes.validation?.durationMs);
   const validationStatus = typeof passes.validation?.status === "string" ? passes.validation.status : "";
+  const rerank = passes.rerank && typeof passes.rerank === "object" ? passes.rerank : null;
+  const rerankStatus = typeof rerank?.status === "string" ? rerank.status : "";
+  const rerankDurationMs = Number(rerank?.durationMs);
+  const rerankInitial = rerank?.initial && typeof rerank.initial === "object" ? rerank.initial : {};
+  const rerankFinal = rerank?.final && typeof rerank.final === "object" ? rerank.final : {};
+  const rerankInitialTiers = rerankInitial.tierCounts && typeof rerankInitial.tierCounts === "object" ? rerankInitial.tierCounts : {};
+  const rerankFinalTiers = rerankFinal.tierCounts && typeof rerankFinal.tierCounts === "object" ? rerankFinal.tierCounts : {};
 
   // Usage extraction: companion doesn't currently pass through BigModel's
   // usage block, so these are often 0. Captured for future use if we
@@ -415,6 +441,8 @@ function runOne({
       head,
       mode,
       adversarialFocus: mode === "adversarial-review" ? adversarialFocus : "",
+      reflect: Boolean(reflect),
+      reflectModel: reflectModel || null,
       temperature: temperature ?? null,
       topP: topP ?? null,
       seed: seed ?? null,
@@ -433,6 +461,22 @@ function runOne({
       model_duration_ms: Number.isFinite(modelDurationMs) ? modelDurationMs : 0,
       validation_status: validationStatus,
       validation_duration_ms: Number.isFinite(validationDurationMs) ? validationDurationMs : 0,
+      rerank_status: rerankStatus,
+      rerank_duration_ms: Number.isFinite(rerankDurationMs) ? rerankDurationMs : 0,
+      rerank_initial_findings: numberOrZero(rerankInitial.totalFindings),
+      rerank_final_findings: numberOrZero(rerankFinal.totalFindings),
+      rerank_initial_tier_distribution: {
+        proposed: numberOrZero(rerankInitialTiers.proposed),
+        cross_checked: numberOrZero(rerankInitialTiers.cross_checked),
+        deterministically_validated: numberOrZero(rerankInitialTiers.deterministically_validated),
+        rejected: numberOrZero(rerankInitialTiers.rejected)
+      },
+      rerank_final_tier_distribution: {
+        proposed: numberOrZero(rerankFinalTiers.proposed),
+        cross_checked: numberOrZero(rerankFinalTiers.cross_checked),
+        deterministically_validated: numberOrZero(rerankFinalTiers.deterministically_validated),
+        rejected: numberOrZero(rerankFinalTiers.rejected)
+      },
       tier_distribution: tierCounts,
       rejected_count: tierCounts.rejected,
       error_code: errorCode
@@ -461,6 +505,18 @@ function runOne({
     model_duration_ms: Number.isFinite(modelDurationMs) ? modelDurationMs : 0,
     validation_status: validationStatus,
     validation_duration_ms: Number.isFinite(validationDurationMs) ? validationDurationMs : 0,
+    rerank_status: rerankStatus,
+    rerank_duration_ms: Number.isFinite(rerankDurationMs) ? rerankDurationMs : 0,
+    rerank_initial_findings: numberOrZero(rerankInitial.totalFindings),
+    rerank_final_findings: numberOrZero(rerankFinal.totalFindings),
+    rerank_initial_proposed: numberOrZero(rerankInitialTiers.proposed),
+    rerank_initial_cross_checked: numberOrZero(rerankInitialTiers.cross_checked),
+    rerank_initial_deterministically_validated: numberOrZero(rerankInitialTiers.deterministically_validated),
+    rerank_initial_rejected: numberOrZero(rerankInitialTiers.rejected),
+    rerank_final_proposed: numberOrZero(rerankFinalTiers.proposed),
+    rerank_final_cross_checked: numberOrZero(rerankFinalTiers.cross_checked),
+    rerank_final_deterministically_validated: numberOrZero(rerankFinalTiers.deterministically_validated),
+    rerank_final_rejected: numberOrZero(rerankFinalTiers.rejected),
     tier_proposed: tierCounts.proposed,
     tier_cross_checked: tierCounts.cross_checked,
     tier_deterministically_validated: tierCounts.deterministically_validated,
@@ -470,6 +526,11 @@ function runOne({
     correction_attempted: correctionAttempted,
     raw_payload_path: sidecarRelative
   };
+}
+
+function numberOrZero(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
 }
 
 async function main() {
@@ -485,6 +546,8 @@ async function main() {
   const topP = args["top-p"] !== undefined ? Number(args["top-p"]) : undefined;
   const seed = args.seed !== undefined ? Number(args.seed) : undefined;
   const thinking = args.thinking || "on";
+  const reflect = args.reflect === true || String(args.reflect || "").toLowerCase() === "true" || String(args.reflect || "").toLowerCase() === "on";
+  const reflectModel = typeof args["reflect-model"] === "string" ? args["reflect-model"].trim() : "";
   const runs = Number(args.runs || 3);
   const outPath = path.resolve(args.out || path.join(__dirname, "../results/v0.4.8/m3-measurement-v2.csv"));
   const adversarialFocus = typeof args["adversarial-focus"] === "string" ? args["adversarial-focus"].trim() : "";
@@ -494,7 +557,7 @@ async function main() {
 
   const fixtureWorktree = createFixtureWorktree({ fixtureId, headRef: head });
   try {
-    console.log(`[run-experiment] fixture=${fixtureId}, mode=${mode}, base=${base}, head=${head}, temp=${temperature ?? "unset"}, top_p=${topP ?? "unset"}, seed=${seed ?? "unset"}, thinking=${thinking}, runs=${runs}, adversarial_focus=${adversarialFocus ? "set" : "unset"}`);
+    console.log(`[run-experiment] fixture=${fixtureId}, mode=${mode}, base=${base}, head=${head}, temp=${temperature ?? "unset"}, top_p=${topP ?? "unset"}, seed=${seed ?? "unset"}, thinking=${thinking}, reflect=${reflect ? "on" : "off"}, reflect_model=${reflectModel || "unset"}, runs=${runs}, adversarial_focus=${adversarialFocus ? "set" : "unset"}`);
     console.log(`[run-experiment] worktree: ${fixtureWorktree.worktreePath}`);
     console.log(`[run-experiment] output: ${outPath}`);
 
@@ -513,7 +576,9 @@ async function main() {
         workspaceRoot: fixtureWorktree.worktreePath,
         head,
         outPath,
-        adversarialFocus
+        adversarialFocus,
+        reflect,
+        reflectModel
       });
       const row = [
         new Date().toISOString(),
@@ -526,6 +591,8 @@ async function main() {
         topP ?? "",
         seed ?? "",
         thinking,
+        reflect ? "on" : "off",
+        reflectModel,
         i,
         metrics.schema_compliance,
         metrics.schema_empty_string,
@@ -540,6 +607,18 @@ async function main() {
         metrics.model_duration_ms,
         metrics.validation_status,
         metrics.validation_duration_ms,
+        metrics.rerank_status,
+        metrics.rerank_duration_ms,
+        metrics.rerank_initial_findings,
+        metrics.rerank_final_findings,
+        metrics.rerank_initial_proposed,
+        metrics.rerank_initial_cross_checked,
+        metrics.rerank_initial_deterministically_validated,
+        metrics.rerank_initial_rejected,
+        metrics.rerank_final_proposed,
+        metrics.rerank_final_cross_checked,
+        metrics.rerank_final_deterministically_validated,
+        metrics.rerank_final_rejected,
         metrics.tier_proposed,
         metrics.tier_cross_checked,
         metrics.tier_deterministically_validated,
@@ -551,7 +630,8 @@ async function main() {
       ].map(csvEscape).join(",");
       appendFileSync(outPath, row + "\n");
       const emptyFlag = metrics.schema_empty_string ? " [empty-str]" : "";
-      console.log(`schema=${metrics.schema_compliance}${emptyFlag} echo=${metrics.schema_echo} cite=${metrics.citation_accuracy} err=${metrics.error_code || "ok"} ${metrics.latency_ms}ms`);
+      const rerankFlag = reflect ? ` rerank=${metrics.rerank_status || "missing"}` : "";
+      console.log(`schema=${metrics.schema_compliance}${emptyFlag} echo=${metrics.schema_echo} cite=${metrics.citation_accuracy}${rerankFlag} err=${metrics.error_code || "ok"} ${metrics.latency_ms}ms`);
     }
   } finally {
     removeFixtureWorktree(fixtureWorktree);
