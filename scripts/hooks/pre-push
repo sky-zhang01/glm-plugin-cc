@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Git pre-push hook: runs the full local CI suite before any push.
-# Blocks push on any failure so gitea / GitHub never see a broken state.
+# Blocks push on any failure so remotes never see a broken state.
 # When pushing a version tag (refs/tags/vX.Y.Z), additionally runs the
 # release-ready gate (replaces the broken verify-release.yml workflow).
 #

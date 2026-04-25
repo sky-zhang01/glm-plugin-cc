@@ -89,7 +89,7 @@
     "scripts/lib/state.mjs",
     "scripts/lib/tracked-jobs.mjs",
     "scripts/session-lifecycle-hook.mjs",
-    "scripts/setup/configure-gitea-protection.sh",
+    "scripts/setup/configure-self-hosted forge-protection.sh",
     "test-automation/uat-reports/v0.4.4/report.md",
     "test-automation/uat-reports/v0.4.4/run-uat.sh",
     "test-automation/uat-reports/v0.4.4/scenario-A.json",

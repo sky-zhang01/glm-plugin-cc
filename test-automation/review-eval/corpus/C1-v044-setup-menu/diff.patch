@@ -118,7 +118,7 @@ index 73a7505..454b9c3 100644
 -human approver is also the owner; release_card + CI gate enforce the
 -evidence chain rather than a peer approval step).
 -
--Intended Ref: tag `v0.4.3` on gitea primary, mirrored to GitHub public.
+-Intended Ref: tag `v0.4.3` on self-hosted forge primary, mirrored to GitHub public.
 -
 -Requested Scope
 -- v0.4.3 bug-fix and hardening release consolidating all fixes on top
@@ -198,7 +198,7 @@ index 73a7505..454b9c3 100644
 -tag-triggered and verifies version parity + CHANGELOG entry +
 -`release_card.md Status: READY` before any future tag lands. Branch
 -protection on `main` is applied via
--`scripts/setup/configure-gitea-protection.sh` (idempotent).
+-`scripts/setup/configure-self-hosted forge-protection.sh` (idempotent).
 -
 -Rollback
 -- Full unwind of the v0.4.3 hotfix arc: revert to the v0.4.3 baseline
@@ -212,7 +212,7 @@ index 73a7505..454b9c3 100644
 -  `formatUserFacingError` refactor is semantically identical to the
 -  previous call sites).
 +human approver is also the owner). Repo-local shortcut in effect for
-+this release: **if Gitea CI is green and adversarial-review is posted
++this release: **if self-hosted forge CI is green and adversarial-review is posted
 +on the PR, the maintainer may auto-merge without a separate approval
 +event.** This shortcut is one-off for v0.4.4 by maintainer decision and
 +is intentionally NOT being promoted into `CONTRIBUTING.md` this cycle
@@ -269,7 +269,7 @@ index 73a7505..454b9c3 100644
 +- Zero functional impact: `"private": true` means the package is
 +  never published to npm; no `import` / `require` references the old
 +  name (grep confirmed: only `package.json` L2 carries it).
-+- This is the last residual `SkyLab` identifier in the tracked repo
++- This is the last residual `public fixture` identifier in the tracked repo
 +  after the v0.4.3 cleanup sweep. The earlier grep pattern
 +  (`skylab-glm`) missed the bare `@skylab` npm-scope form. This fix
 +  closes that gap.
@@ -339,22 +339,22 @@ index 73a7505..454b9c3 100644
 +
 +8. Run `/codex:adversarial-review` against **the full feature branch
 +   context** (not diff-only) — maintainer decision for v0.4.4. Post
-+   the verdict summary as a comment on the Gitea PR (satisfies
++   the verdict summary as a comment on the self-hosted forge PR (satisfies
 +   `check-cross-ai-review.mjs`).
-+9. Push `fix/setup-interactive-menu` to Gitea + GitHub.
-+10. Open Gitea PR → `develop`. Paste codex adversarial-review verdict
++9. Push `fix/setup-interactive-menu` to self-hosted forge + GitHub.
++10. Open self-hosted forge PR → `develop`. Paste codex adversarial-review verdict
 +    in the PR description.
-+11. **Gate: Gitea CI green + adversarial-review posted** → maintainer
++11. **Gate: self-hosted forge CI green + adversarial-review posted** → maintainer
 +    auto-merges to `develop`. No separate approval event required
 +    (repo-local shortcut, see Approval Mode).
-+12. Open Gitea PR `develop` → `main`, merge with linear history.
++12. Open self-hosted forge PR `develop` → `main`, merge with linear history.
 +13. Tag `v0.4.4` annotated on the main merge commit with release
 +    notes lifted from CHANGELOG.
 +14. Push `main` and tag to GitHub mirror.
 +15. **Verify GitHub Actions**: `pr-check.yml`, `ai-quality-gate.yml`,
-+    `verify-release.yml` all green. If GitHub CI diverges from Gitea,
++    `verify-release.yml` all green. If GitHub CI diverges from self-hosted forge,
 +    block release until reconciled.
-+16. Publish Gitea release v0.4.4 + GitHub release v0.4.4, both linked
++16. Publish self-hosted forge release v0.4.4 + GitHub release v0.4.4, both linked
 +    to CHANGELOG section, GitHub marked `latest`.
 +17. Upgrade local plugin cache to v0.4.4 at
 +    `~/.claude/plugins/cache/glm-plugin-cc/glm/0.4.4/` + update
@@ -404,7 +404,7 @@ index 73a7505..454b9c3 100644
 +| Cross-AI | `check-cross-ai-review.mjs` | codex review referenced in commit/PR trailer |
 +| **UAT** | **Manual live /glm:setup in Claude Code** | **All 6 scenarios (A-F) pass** |
 +| Adversarial | `/codex:adversarial-review` | No CRITICAL or HIGH findings |
-+| CI Gitea | `.gitea/workflows/*` (if present) or mirror | all green |
++| CI self-hosted forge | `.self-hosted forge/workflows/*` (if present) or mirror | all green |
 +| CI GitHub | `.github/workflows/pr-check.yml`, `ai-quality-gate.yml`, `verify-release.yml` | all green |
 +
 +## Local Verification: not yet run (DRAFT state)
@@ -420,7 +420,7 @@ index 73a7505..454b9c3 100644
 +  so no data migration needed.
 +- **Full**: `git revert` the PR merge commit on `main`, delete tag
 +  `v0.4.4`, unmark GitHub release latest, mark v0.4.3 latest again.
-+  Publish an immediate v0.4.5 revert tag if Gitea public release
++  Publish an immediate v0.4.5 revert tag if self-hosted forge public release
 +  record needs to stay monotonic.
 +- Config files in `~/.config/glm-plugin-cc/config.json` are never
 +  mutated by the skill edit itself — only by user-chosen menu actions

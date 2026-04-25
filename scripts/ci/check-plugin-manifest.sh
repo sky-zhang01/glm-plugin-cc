@@ -26,7 +26,7 @@ require_file() {
 
 parse_json() {
   # We use node because the repo already requires node for tests; jq
-  # isn't always installed on gitea runners.
+  # is not always installed on self-hosted runners.
   node -e "JSON.parse(require('fs').readFileSync('$1','utf8'))" 2>&1
 }
 

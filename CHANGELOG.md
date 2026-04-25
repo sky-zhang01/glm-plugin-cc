@@ -1146,7 +1146,7 @@ regression patterns found during this release's review passes.
   pre-push hook that mirrors the server gate.
   `npm run hooks:install` to wire up.
 - Branch-protection setup helper —
-  `scripts/setup/configure-gitea-protection.sh` (idempotent).
+  `branch-protection setup notes` (idempotent).
 - Governance: `.github/PULL_REQUEST_TEMPLATE.md`,
   `.github/dependabot.yml` (weekly GitHub Actions bumps on the
   mirror), `CONTRIBUTING.md`, `docs/ci.md`.

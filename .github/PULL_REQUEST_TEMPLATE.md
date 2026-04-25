@@ -1,4 +1,4 @@
-<!-- PR TEMPLATE — gitea + GitHub. Sky is the sole formal approver. -->
+<!-- PR TEMPLATE — maintainer-owned release workflow. -->
 
 ## Summary
 <!-- One sentence of *what* changed, one sentence of *why*. -->

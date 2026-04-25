@@ -2,7 +2,7 @@
   "fixture_id": "C2-v046-aftercare",
   "description": "The v0.4.5 → v0.4.6 diff for glm-plugin-cc itself. Captures the full set of changes that landed in v0.4.6: BigModel error-code dispatch, retry/backoff layer, verify-release.yml retirement. Chosen as the medium-size fixture because we know this code intimately (we wrote it) which makes ground-truth curation possible.",
   "captured_at": "2026-04-21",
-  "source_repo": "SkyLab/glm-plugin-cc (Gitea)",
+  "source_repo": "glm-plugin-cc fixture source",
   "base_ref": "8fc1b98",
   "head_ref": "d5fa754",
   "line_count": 1550,

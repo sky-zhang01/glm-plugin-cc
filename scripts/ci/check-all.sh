@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Local one-shot CI: runs every check the gitea / GitHub workflows run,
+# Local one-shot CI: runs every check the server workflows run,
 # in the same order, so `npm run ci:local` fully replicates CI on the
 # developer machine before `git push`.
 #

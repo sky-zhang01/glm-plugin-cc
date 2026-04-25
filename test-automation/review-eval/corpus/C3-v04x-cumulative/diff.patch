@@ -10,7 +10,7 @@ index cfeda2c..6cd4f9a 100644
      "name": "Sky Zhang"
    },
    "metadata": {
--    "description": "SkyLab marketplace exposing glm-plugin-cc for Claude Code (GLM reviewer/rescue via 智谱 BigModel OpenAI-compatible HTTP).",
+-    "description": "public fixture marketplace exposing glm-plugin-cc for Claude Code (GLM reviewer/rescue via 智谱 BigModel OpenAI-compatible HTTP).",
 -    "version": "0.4.0"
 +    "description": "Marketplace exposing glm-plugin-cc for Claude Code (GLM reviewer/rescue via 智谱 BigModel OpenAI-compatible HTTP).",
 +    "version": "0.4.6"
@@ -25,7 +25,7 @@ index cfeda2c..6cd4f9a 100644
        "author": {
          "name": "Sky Zhang"
        },
--      "homepage": "https://gitea.tokyo.skyzhang.net/SkyLab/glm-plugin-cc",
+-      "homepage": "https://github.com/sky-zhang01/glm-plugin-cc",
 -      "source": "."
 +      "homepage": "https://github.com/sky-zhang01/glm-plugin-cc",
 +      "source": "./"
@@ -46,7 +46,7 @@ index a22e553..bd51de3 100644
    "author": {
      "name": "Sky Zhang"
    },
--  "homepage": "https://gitea.tokyo.skyzhang.net/SkyLab/glm-plugin-cc"
+-  "homepage": "https://github.com/sky-zhang01/glm-plugin-cc"
 +  "homepage": "https://github.com/sky-zhang01/glm-plugin-cc"
  }
 diff --git a/.github/CODEOWNERS b/.github/CODEOWNERS
@@ -149,7 +149,7 @@ index 0000000..2318a18
 --- /dev/null
 +++ b/.github/PULL_REQUEST_TEMPLATE.md
 @@ -0,0 +1,43 @@
-+<!-- PR TEMPLATE — gitea + GitHub. Sky is the sole formal approver. -->
++<!-- PR TEMPLATE — self-hosted forge + GitHub. Sky is the sole formal approver. -->
 +
 +## Summary
 +<!-- One sentence of *what* changed, one sentence of *why*. -->
@@ -199,7 +199,7 @@ index 0000000..db53be6
 +++ b/.github/dependabot.yml
 @@ -0,0 +1,19 @@
 +# GitHub Dependabot config — only runs on the GitHub mirror.
-+# The gitea primary repo ignores this file.
++# The self-hosted forge primary repo ignores this file.
 +#
 +# Scope: GitHub Actions updates only. The plugin itself has zero
 +# runtime npm dependencies, so there is nothing else to watch.
@@ -717,7 +717,7 @@ index a8f552f..c530e7b 100644
 +  pre-push hook that mirrors the server gate.
 +  `npm run hooks:install` to wire up.
 +- Branch-protection setup helper —
-+  `scripts/setup/configure-gitea-protection.sh` (idempotent).
++  `scripts/setup/configure-self-hosted forge-protection.sh` (idempotent).
 +- Governance: `.github/PULL_REQUEST_TEMPLATE.md`,
 +  `.github/dependabot.yml` (weekly GitHub Actions bumps on the
 +  mirror), `CONTRIBUTING.md`, `docs/ci.md`.
@@ -850,7 +850,7 @@ index a8f552f..c530e7b 100644
  
  ### Install
  
--Local path (recommended — bypasses Cloudflare Access on the Gitea
+-Local path (recommended — bypasses Cloudflare Access on the self-hosted forge
 -remote):
 -
 -```
@@ -861,7 +861,7 @@ index a8f552f..c530e7b 100644
 -Or, after Cloudflare Access auth is established on the host:
 -
  ```
--/plugin marketplace add https://gitea.tokyo.skyzhang.net/SkyLab/glm-plugin-cc
+-/plugin marketplace add https://github.com/sky-zhang01/glm-plugin-cc
 -/plugin install glm@skylab-glm
 +/plugin marketplace add https://github.com/sky-zhang01/glm-plugin-cc
 +/plugin install glm@glm-plugin-cc
@@ -942,7 +942,7 @@ index 0000000..508ab36
 +
 +The pre-push hook runs the full local CI (`npm run ci:local`) before
 +any push. You can emergency-bypass with `git push --no-verify`, but
-+the gitea pipeline will still block on the same checks.
++the self-hosted forge pipeline will still block on the same checks.
 +
 +## Running tests
 +
@@ -1004,7 +1004,7 @@ index 0000000..508ab36
 +4. Publish the GitHub release from the CHANGELOG section.
 +
 +Admin (repo owner) may bypass branch protection in emergencies on
-+both gitea and GitHub.
++both self-hosted forge and GitHub.
 +
 +## Pull requests
 +
@@ -1044,7 +1044,7 @@ index d7cdcdf..513068e 100644
  
  To apply the Apache License to your work, attach the following boilerplate notice, with the fields enclosed by brackets "[]" replaced with your own identifying information. (Don't include the brackets!)  The text should be enclosed in the appropriate comment syntax for the file format. We also recommend that a file or class name and description of purpose be included on the same "printed page" as the copyright notice for easier identification within third-party archives.
  
--Copyright 2026 SkyLab
+-Copyright 2026 public fixture
 +Copyright 2026 Sky Zhang
  
  Licensed under the Apache License, Version 2.0 (the "License");
@@ -1058,7 +1058,7 @@ index 454e2ac..e7ec8d8 100644
  ## Why this plugin exists
  
 -This plugin is one of the external reviewers feeding into
--[claude-dev-harness](https://gitea.tokyo.skyzhang.net/SkyLab/claude-dev-harness)'s
+-[claude-dev-harness](https://example.com/claude-dev-harness)'s
 -SEV `/verify` Layer 3 orchestration. When the primary codex reviewer is
 -rate-limited or unavailable, GLM is the secondary provider in the
 -fallback chain.
@@ -1075,7 +1075,7 @@ index 454e2ac..e7ec8d8 100644
  - **Stateless HTTP.** No persistent sessions, no broker subprocess.
 -- **No Stop hook.** Orchestration and Stop-gate logic live in the harness
 -  (`completion-stop-guard.sh`), not in plugins. See
--  [claude-dev-harness docs/quality-loop-v3-boundary-crosswalk.md §4.4](https://gitea.tokyo.skyzhang.net/SkyLab/claude-dev-harness/src/branch/plan/quality-loop-v3/docs/quality-loop-v3-boundary-crosswalk.md).
+-  [claude-dev-harness docs/quality-loop-v3-boundary-crosswalk.md §4.4](https://example.com/claude-dev-harness/src/branch/plan/quality-loop-v3/docs/quality-loop-v3-boundary-crosswalk.md).
 +- **No Stop hook.** Orchestration and Stop-gate logic live in the SEV
 +  harness (`completion-stop-guard.sh`), not in plugins. This separation
 +  is documented in the internal harness's
@@ -1087,8 +1087,8 @@ index 454e2ac..e7ec8d8 100644
  Add to your Claude Code plugin marketplace:
  
  ```
--/plugin marketplace add https://gitea.tokyo.skyzhang.net/SkyLab/glm-plugin-cc
--/plugin install glm@SkyLab/glm-plugin-cc
+-/plugin marketplace add https://github.com/sky-zhang01/glm-plugin-cc
+-/plugin install glm@glm-plugin-cc
 +/plugin marketplace add https://github.com/sky-zhang01/glm-plugin-cc
 +/plugin install glm@glm-plugin-cc
  ```
@@ -1614,7 +1614,7 @@ index 0000000..33eb14c
 +- `release_card.md` exists and is `Status: READY`
 +
 +Once this job is green, use `scripts/github-release-create.sh` (or
-+equivalent gitea helper) to actually publish.
++equivalent self-hosted forge helper) to actually publish.
 +
 +## Local commands
 +
@@ -1631,7 +1631,7 @@ index 0000000..33eb14c
 +
 +## Branch protection (enforced server-side)
 +
-+Both `develop` and `main` are protected on gitea and GitHub:
++Both `develop` and `main` are protected on self-hosted forge and GitHub:
 +
 +- Require PR — direct push rejected for non-admin identities
 +- Require `pr-check` + `static-invariants` status checks to pass
@@ -1642,17 +1642,17 @@ index 0000000..33eb14c
 +- Admin (`sky`) may bypass protection in emergencies — this is the
 +  tradeoff for solo-maintainer agility
 +
-+Configure / re-apply gitea with:
++Configure / re-apply self-hosted forge with:
 +
 +```bash
-+GITEA_HOST=https://your-gitea-host \
++GITEA_HOST=https://your-self-hosted forge-host \
 +GITEA_OWNER=your-org \
 +GITEA_APPROVER=your-username \
-+bash scripts/setup/configure-gitea-protection.sh
++bash scripts/setup/configure-self-hosted forge-protection.sh
 +```
 +
 +(GitHub protection was applied via `gh api ... /branches/<name>/protection`.
-+The script is gitea-specific; add a GitHub-equivalent helper if that
++The script is self-hosted forge-specific; add a GitHub-equivalent helper if that
 +re-configuration becomes recurrent.)
 +
 +## Scripts index
@@ -1673,7 +1673,7 @@ index 0000000..33eb14c
 +scripts/install-hooks.sh          # symlinks scripts/hooks/* → .git/hooks/
 +
 +scripts/setup/
-+└── configure-gitea-protection.sh # one-shot branch-protection setup
++└── configure-self-hosted forge-protection.sh # one-shot branch-protection setup
 +```
 +
 +## Why this shape
@@ -1830,11 +1830,11 @@ index 4a15b94..cc3bdca 100644
 +# Release Card — glm-plugin-cc v0.4.6
  
  Status: READY
--Approval Mode: inline-session (user: "api key和codex原本的保持一模一样吧" + "GitHub public repo版本和 gitea的一致可以但不用提示之前做了什么修改 gitea repo 保留 因为以后如果要做修改 也是先在gitea上弄完 确认没问题了再push到GitHub")
+-Approval Mode: inline-session (user: "api key和codex原本的保持一模一样吧" + "GitHub public repo版本和 self-hosted forge的一致可以但不用提示之前做了什么修改 self-hosted forge repo 保留 因为以后如果要做修改 也是先在self-hosted forge上弄完 确认没问题了再push到GitHub")
  
--Requested Scope: v0.4.0 **breaking auth change** — API key now persists to `~/.config/glm-plugin-cc/config.json` (mode 0600) instead of reading `ZAI_API_KEY` env var. Mirrors codex CLI `~/.codex/auth.json` (confirmed codex rejects env-only via issue openai/codex#5212 closed "not planned"). Phase 1 = gitea side ship. Phase 2 (separate — out-of-scope for this card) = clean GitHub public snapshot to `sky-zhang01/glm-plugin-cc`.
+-Requested Scope: v0.4.0 **breaking auth change** — API key now persists to `~/.config/glm-plugin-cc/config.json` (mode 0600) instead of reading `ZAI_API_KEY` env var. Mirrors codex CLI `~/.codex/auth.json` (confirmed codex rejects env-only via issue upstream issue reference closed "not planned"). Phase 1 = self-hosted forge side ship. Phase 2 (separate — out-of-scope for this card) = clean GitHub public snapshot to `sky-zhang01/glm-plugin-cc`.
 +Approval Mode: maintainer direct-approval (solo-maintainer repo; same
-+pattern as v0.4.4 and v0.4.5). Gitea CI green → maintainer auto-merge
++pattern as v0.4.4 and v0.4.5). self-hosted forge CI green → maintainer auto-merge
 +per standing one-off-per-release shortcut. Not promoted into
 +CONTRIBUTING.md.
  
@@ -1846,7 +1846,7 @@ index 4a15b94..cc3bdca 100644
 +- Tag: `v0.4.6` annotated, on the `develop → main` merge commit
 +- Mirrored: GitHub public repo (main + tag + release, marked Latest)
  
--Intended Ref: main @ new commit (post v0.3.4 df89ceb) + tag v0.4.0 (annotated), remote gitea.tokyo.skyzhang.net/SkyLab/glm-plugin-cc.
+-Intended Ref: main @ new commit (post v0.3.4 df89ceb) + tag v0.4.0 (annotated), remote github.com/sky-zhang01/glm-plugin-cc.
 +---
  
 -Planned Actions: (1) commit v0.4.0 on main; (2) push main via cloudflared access token header; (3) create + push tag v0.4.0.
@@ -1945,7 +1945,7 @@ index 4a15b94..cc3bdca 100644
 +15. Open release review: develop → main. Merge.
 +16. Tag v0.4.6 annotated on main merge commit (pre-push will run
 +    check-release-ready.sh automatically). Push tag.
-+17. Publish Gitea release v0.4.6 (Latest auto-set)
++17. Publish self-hosted forge release v0.4.6 (Latest auto-set)
 +18. Sync main + develop + tag to GitHub. Confirm PR Check + AI Quality
 +    Gate green (verify-release.yml should NO LONGER be in the run list)
 +19. Publish GitHub release v0.4.6, mark Latest
@@ -2005,7 +2005,7 @@ index 4a15b94..cc3bdca 100644
 +| Cross-AI | `check-cross-ai-review.mjs` | adversarial review referenced |
 +| Companion UAT | `test-automation/uat-reports/v0.4.5/run-uat.sh` | All scenarios (A-J) still PASS — v0.4.6 additive-only so v0.4.5 UAT still valid |
 +| Adversarial | `/codex:adversarial-review` preferred, else `/glm:adversarial-review` with waiver | No unresolved CRITICAL/HIGH |
-+| Gitea CI | `.github/workflows/ai-quality-gate.yml` + `pr-check.yml` | both green (verify-release.yml no longer exists) |
++| self-hosted forge CI | `.github/workflows/ai-quality-gate.yml` + `pr-check.yml` | both green (verify-release.yml no longer exists) |
 +| GitHub CI | same 2 workflows | both green (verify-release.yml disabled on GitHub) |
 +| **Release gate** | `bash scripts/ci/check-release-ready.sh v0.4.6` | All 4 checks pass (runs automatically in pre-push on tag push) |
 +| **Post-release live** | Simulated 1305 error path | classifier surfaces SERVICE_OVERLOADED with correct message referencing model name |
@@ -2178,7 +2178,7 @@ index 0000000..c5dc6a1
 +++ b/scripts/ci/check-all.sh
 @@ -0,0 +1,54 @@
 +#!/usr/bin/env bash
-+# Local one-shot CI: runs every check the gitea / GitHub workflows run,
++# Local one-shot CI: runs every check the self-hosted forge / GitHub workflows run,
 +# in the same order, so `npm run ci:local` fully replicates CI on the
 +# developer machine before `git push`.
 +#
@@ -2356,7 +2356,7 @@ index 0000000..54bcc8f
 +
 +MISSING=0
 +for sha in $COMMITS; do
-+  # Skip merge commits: they are generated by the merger (Gitea / GitHub
++  # Skip merge commits: they are generated by the merger (self-hosted forge / GitHub
 +  # API / git merge) and summarize PR content — the underlying PR commits
 +  # already carry their own Co-Authored-By trailers. A merge commit whose
 +  # summary mentions e.g. "codex:adversarial-review" would otherwise trip
@@ -2412,7 +2412,7 @@ index 0000000..c1fd1c5
 +//   ADVISORY — PR from AI-A but no cross-review from AI-B yet
 +//   SKIP     — not enough environment (missing token or PR metadata)
 +//
-+// Works against gitea + GitHub — both expose the same issue-comments
++// Works against self-hosted forge + GitHub — both expose the same issue-comments
 +// REST shape at /api/v1|/api/v3 /repos/{owner}/{name}/issues/{n}/comments.
 +
 +const AI_IDENTITIES = ["claude-code", "codex"];
@@ -2555,7 +2555,7 @@ index 0000000..ff12cb2
 +  '\b192\.168\.[0-9]+\.[0-9]+\b'         # private 192.168.x IPs
 +  '\b172\.(1[6-9]|2[0-9]|3[01])\.[0-9]+\.[0-9]+\b'  # private 172.16-31.x IPs
 +  '([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}'   # MAC addresses
-+  '[a-zA-Z0-9-]+\.tokyo\.skyzhang\.net'  # private gitea hostname
++  '[a-zA-Z0-9-]+\.tokyo\.skyzhang\.net'  # private self-hosted forge hostname
 +)
 +
 +declare -a LABELS=(
@@ -2577,9 +2577,9 @@ index 0000000..ff12cb2
 +# - docs/ci.md — internal CI documentation; naming the runner host
 +#   on purpose.
 +# - CONTRIBUTING.md — developer-facing clone instructions must name
-+#   the authoritative gitea host on Sky's network.
-+# - scripts/setup/configure-gitea-protection.sh — the whole script's
-+#   job is to talk to the gitea host; the URL is intentional.
++#   the authoritative self-hosted forge host on Sky's network.
++# - scripts/setup/configure-self-hosted forge-protection.sh — the whole script's
++#   job is to talk to the self-hosted forge host; the URL is intentional.
 +EXCLUDE_GLOBS=(
 +  ':(exclude)scripts/ci/check-no-local-paths.sh'
 +  ':(exclude)node_modules/**'
@@ -2591,7 +2591,7 @@ index 0000000..ff12cb2
 +  ':(exclude)release_card.md'
 +  ':(exclude)docs/ci.md'
 +  ':(exclude)CONTRIBUTING.md'
-+  ':(exclude)scripts/setup/configure-gitea-protection.sh'
++  ':(exclude)scripts/setup/configure-self-hosted forge-protection.sh'
 +)
 +
 +VIOLATIONS=0
@@ -2662,7 +2662,7 @@ index 0000000..8333cf2
 +
 +parse_json() {
 +  # We use node because the repo already requires node for tests; jq
-+  # isn't always installed on gitea runners.
++  # isn't always installed on self-hosted forge runners.
 +  node -e "JSON.parse(require('fs').readFileSync('$1','utf8'))" 2>&1
 +}
 +
@@ -3150,7 +3150,7 @@ index 0000000..3f11e05
 @@ -0,0 +1,46 @@
 +#!/usr/bin/env bash
 +# Git pre-push hook: runs the full local CI suite before any push.
-+# Blocks push on any failure so gitea / GitHub never see a broken state.
++# Blocks push on any failure so self-hosted forge / GitHub never see a broken state.
 +# When pushing a version tag (refs/tags/vX.Y.Z), additionally runs the
 +# release-ready gate (replaces the broken verify-release.yml workflow).
 +#
@@ -4531,39 +4531,39 @@ index f446ee4..1dff6fb 100644
 +  process.stderr.write(`[glm-session-hook] ${formatUserFacingError(error)}\n`);
    process.exit(0);
  }
-diff --git a/scripts/setup/configure-gitea-protection.sh b/scripts/setup/configure-gitea-protection.sh
+diff --git a/scripts/setup/configure-self-hosted forge-protection.sh b/scripts/setup/configure-self-hosted forge-protection.sh
 new file mode 100755
 index 0000000..dad9865
 --- /dev/null
-+++ b/scripts/setup/configure-gitea-protection.sh
++++ b/scripts/setup/configure-self-hosted forge-protection.sh
 @@ -0,0 +1,126 @@
 +#!/usr/bin/env bash
-+# One-shot / idempotent configuration of gitea branch protection for
++# One-shot / idempotent configuration of self-hosted forge branch protection for
 +# the private-primary repo hosting this plugin. Safe to re-run: GETs
 +# current state, then POSTs (create) or PATCHes (update) to match the
 +# intended spec.
 +#
 +# Usage:
-+#   GITEA_HOST=https://your-gitea-host \
++#   GITEA_HOST=https://your-self-hosted forge-host \
 +#   GITEA_OWNER=your-org \
 +#   GITEA_REPO=glm-plugin-cc \
-+#   bash scripts/setup/configure-gitea-protection.sh
++#   bash scripts/setup/configure-self-hosted forge-protection.sh
 +#
 +# Required env:
-+#   GITEA_HOST       gitea base URL (e.g. https://gitea.example.com)
++#   GITEA_HOST       self-hosted forge base URL (e.g. https://self-hosted forge.example.com)
 +#   GITEA_OWNER      org or user that owns the repo
 +# Optional env:
 +#   GITEA_REPO       default glm-plugin-cc
 +#   GITEA_BRANCH     default main
-+#   GITEA_TOKEN_FILE default ${HOME}/.claude/secrets/gitea-approver.pat,
-+#                    falls back to gitea-claude-code.pat
++#   GITEA_TOKEN_FILE default ${HOME}/.claude/secrets/self-hosted forge-approver.pat,
++#                    falls back to self-hosted forge-claude-code.pat
 +#
 +# Prefer a PAT owned by the single formal approver; fall back to a
 +# CI PAT when the approver PAT isn't available locally.
 +set -euo pipefail
 +
 +if [[ -z "${GITEA_HOST:-}" ]]; then
-+  echo "✗ GITEA_HOST not set. Export your gitea base URL and re-run."
++  echo "✗ GITEA_HOST not set. Export your self-hosted forge base URL and re-run."
 +  exit 1
 +fi
 +if [[ -z "${GITEA_OWNER:-}" ]]; then
@@ -4573,19 +4573,19 @@ index 0000000..dad9865
 +
 +GITEA_REPO="${GITEA_REPO:-glm-plugin-cc}"
 +GITEA_BRANCH="${GITEA_BRANCH:-main}"
-+GITEA_TOKEN_FILE="${GITEA_TOKEN_FILE:-${HOME}/.claude/secrets/gitea-approver.pat}"
++GITEA_TOKEN_FILE="${GITEA_TOKEN_FILE:-${HOME}/.claude/secrets/self-hosted forge-approver.pat}"
 +GITEA_APPROVER="${GITEA_APPROVER:-${GITEA_OWNER}}"
 +
 +if [[ ! -r "$GITEA_TOKEN_FILE" ]]; then
-+  # Fall back to a generic gitea PAT if the approver PAT file doesn't
++  # Fall back to a generic self-hosted forge PAT if the approver PAT file doesn't
 +  # exist — with a warning, so the human operator knows the identity
 +  # context.
-+  ALT="${HOME}/.claude/secrets/gitea-claude-code.pat"
++  ALT="${HOME}/.claude/secrets/self-hosted forge-claude-code.pat"
 +  if [[ -r "$ALT" ]]; then
 +    echo "⚠ approver PAT not found at $GITEA_TOKEN_FILE; falling back to $ALT."
 +    GITEA_TOKEN_FILE="$ALT"
 +  else
-+    echo "✗ No gitea PAT found. Set GITEA_TOKEN_FILE or create $GITEA_TOKEN_FILE."
++    echo "✗ No self-hosted forge PAT found. Set GITEA_TOKEN_FILE or create $GITEA_TOKEN_FILE."
 +    exit 1
 +  fi
 +fi
@@ -4619,14 +4619,14 @@ index 0000000..dad9865
 +}
 +JSON
 +
-+existing=$(curl -s -o /tmp/gitea-protection.json -w "%{http_code}" \
++existing=$(curl -s -o /tmp/self-hosted forge-protection.json -w "%{http_code}" \
 +  -H "Authorization: token ${TOKEN}" \
 +  -H "Accept: application/json" \
 +  "${API_BASE}/branch_protections/${GITEA_BRANCH}")
 +
 +if [[ "$existing" == "200" ]]; then
 +  echo "Protection already exists; updating via PATCH…"
-+  code=$(curl -s -o /tmp/gitea-protection-response.json -w "%{http_code}" \
++  code=$(curl -s -o /tmp/self-hosted forge-protection-response.json -w "%{http_code}" \
 +    -X PATCH \
 +    -H "Authorization: token ${TOKEN}" \
 +    -H "Content-Type: application/json" \
@@ -4634,7 +4634,7 @@ index 0000000..dad9865
 +    "${API_BASE}/branch_protections/${GITEA_BRANCH}")
 +elif [[ "$existing" == "404" ]]; then
 +  echo "No protection yet; creating via POST…"
-+  code=$(curl -s -o /tmp/gitea-protection-response.json -w "%{http_code}" \
++  code=$(curl -s -o /tmp/self-hosted forge-protection-response.json -w "%{http_code}" \
 +    -X POST \
 +    -H "Authorization: token ${TOKEN}" \
 +    -H "Content-Type: application/json" \
@@ -4642,13 +4642,13 @@ index 0000000..dad9865
 +    "${API_BASE}/branch_protections")
 +else
 +  echo "✗ unexpected GET status: $existing"
-+  cat /tmp/gitea-protection.json
++  cat /tmp/self-hosted forge-protection.json
 +  exit 1
 +fi
 +
 +if [[ "$code" != "200" && "$code" != "201" ]]; then
 +  echo "✗ write failed with HTTP ${code}:"
-+  cat /tmp/gitea-protection-response.json
++  cat /tmp/self-hosted forge-protection-response.json
 +  exit 1
 +fi
 +

@@ -65,8 +65,8 @@ publication. Verifies:
 - `CHANGELOG.md` has a `## vX.Y.Z` section for this tag
 - `release_card.md` exists and is `Status: READY`
 
-Once this job is green, use `scripts/github-release-create.sh` (or
-equivalent gitea helper) to actually publish.
+Once this job is green, publish the release through the repository
+host.
 
 ## Local commands
 
@@ -83,7 +83,7 @@ time when you are certain of what you are pushing.
 
 ## Branch protection (enforced server-side)
 
-Both `develop` and `main` are protected on gitea and GitHub:
+Both `develop` and `main` are protected:
 
 - Require PR — direct push rejected for non-admin identities
 - Require `pr-check` + `static-invariants` status checks to pass
@@ -94,18 +94,9 @@ Both `develop` and `main` are protected on gitea and GitHub:
 - Admin (`sky`) may bypass protection in emergencies — this is the
   tradeoff for solo-maintainer agility
 
-Configure / re-apply gitea with:
-
-```bash
-GITEA_HOST=https://your-gitea-host \
-GITEA_OWNER=your-org \
-GITEA_APPROVER=your-username \
-bash scripts/setup/configure-gitea-protection.sh
-```
-
-(GitHub protection was applied via `gh api ... /branches/<name>/protection`.
-The script is gitea-specific; add a GitHub-equivalent helper if that
-re-configuration becomes recurrent.)
+Branch protection should be managed through the repository host's
+native settings/API. Keep required checks aligned with the workflow
+names above.
 
 ## Scripts index
 
@@ -124,8 +115,6 @@ scripts/hooks/
 
 scripts/install-hooks.sh          # symlinks scripts/hooks/* → .git/hooks/
 
-scripts/setup/
-└── configure-gitea-protection.sh # one-shot branch-protection setup
 ```
 
 ## Why this shape
@@ -139,7 +128,7 @@ scripts/setup/
   lands without counterpart review.
 - **Release gate separate from release action** — a release tag must
   pass the gate, but the publication itself stays manual to avoid
-  accidental pushes to the public GitHub mirror.
+  accidental publication.
 
 ## When CI fails
 

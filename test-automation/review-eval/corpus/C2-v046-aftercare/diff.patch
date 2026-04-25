@@ -45,7 +45,7 @@ index 82605c5..0000000
 -#   3. release_card.md exists and is `Status: READY`.
 -#
 -# Does NOT publish. Publication (GitHub release draft, manifest push,
--# gitea release) stays a manual operation routed through
+-# self-hosted forge release) stays a manual operation routed through
 -# `scripts/github-release-create.sh` after this gate goes green.
 -
 -on:
@@ -368,7 +368,7 @@ index f7a71bb..3f11e05 100755
 @@ -1,6 +1,8 @@
  #!/usr/bin/env bash
  # Git pre-push hook: runs the full local CI suite before any push.
- # Blocks push on any failure so gitea / GitHub never see a broken state.
+ # Blocks push on any failure so self-hosted forge / GitHub never see a broken state.
 +# When pushing a version tag (refs/tags/vX.Y.Z), additionally runs the
 +# release-ready gate (replaces the broken verify-release.yml workflow).
  #

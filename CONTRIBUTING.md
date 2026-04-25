@@ -24,7 +24,7 @@ npm run hooks:install   # symlinks the pre-push hook into .git/hooks
 
 The pre-push hook runs the full local CI (`npm run ci:local`) before
 any push. You can emergency-bypass with `git push --no-verify`, but
-the gitea pipeline will still block on the same checks.
+the server pipeline will still block on the same checks.
 
 ## Running tests
 
@@ -85,8 +85,7 @@ entry in the same PR.
    `release_card.md Status: READY`.
 4. Publish the GitHub release from the CHANGELOG section.
 
-Admin (repo owner) may bypass branch protection in emergencies on
-both gitea and GitHub.
+Admin (repo owner) may bypass branch protection in emergencies.
 
 ## Pull requests
 

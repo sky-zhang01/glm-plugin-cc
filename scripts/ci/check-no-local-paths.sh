@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Block any committed file that leaks a local absolute path, private IP,
-# MAC address, or internal hostname. Enforces Sky's global sensitive-info
+# MAC address, or internal hostname. Enforces the sensitive-info
 # policy at CI time instead of relying only on the runtime redaction
 # helper (scripts/lib/fs.mjs redactHomePath).
 #
@@ -22,7 +22,6 @@ declare -a PATTERNS=(
   '\b192\.168\.[0-9]+\.[0-9]+\b'         # private 192.168.x IPs
   '\b172\.(1[6-9]|2[0-9]|3[01])\.[0-9]+\.[0-9]+\b'  # private 172.16-31.x IPs
   '([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}'   # MAC addresses
-  '[a-zA-Z0-9-]+\.tokyo\.skyzhang\.net'  # private gitea hostname
 )
 
 declare -a LABELS=(
@@ -32,7 +31,6 @@ declare -a LABELS=(
   "private IP 192.168.x"
   "private IP 172.16-31.x"
   "MAC address"
-  "private Sky hostname"
 )
 
 # Files / paths we intentionally exclude:
@@ -41,12 +39,6 @@ declare -a LABELS=(
 #   test / CI artifact dirs that a developer might leave behind.
 # - CHANGELOG / release_card — free-form narrative about debugging
 #   history; not a code surface that leaks into runtime.
-# - docs/ci.md — internal CI documentation; naming the runner host
-#   on purpose.
-# - CONTRIBUTING.md — developer-facing clone instructions must name
-#   the authoritative gitea host on Sky's network.
-# - scripts/setup/configure-gitea-protection.sh — the whole script's
-#   job is to talk to the gitea host; the URL is intentional.
 # - test-automation/review-eval/corpus/ — frozen git-history fixture
 #   artifacts (diff.patch files + describing meta.json). These carry
 #   pre-cleanup strings (old @skylab/ scope, old internal hostname) by
@@ -61,9 +53,6 @@ EXCLUDE_GLOBS=(
   ':(exclude)package-lock.json'
   ':(exclude)CHANGELOG.md'
   ':(exclude)release_card.md'
-  ':(exclude)docs/ci.md'
-  ':(exclude)CONTRIBUTING.md'
-  ':(exclude)scripts/setup/configure-gitea-protection.sh'
   ':(exclude)test-automation/review-eval/corpus/**'
   ':(exclude)test-automation/review-eval/results/**'
 )
@@ -96,7 +85,7 @@ done
 if [[ $VIOLATIONS -gt 0 ]]; then
   echo "FAIL — $VIOLATIONS pattern families matched."
   echo "Tracked files must not carry absolute local paths, private IPs,"
-  echo "MAC addresses, or internal Sky hostnames. Move sensitive values"
+  echo "MAC addresses, or internal hostnames. Move sensitive values"
   echo "to env vars / config, or redact before committing."
   exit 1
 fi

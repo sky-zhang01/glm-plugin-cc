@@ -3,7 +3,7 @@
   "size_class": "small",
   "description": "Single-commit v0.4.4 fix that added an interactive AskUserQuestion menu to /glm:setup when the plugin is already fully configured (both preset_id + has_api_key set) and the user runs bare /glm:setup. Also renamed the npm scope @skylab/glm-plugin-cc → glm-plugin-cc. Chosen as the C1 small-diff fixture because the scope is tightly bounded (one new UX branch + one rename + release-card rewrite) and we curated it ourselves, making ground-truth curation straightforward.",
   "captured_at": "2026-04-21",
-  "source_repo": "SkyLab/glm-plugin-cc (Gitea)",
+  "source_repo": "glm-plugin-cc fixture source",
   "base_ref": "eb47b5f",
   "head_ref": "7766943",
   "line_count": 440,

@@ -9,7 +9,7 @@
 //   ADVISORY — PR from AI-A but no cross-review from AI-B yet
 //   SKIP     — not enough environment (missing token or PR metadata)
 //
-// Works against gitea + GitHub — both expose the same issue-comments
+// Works against compatible forge APIs — both expose the same issue-comments
 // REST shape at /api/v1|/api/v3 /repos/{owner}/{name}/issues/{n}/comments.
 
 const AI_IDENTITIES = ["claude-code", "codex"];

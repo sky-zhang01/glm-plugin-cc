@@ -1,5 +1,4 @@
-# GitHub Dependabot config — only runs on the GitHub mirror.
-# The gitea primary repo ignores this file.
+# GitHub Dependabot config.
 #
 # Scope: GitHub Actions updates only. The plugin itself has zero
 # runtime npm dependencies, so there is nothing else to watch.

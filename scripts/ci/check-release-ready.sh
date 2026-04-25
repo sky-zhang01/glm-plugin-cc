@@ -12,7 +12,7 @@
 # per the SemVer 2.0 prerelease grammar. Prereleases intentionally
 # use the same gate — they still need a matching CHANGELOG section,
 # manifest parity, and a READY release_card. The caller is responsible
-# for NOT marking the Gitea/GitHub release as Latest.
+# for NOT marking a prerelease as Latest.
 #
 # Exits non-zero (with a specific message) if:
 #   1. tag argument missing or malformed (expected vX.Y.Z or vX.Y.Z-<prerelease>)
