@@ -1,416 +1,206 @@
-# Release Card — glm-plugin-cc v0.4.7 (final cut 2026-04-22)
+# Release Card — glm-plugin-cc v0.4.8
 
-Status: READY — v0.4.7 final (supersedes beta1 98c4ca0)
+Status: READY — manifests bumped 0.4.7 → 0.4.8 (3 files); CHANGELOG header de-`(unreleased)`; release_card finalized.
 
-Approval Mode: maintainer direct-approval (solo-maintainer repo; same
-pattern as v0.4.4 / v0.4.5 / v0.4.6). Gitea CI green → maintainer
-auto-merge per standing one-off-per-release shortcut. Not promoted
-into CONTRIBUTING.md. Beta1 was cut mid-release as an interim
-audit-ref at commit `98c4ca0` (Gitea + GitHub Prerelease, NOT
-Latest, v0.4.6 stayed Latest during beta1). Phase 7d power-up sweep
-then completed in ~3h wall time via 2 parallel detached worktrees,
-producing the final 457-run evidence base (N=81-84 per C3 cell,
-N=42-44 per C1 cell). This final cut amends the beta1 commit with
-Phase 7d numbers in CHANGELOG + bumps manifests beta1→final.
+Approval Mode: `release/v0.4.8` is authored by claude-code and reviewed/merged by codex as the non-author reviewer. Later `develop` → `main`, tag, and release-object actions remain maintainer-controlled release actions. Cross-AI review (claude-code session reviewing codex-authored PRs and vice versa) is explicitly downgraded to **dual-token user-bypass** label per L0/L1 governance landed during this cycle (see `~/.claude/scripts/gitea_rest_common.sh` + Gitea issue #26). v0.4.8 is not promoted into CONTRIBUTING.md as standing policy; it is the current observed pattern.
 
-Beta1 history preserved (already shipped as Gitea + GitHub
-Prerelease on tag `v0.4.7-beta1`, NOT Latest). Not rebased or
-force-replaced — the beta1 tag stands as the audit-ref snapshot.
+## Intended Ref (v0.4.8)
 
-Intended Ref (v0.4.7 final)
-- Feature branch: `fix/v047-review-reliability-mvp` off `develop`
-  (amended to add final 7d numbers + manifest bump + CHANGELOG
-  header change beta1→final)
-- PR: `fix/v047-review-reliability-mvp` → `develop` (Gitea; may
-  reuse the beta1 PR if still open, or fresh PR with same branch)
-- PR: `develop` → `main` (Gitea)
-- Tag: `v0.4.7` annotated, on the `develop → main` merge commit
-- **Gitea release**: marked `Latest`
-- **GitHub release**: marked `Latest` (promotes past v0.4.6)
-- Gitea issue #7: close at this point
+- Pre-tag commit on `develop`: `2080924d7fdcc9e0fdace1ee0d070c9829ea5994` (= PR #36 merge by sky, post-mirror to GitHub)
+- Manifest bump branch: `release/v0.4.8` off `develop`@`2080924` — bumps 3 manifests + CHANGELOG header. PR `release/v0.4.8` → `develop` (codex non-author review + merge).
+- PR: `develop` → `main` (Gitea, admin-bypass merge).
+- Tag: `v0.4.8` annotated, on the `develop → main` merge commit.
+- **Gitea release**: marked `Latest` (promotes past v0.4.7).
+- **GitHub release**: marked `Latest` (promotes past v0.4.7).
+- Gitea issues to close at this point: **#18** (M5 entry condition resolved by #36 evidence; verdict: keep `--reflect` opt-in, evidence-backed; not promoted to default-on).
+- Gitea issues that stay open as v0.4.9 follow-ups: **#32** (M2.1 stronger acceptance fixtures), **#12** (review design umbrella, not yet finished), **#26** (governance: pin Gitea actor identity — partially landed via helper hardening, but actor-isolation work continues).
 
 ---
 
 ## Requested Scope
 
-Tracked under Gitea issue #7. Three aligned additions motivated by the
-v0.4.5 SCHEMA_ECHO dogfood observation + the 2026-04-21
-workflow-governor cross-review hallucination session:
+Tracked under Gitea umbrella issue #12 plus per-milestone subissues. Six functional milestones (M0–M6) plus three measurement-infrastructure repairs (PA1–PA3) and one calibration experiment (M2.1).
 
-1. **Parse-layer defenses** that run unconditionally on every review
-   response, independent of model version or sampling parameters. These
-   are pure JSON-processing code — cheap, idempotent, and they do not
-   change the GLM request shape.
+### M0 — Review substrate
 
-   - `stripMarkdownFences` removes `` ```json ... ``` `` wrappers that
-     GLM-5.1 occasionally emits around structured output despite the
-     prompt instruction.
-   - `classifyReviewPayload` reproduces the two observed semantic
-     failures (SCHEMA_ECHO = returned schema definition instead of
-     findings; INVALID_SHAPE = missing required fields) with typed
-     `errorCode` values the companion + caller can branch on.
-   - `runChatRequestWithCorrectionRetry` adds a single-shot targeted
-     re-prompt when the above are detected. Separate mechanism from
-     the v0.4.6 transient-error backoff layer (different failure
-     class; no attempt-budget overlap).
+Confidence-tier and validation-signals fields added to the review schema. `/glm:review` now rejects trailing focus text (which previously interpolated to empty under the old shared template), forcing balanced review to use prompt-defined framing only. Pass-level metadata scaffolding (`passes.model`, `passes.validation`, `passes.rerank`) wired through `runReview` so downstream consumers can inspect each lane independently. Failure-path payloads now preserve rejected review structure instead of silently sanitising it.
 
-2. **Sampling-parameter CLI flags** (`--temperature`, `--top-p`,
-   `--seed`, `--frequency-penalty`, `--presence-penalty`) on `/glm:review`
-   and `/glm:adversarial-review`, forwarded to the BigModel POST body
-   only when provided. Unset = server default = no behavior change.
-   Out-of-range values are silently skipped so sweep automation never
-   crashes mid-run.
+### M1 — Structural validators and tier wiring
 
-3. **Three-fixture evaluation harness** (`test-automation/review-eval/`)
-   — pinned fixtures at three scales (C1 small ~440 lines / C2 medium
-   ~1550 lines / C3 large ~8336 lines), automated citation scoring via
-   file-existence + distinctive-token grep, CSV results format stable
-   across releases, per-run sidecar payload capture for offline audit.
-   Ships with both the initial 9-call sanity-sweep data
-   (`sanity-sweep.csv`) and the 457-run five-phase expanded-sweep
-   data (`expanded-sweep.csv`) so future sweeps can diff against
-   either baseline.
+Validators in `scripts/lib/validators/review-structural.mjs` evaluate every parsed finding against four signals: `file_in_target`, `known_false_reference_absent`, `line_range_in_file`, and `anchor_literal_found` (token-boundary literal-match within the cited line range). Findings inherit one of four tiers — `proposed`, `cross-checked`, `deterministically_validated`, `rejected` — based on which signals pass. Render policy in `scripts/lib/render.mjs` applies per-mode tier filtering downstream.
 
-4. **Extended parse-failure classifier** added post-expanded-sweep.
-   The initial 9-run sweep (medium diff) produced a schema=0 cell
-   that user push-back correctly identified as possibly underpowered.
-   The five-phase expanded sweep on C1/C2/C3 surfaced five distinct
-   parse-failure modes that the initial `classifyReviewPayload` did
-   not cover — all now typed and correction-hinted:
-   - `EMPTY_RESPONSE`, `REASONING_LEAK`, `MARKDOWN_FENCE_UNTERMINATED`,
-     `TRUNCATED_JSON`, `PARSE_FAILURE`.
-   - `stripMarkdownFences` also extended with open-only and close-only
-     half-fence fallbacks.
-   - 15 new unit tests, then +7 for the new vendor codes (Phase 7a)
-     and +14 for `buildChatRequestBody` extraction (beta1). Total
-     suite: 170/170.
+### M2 — Real mode split for review vs adversarial-review
+
+`/glm:review` and `/glm:adversarial-review` now load distinct prompt templates (`prompts/review.md` and `prompts/adversarial-review.md`). Render policy splits into a balanced default (`cross-checked+`, severity `medium+`, cap 5) and an adversarial default (`cross-checked+ OR proposed-with-fail-anchor`, severity `medium+`, cap 8). Pre-M2 both modes shipped the same template + render policy with empty interpolated keys, so balanced mode was effectively adversarial mode in disguise.
+
+### M3 — Measurement parity and dogfood packets
+
+Review-eval harness (`test-automation/review-eval/scripts/run-experiment.mjs`) gains `--mode review|adversarial-review`. CSV rows record `mode`, post-validation tier distribution, rejected count, and `passes.model.durationMs` / `passes.validation` status/timing. Dogfood summary output adds rerank-row support. **Note**: the v0.4.8/m3-measurement.csv was generated against the broken pre-PA1 review-context path; it is preserved as historical artifact only and is **not** cited as M5 entry-condition evidence (see PA1+PA3 below).
+
+### M4 — Repo-owned checks v0.1
+
+`.glm/checks/*.json|yaml` adds local policy via two check kinds: `grep-exists` and `grep-notpresent`. Hard-schema config; literal text matching only; scans only files in the reviewed target set; no shell, no test runners, no markdown-driven execution. Stored under `result.repo_checks`, rendered as a separate render section, never merged into model `findings`. Invalid check config is surfaced as configuration failure rather than silently ignored.
+
+### M5 — Optional reflection / rerank lane (opt-in only)
+
+`/glm:review --reflect` and `/glm:adversarial-review --reflect` add a single optional second pass that sees the first-pass parsed result, validation telemetry, and repo-check output, then prunes weak findings or sharpens evidence. Default review path remains one GLM call plus local validation + repo checks. Reflection metadata stored under `passes.rerank` and `result.rerank`. On reflection failure the first-pass result is preserved.
+
+**ROI evidence** (`test-automation/review-eval/results/v0.4.8/m5-reflection-roi.csv` and `…m5-reflection-roi-dogfood.md`, captured under the corrected PA2 harness on C1/C2 adversarial review, N=3 each, temperature=0, seed=42, thinking=off): rerank completed 6/6 runs with no fallback failures. Citation/quality outcome was mixed — C1 cite 0.78 → 0.67, cross-checked 5 → 3, latency 37.7s → 62.3s; C2 cite stayed 1.00, cross-checked 3 → 4, but proposed 0 → 1, latency 38.6s → 69.2s. Net judgment: keep the lane available as an opt-in diagnostic, do not promote to default-on. Closes #18 (entry condition resolved).
+
+### M6 — Challenge-surface graduation decision (no graduation)
+
+`docs/plans/2026-04-25-m6-graduation-design.md` applies the roadmap §5.7 graduation rule (distinct context / deterministic validation hooks / distinct severity-report structure) to all six adversarial-review challenge surfaces: correctness-under-stress, state-and-data-integrity, trust-boundaries, compatibility-and-version-skew, operability, test-strategy. Result: zero surfaces graduate. Correctness-under-stress and test-strategy fail because deterministic validation would require shell or test execution (M4 explicitly excludes this). Operability and compatibility-and-version-skew are already covered by `.glm/checks/`. State/data-integrity, trust-boundaries, and test-strategy do not have ≥20% adoption-driving signal in the current evidence base. Trust-boundary graduation would also push toward "general security pipeline", which M5/M6 non-goals explicitly exclude. **Net effect**: no code change. All six surfaces stay as adversarial-mode prompt tags. Re-open conditions documented inline.
+
+### PA1 — Production review-context fail-closed (root-cause repair)
+
+`scripts/lib/git.mjs::collectReviewContext` previously fell back to a `self-collect` mode when the diff exceeded 2 files / 256 KB, shipping only commit log + diff stat + changed-file list to the BigModel runtime — which has no git access, so the model honestly refused to review (balanced mode, 0 findings) or fabricated whole-file findings (adversarial mode, `file:1` to `file:end-of-file` with `anchor_literal_found=fail`). PA1 raises the inline-diff budget to 50 files / 384 KB (≈110K tokens, ~18K headroom under 128K-token glm-4.6/5.1 input contexts), throws `ReviewContextDiffTooLargeError` (`errorCode=DIFF_TOO_LARGE`, `retry=never`) above that, and exposes `--max-diff-files` / `--max-diff-bytes` per-call overrides. The `self-collect` `inputMode` and `buildAdversarialCollectionGuidance` "inspect yourself" guidance are removed. Companion catches the error and emits a structured failure shape rather than a silent stat-only review.
+
+### PA2 — Fixture-aware measurement harness checkout
+
+`test-automation/review-eval/scripts/run-experiment.mjs` now reads each fixture's `meta.json`, checks out the `head_ref` in a temporary detached worktree, and runs the companion against that worktree with the fixture `base_ref`. CSV rows include `base_ref` and `head_ref`. Citation scoring inspects fixture-worktree files instead of the current repo state. New runs default to `m3-measurement-v2.csv` so they cannot append to the invalid pre-PA1 CSV. Without PA2, M3 measurement was reviewing whatever development branch the harness happened to run from, not the pinned fixture diff.
+
+### PA3 — Fixture-aware M3 v2 baseline
+
+`test-automation/review-eval/results/v0.4.8/m3-measurement-v2.csv` and `…m3-v2-dogfood.md` capture the C1/C2/C3 × review/adversarial-review × N=3 baseline under the corrected PA1+PA2 harness. This baseline supersedes the pre-PA1 m3-measurement.csv as the v0.4.8 evidence for review/adversarial behaviour. It is the input M5 ROI evidence (#36) was generated against.
+
+### M2.1 — Balanced review calibration experiment (negative result)
+
+`prompts/review.md` tightened: balanced review now requires a concrete failure-path trace before approving runtime files / hooks / scripts / schema migrations / config surfaces, and explicitly does not treat release cards / changelogs / plans / test-count summaries as proof of correctness. Rerun under the PA2 fixture-aware harness produced `P0/C0/D0/R0` and `0 findings` on both C1 and C2 (`test-automation/review-eval/results/v0.4.8/m21-review-calibration.csv`, `m21-review-calibration-dogfood.md`). The prompt change is shipped (it is also a correctness improvement on its own merits), but **#32 stays open**: M2.1 cannot be closed by prompt hardening alone; follow-up work must define stronger acceptance fixtures or compare against human-labeled expected findings. Deferred to v0.4.9.
 
 ## Out of Scope
 
-- **No default sampling parameter change.** Sweep expanded in five
-  phases to **457 total runs**, reaching effective **N=81-84 per C3
-  cell** (Phase 7d N=80 power-up) and **N=42-44 per C1 cell**. At
-  that sample size Fisher exact two-sided p on C3 schema compliance
-  is **0.5348 / 0.7466 / 0.7812** for the three pairwise contrasts (all
-  p > 0.5); observed rates flatten to **95.1% / 91.6% / 92.9%**
-  across temperatures (max-min ≈ 3.5pct with overlapping Wilson
-  CIs). C1 is **129/129 across temperatures** at N=42-44 per cell
-  (Wilson lower bound ≥ 91.6%). Design power at N=81-84 for a ~15pct
-  per-step effect is ~80%, and for ~20pct is ~95% under that assumed
-  alternative. The plugin ships no default temperature change because
-  there is no detected effect to justify one; server default
-  (unset) is preserved. Issue #7 closes here; a future test
-  targeting per-step effects smaller than ~10pct would need N ≥ ~200
-  per cell.
-- **~~No BigModel error-code table update~~** — CANCELED. The 457-
-  run sweep surfaced 38 upstream-layer vendor errors (8.3%), the
-  majority 500s and 1234s. Cross-checking
-  https://docs.bigmodel.cn/cn/faq/api-code confirmed both codes are
-  documented (1234 = upstream network error, 500 = upstream internal
-  error), plus 3 more codes the v0.4.6 snapshot missed (1311, 1312,
-  1313). Table expansion now ships in v0.4.7 — see "Added" in
-  CHANGELOG.
-- **~~No C1 (small) / C3 (large) fixtures~~ — SUPERSEDED.** The
-  original v0.4.7 sanity-sweep scope was C2 only; when the 9-call
-  sanity data proved too thin, the scope expanded to add C1 (440
-  lines, 6 files) and C3 (8336 lines, 84 files) in commit 7a971a7
-  so the 457-run sweep could cover small/medium/large. v0.4.7 now
-  ships all three fixtures.
-- **No RAG / fine-tuning / context-packing variant.** Out-of-scope per
-  user pushback — those are not review-workflow solutions, they're
-  different product surfaces.
-- **No changes to** GLM HTTP call shape (except conditional POST body
-  sampling fields), model catalog, schema, prompts, `/glm:setup`,
-  `/glm:status`, `/glm:result`, `/glm:cancel`, `/glm:task`.
+- **#32 M2.1 stronger acceptance fixtures** — deferred to v0.4.9. Evidence shows balanced review still emits 0 findings on PA2-corrected C1/C2 even after prompt hardening; closing this requires a fixture authoring effort with human-labeled expected findings, not blind prompt tuning.
+- **#12 review-design umbrella** — stays open as the rolling tracker for the review surface; v0.4.8 substantially advances it but does not close it.
+- **#26 governance: pin Gitea actor identity** — partially landed (helper hardening with `GITEA_EXPECT_ACTOR` + actor assertion + audit log under `~/.claude/state/gitea-mutations/`), but the broader actor-isolation effort (true session-separated review across two physically distinct sessions / machines) is not solved within v0.4.8 scope. Stays open.
+- **No cross-model verifier**. M5 explicitly excludes a default second model pass on every review. Codex/cross-AI review is governed by `Review-Mode: dual-token user-bypass` semantics, not as a productised feature.
+- **No security platform expansion**. Adversarial review remains six bounded challenge surfaces (correctness, integrity, trust, compatibility, operability, test-strategy). M6 explicitly declined graduation to a general security pipeline.
+- **No diff streaming / chunking** for diffs above the 384 KB inline budget. Above the budget, `/glm:review` fails-closed and asks the user to narrow scope (`--base <closer-ref>`) or split the change. Streaming is a future design (would require a multi-turn protocol).
+- **No sampling-parameter default change**. v0.4.7 expanded sweep already showed no detectable temperature effect at the design power level. v0.4.8 leaves server-default sampling unchanged.
+- **No KB / MB suffix parsing** for `--max-diff-bytes`. Plain bytes only; deferred.
+- **No `--reflect` default-on**. ROI evidence (#36) does not support promotion to default-on for v0.4.8.
 
 ## Planned Actions
 
-1. Branch `fix/v047-review-reliability-mvp` off `develop` ✓
-2. Add `stripMarkdownFences` / `classifyReviewPayload` /
-   `buildCorrectionHint` / `runChatRequestWithCorrectionRetry` /
-   `assignOptionalSamplingParam` to `scripts/lib/glm-client.mjs` ✓
-3. Wire sampling flags through `scripts/glm-companion.mjs runReview` ✓
-4. Extend `commands/review.md` + `commands/adversarial-review.md`
-   argument hints + scope flags section ✓
-5. Add `tests/review-payload.test.mjs` (19 tests) ✓
-6. Build `test-automation/review-eval/` harness (fixture, ground truth,
-   run-experiment.mjs, summarize.mjs) ✓
-7. Open Gitea issue #7 with full investigation scope + hypotheses ✓
-8. Commit infra checkpoint (60c7a1a) pre-sweep ✓
-9. Run 9-call sanity sweep: temp ∈ {0.0, 0.5, 1.0} × N=3 on C2 ✓
-10. Record result CSV in `test-automation/review-eval/results/v0.4.7/` ✓
-11. Add `--base` flag to run-experiment.mjs so future fixtures can
-    pin arbitrary base refs ✓
-12. Bump 0.4.6 → 0.4.7 (package.json + plugin.json + marketplace.json) ✓
-13. CHANGELOG v0.4.7 section with sweep outcome table ✓
-14. **(Added post-user-pushback)** Harness strictness realignment +
-    raw-payload sidecar capture (commit 66ba99c) ✓
-15. **(Added)** C1 (small) + C3 (large) fixtures + path-leak exclusion
-    (commit 7a971a7) ✓
-16. **(Added)** 54-run B+D+E expanded sweep on 3 fixtures ✓
-17. **(Added)** `classifyParseFailure` for 5 parse-failure modes +
-    `stripMarkdownFences` half-fence fallbacks + 15 new unit tests ✓
-18. **(Added)** CHANGELOG v0.4.7 rewrite with expanded-sweep outcome
-    table + C3 scale-effect flag for v0.4.8 ✓
-19. **(Added post-phase-7a)** Adaptive sampling — 15 targeted runs
-    consolidating 5 signal-of-interest cells to N=6 rather than
-    uniform re-sampling. Revealed vendor-error clustering (3/3 at C3
-    t=0.5 were VENDOR_ERROR:1234/500), which explained the N=3
-    "temperature signal" illusion. ✓
-20. **(Added post-phase-7a)** BigModel error-code table expansion:
-    500, 1234, 1311, 1312, 1313 added per official docs recheck.
-    Table grew from 7 to 12 known codes. ✓
-21. **(Added post-phase-7a)** 7 new unit tests for the 5 new vendor
-    codes + retry-semantic partitioning. Total suite: 156/156. ✓
-22. **(Added post-phase-7a)** CHANGELOG update: vendor-error
-    expansion added to Added section, Changed section notes the
-    table growth, outcome table expanded to include N=6 cells +
-    error_code distribution histogram. ✓
-22b. **(Added post-phase-7b)** Effective-N fill: +16 targeted runs
-    on 5 cells previously polluted by Phase 7a upstream failures,
-    so every cell has ≥5 effective model-behavior samples. Zero
-    upstream errors in Phase 7b confirms vendor errors are
-    time-correlated BigModel transient instability. C1 100%/100%/100%
-    schema on effective N; C3 temperature chain refined to
-    83%/71%/67% (Fisher p ≈ 0.5, not significant at N=6-7). CHANGELOG
-    + release_card updated to replace earlier "unambiguous C3
-    temperature signal" narrative with "mild, inconclusive at N=6". ✓
-22c. **(Added post-phase-7c, per user directive "all open questions
-    resolved in this version, not v0.4.8")** N≥14 fill: +64
-    targeted runs in parallel from two detached worktrees (C3 from
-    `/tmp/glm-eval-A` at d5fa754: +30; C1 from `/tmp/glm-eval-B` at
-    7766943: +34). Every C1 and C3 cell now has effective N≥14.
-    [Phase 7d N=80 power-up sweep kicked off subsequently — in
-    flight at time of commit; see Local Verification.]
-    Results: C1 schema 16/16, 16/16, 17/17 (100% across temps); C3
-    schema 13/14 (93%), 13/17 (76%), 12/14 (86%) — pairwise Fisher
-    exact p = 0.344 / 1.000 / 0.664 (all non-significant), ordering
-    non-monotonic. Design power at this N for a ~15pct per-step
-    effect is ~16%, so the C3 temperature finding is "no detected
-    effect at this sample size", not "no effect exists". Per-finding
-    C1 citation audit (93 findings from 49 sidecars): 0 out-of-
-    allowed files, 0 known-false files. 41.9% are IN_ALLOWED with
-    line-range tokens not found; a post-audit spot-check surfaced at
-    least one line-level content fabrication (e.g. fictional
-    `@anthropics → @anthropic-ai` rename claim) that the scoring
-    rubric's token-in-window check does not catch, so the claim is
-    narrowed to "0 wrong-file citations" rather than "0 fabrication".
-    CHANGELOG at this step reflected underpowered-null framing;
-    `commands/review.md` gains "Diff size guidance" section;
-    `commands/adversarial-review.md` sampling bullet aligned.
-    (Superseded by Phase 7d at step 25e where N=81-84 detects no
-    C3 temperature effect. Phase 7c numbers retained below as
-    historical intermediate state.) ✓
-23. `Skill(simplify)` on N=149 doc diff — **DONE** (3-agent parallel
-    + Python factual audit; caught 134-vs-127 success-count mismatch
-    + 47/48-vs-40/42 C2 mismatch + stale `7/85`/`91.3%` numbers, all
-    corrected pre-commit).
-24. `npm run ci:local` — **DONE** (156/156 green); re-run after
-    Codex F-1..F-5 fixes — pending
-25. Adversarial review (Codex primary) — **DONE**. Verdict:
-    REQUEST_CHANGES with 5 findings:
-      - F-1 HIGH: success count 134→127 (schema_compliance, not blank
-        error_code). Fixed in CHANGELOG outcome table.
-      - F-2 HIGH: "0 fabrication" narrowed to "0 out-of-allowed
-        files"; line-level content fabrication observed (fictional
-        `@anthropics → @anthropic-ai` rename claim) and documented
-        as scoring-rubric limitation.
-      - F-3 HIGH: "decisive null" rephrased to "not detected at this
-        N (~16% power)" across CHANGELOG / release_card /
-        commands/review.md / commands/adversarial-review.md.
-      - F-4 MEDIUM: raw vs typed 1234/500 attribution clarified —
-        every raw code is pre-Phase-7c; Phase 7c worktrees correctly
-        emitted typed codes.
-      - F-5 MEDIUM: stale "No C1/C3 fixtures" bullet in release_card
-        and test-automation/review-eval/README.md marked SUPERSEDED.
-    Optional step 25b: re-query Codex with the fixes applied.25b. Optional Codex re-verify after F-1..F-5 fixes — pending user
-    decision (can ship citing REQUEST_CHANGES→addressed in PR body
-    instead).
-25c. **(Added post-Codex-review-round-2, per user directive "这块
-    很重要 社区到底在怎么解决这块的问题")** Codex community research
-    pass on anti-hallucination solutions (CoVe, Self-Consistency,
-    SelfCheckGPT, RAG grounding, Guardrails/NeMo, Pydantic AI,
-    constrained decoding, attribution-faithfulness). Output:
-    `docs/anti-hallucination-roadmap.md` with Tier 1/2/3 landing
-    plan + literature citations (Dhuliawala 2023, Wang 2023,
-    Manakul 2023, Farquhar 2024, Wallat 2024). v0.4.7 ships Tier 1
-    #3 only (`response_format: json_object` on every review call,
-    confirmed supported by GLM-5.x via `docs.z.ai`); #1 content
-    verifier + #2 schema anchors deferred to v0.4.8 under proper
-    design gate. Rationale: #1/#2 change production review output
-    and need design-gate discussion before rushing into release
-    tail. ✓
-25d. **(Added with 25c)** Extracted `buildChatRequestBody` as pure
-    exported helper in `glm-client.mjs` so response_format + sampling
-    + thinking-mode body shape is unit-testable. 14 new tests in
-    `tests/chat-request-body.test.mjs`. Total suite: 170/170 green. ✓
-25e. **(DONE)** Phase 7d N=80 power-up sweep — 308 runs (C3 +225 for
-    ~80% Fisher power, C1 +83 to effective N=42-44) delivered in
-    parallel from 2 detached worktrees (`/tmp/glm-eval-A` C3 at
-    d5fa754, `/tmp/glm-eval-B` C1 at 7766943), total wall time
-    ~3h. Final effective-N: C3 81/83/84 per temperature cell, C1
-    44/43/42. **Schema compliance**: C3 77/81 (95.1%) / 76/83
-    (91.6%) / 78/84 (92.9%); C1 100% across all three cells. **All
-    three pairwise C3 Fisher exact p > 0.5**: 0.5348 / 0.7466 / 0.7812.
-    Phase 7d upstream failures: 25/308. Non-upstream typed parse
-    failures across the full CSV: 12/457, including TRUNCATED_JSON
-    1/457. **C1 citation audit at final N=42-44**: 227 parsed
-    findings, 0 out-of-allowed, 0 known_false_files (Wallat
-    correctness-without-faithfulness failure mode still applies to
-    line-level content; scoped as v0.4.8 Tier 1 #1/#2). ✓
-25f. **(DONE post-Phase-7d)** CHANGELOG.md rewritten with final
-    Phase 7d numbers: 457-run outcome block, N=81-84/N=42-44
-    effective-N table, Fisher exact table with final p-values,
-    227-finding citation audit, final no-detected-temperature-effect
-    framing replacing the underpowered-null language. ✓
-25g. **(DONE post-Phase-7d)** Codex cross-review of final CHANGELOG
-    + release_card against raw CSV/payloads: Verdict BLOCK on 2
-    items — CRITICAL release_card staleness (149-run language) +
-    HIGH CHANGELOG parse-failure temp attribution (MARKDOWN_FENCE
-    + TRUNCATED_JSON were two distinct once-each observations at
-    different temps, not two occurrences of the same mode). Both
-    fixed in this amendment. Codex independently verified: CSV
-    row count, effective-N, Fisher p-values, 227/0/0 citation
-    audit, 0 known_false_files hits across all 457 payloads. ✓
-26. Manifest bump: package.json + plugin.json + marketplace.json
-    0.4.7-beta1 → 0.4.7. ✓
-27. `npm run ci:local` post-doc-updates re-run: syntax check,
-    170/170 tests, path-leak guard, plugin manifest validation, AI
-    quality gate, CHANGELOG update gate, and Co-Authored-By trailer
-    check all passed. ✓
-28. Corrective commit on top of `6f849e8` with Phase 7d doc/gate
-    corrections (`25/308`, `12/457`, Scope Completion release gate). ✓
-29. Push to Gitea. PR may already be open from beta1; if open, the
-    amend shows up on the existing PR. If closed, open new PR → develop. — pending
-30. Gitea CI green → auto-merge PR to develop. — pending
-31. Open Gitea PR: develop → main. Merge. — pending
-32. Tag v0.4.7 annotated on main merge commit. Pre-push hook runs
-    `check-release-ready.sh v0.4.7`. — pending
-33. Publish Gitea release v0.4.7, mark Latest (promotes past v0.4.6). — pending
-34. Sync main + develop + tag to GitHub. Confirm PR Check + AI
-    Quality Gate green. — pending
-35. Publish GitHub release v0.4.7, mark Latest (promotes past v0.4.6). — pending
-36. Fast-forward develop → main on both remotes (GitFlow cleanup). — pending
-37. Upgrade local plugin cache to v0.4.7. — pending
-38. Close Gitea issue #7 with link to CHANGELOG entry + final
-    457-run CSV. No v0.4.8 follow-up issue for temperature default
-    — 457-run sweep cannot support one; content-faithfulness
-    mitigations tracked in `docs/anti-hallucination-roadmap.md` as
-    v0.4.8 Tier 1 #1/#2. — pending
+1. M0 substrate (#19 merged 2026-04-23). ✓
+2. M1 structural validators (#20 merged 2026-04-23). ✓
+3. M2 real mode split (#21 merged 2026-04-23). ✓
+4. M3 measurement parity (#22 merged 2026-04-23). ✓
+5. v0.4.8 review cleanup observations (#23 merged 2026-04-23). ✓
+6. M4 repo-owned checks (#24 merged 2026-04-24). ✓
+7. M3 measurement evidence (pre-PA1) (#25 merged 2026-04-24). ✓
+8. M5 reflection lane (#27 merged 2026-04-25 by sky admin-bypass). ✓
+9. PA1 production review-context fail-closed (#28 merged 2026-04-25). ✓
+10. PA2 fixture-aware harness checkout (#29 merged 2026-04-25). ✓
+11. PA3 fixture-aware M3 v2 baseline (#30 merged 2026-04-25). ✓
+12. M5 ROI harness instrumentation (#35 merged 2026-04-25). ✓
+13. M2.1 balanced review calibration experiment (#33 merged 2026-04-25). ✓
+14. M6 challenge-surface graduation decision (#34 merged 2026-04-25). ✓
+15. M5 ROI evidence (#36 merged 2026-04-25 by sky admin-bypass). ✓
+16. **(pending)** Manifest bump: `package.json` + `.claude-plugin/plugin.json` + `.claude-plugin/marketplace.json` 0.4.7 → 0.4.8.
+17. **(pending)** CHANGELOG header change `## v0.4.8 (unreleased)` → `## v0.4.8` (release-day cut).
+18. **(pending)** Open `release/v0.4.8` PR → `develop` (Gitea) with steps 16–17. Codex non-author review + merge.
+19. **(pending)** Open `develop` → `main` PR (Gitea). Admin-bypass merge.
+20. **(pending)** Tag `v0.4.8` annotated on the `develop → main` merge commit. Pre-push hook runs `bash scripts/ci/check-release-ready.sh v0.4.8`.
+21. **(pending)** Publish Gitea release `v0.4.8`, mark `Latest` (promotes past v0.4.7).
+22. **(pending)** Sync `main` + `develop` + tag to GitHub. Confirm AI Quality Gate + PR Check green.
+23. **(pending)** Publish GitHub release `v0.4.8`, mark `Latest`.
+24. **(pending)** Fast-forward `develop` → `main` on both remotes (GitFlow cleanup).
+25. **(pending)** Upgrade local plugin cache to v0.4.8.
+26. **(pending)** Close Gitea issue #18 with link to CHANGELOG entry + #36 evidence summary.
 
 ## Scope Completion: COMPLETE
-## Outstanding In-Scope Work: none — all technical scope (code, docs,
-Phase 7d data, Codex cross-review, CHANGELOG/release_card amendments)
-complete. Remaining steps 29-38 are mechanical release chain actions.
+
+Code, evidence, manifest bump, and CHANGELOG header are all on the `release/v0.4.8` branch off `develop`@`2080924`. Steps 18–26 below are mechanical release-chain actions (PR merges, tag, GitHub mirror, Gitea + GitHub release publish, plugin cache, issue close).
+
+## Outstanding In-Scope Work: none
 
 ## Major Upgrade Review: N/A
 
-No dependency bumps, Action SHA changes, Node version bumps, or
-runtime/platform changes. Pure additive parse-layer code + CLI-flag
-forwarding + evaluation harness. No change to the GLM endpoint, model,
-prompt, or request shape (except conditional sampling-param fields in
-the POST body when the caller explicitly passes a flag).
-
-## Breaking Changes: none
-
-- `classifyReviewPayload` runs after successful JSON parse and only
-  affects requests with `expectJson: true` (review calls). Non-review
-  calls (`/glm:task`) are untouched.
-- `runChatRequestWithCorrectionRetry` intercepts `retry: "correction"`
-  failures between `withRetry` iterations; it does not consume the
-  transient-backoff attempt budget, does not change v0.4.6 behavior on
-  HTTP/network errors, and opts out automatically for non-review calls.
-- Markdown fence stripping is idempotent on already-clean JSON (no
-  change if no fence present).
-- Sampling CLI flags are optional. Unset = server default = v0.4.6
-  behavior.
-- New CSV under `test-automation/review-eval/results/v0.4.7/` is
-  data-only; no CI or runtime consumes it.
+No dependency bumps, GitHub/Gitea Action SHA changes, Node version bumps, or runtime/platform changes in v0.4.8. All work is additive plugin code + measurement infra + review-eval data + design docs. The review path now fail-closes on big diffs (PA1) — that is a behaviour change but not a dependency-version change. Companion HTTP call shape, BigModel endpoint, model catalog, schema, prompt templates' core structure, and `/glm:setup` / `/glm:status` / `/glm:result` / `/glm:cancel` / `/glm:task` all unchanged in protocol/contract; only review-mode prompts were tightened (M2.1).
 
 ## Repo Usage Audit
 
-- Modified: `scripts/lib/glm-client.mjs` (+223 lines: parse helpers,
-  classifier, correction-retry wrapper, sampling-param dispatcher;
-  existing functions unchanged in signature).
-- Modified: `scripts/glm-companion.mjs` (+43 lines: CLI flag parsing,
-  forwarding into `runGlmReview` options, updated printUsage).
-- Modified: `commands/review.md`, `commands/adversarial-review.md`
-  (argument-hint extension + scope-flags doc pointer to issue #7).
-- New: `tests/review-payload.test.mjs` (initial 19 tests + 15 added
-  post-expanded-sweep for half-fences + 5-mode parse-failure classifier
-  = 34 total).
-- New: `test-automation/review-eval/` directory
-  - `corpus/C1-v044-setup-menu/` (small fixture, 440 lines, 6 files)
-  - `corpus/C2-v046-aftercare/` (medium fixture, 1550 lines, 11 files)
-  - `corpus/C3-v04x-cumulative/` (large fixture, 8336 lines, 84 files)
-  - `scripts/{run-experiment,summarize}.mjs` — run-experiment extended
-    with raw-payload sidecar capture + `--base` flag + schema-check
-    alignment to classifyReviewPayload
-  - `results/v0.4.7/sanity-sweep.csv` (initial 9 runs, v1 strictness)
-  - `results/v0.4.7/expanded-sweep.csv` (457 runs: 54 Phase 4/5 +
-    15 Phase 7a + 16 Phase 7b + 64 Phase 7c N≥14 fill + 308 Phase 7d
-    N=80 power-up sweep)
-  - `results/v0.4.7/payloads/` (457 sidecar JSON files spanning all
-    five phases)
-- Modified: `scripts/ci/check-no-local-paths.sh` (exclude
-  review-eval corpus + results paths from path-leak scanner).
-- Version bump in 3 manifest files + CHANGELOG v0.4.7 rewrite with
-  expanded-sweep outcome table.
-- Gitea issue #7 opened + commented with scope reduction (β) +
-  expanded (B+D+E mix).
+- Modified: `scripts/lib/git.mjs` (PA1: `+ReviewContextDiffTooLargeError` class, threshold raise, fail-closed semantics, removal of `self-collect` mode and `buildAdversarialCollectionGuidance`).
+- Modified: `scripts/glm-companion.mjs` (PA1: `--max-diff-files` / `--max-diff-bytes`; M5: `--reflect` / `--reflect-model`; M0: focus-text rejection on `/glm:review`; M0/M1/M2: pass metadata + structural-validator wiring + mode-split prompt dispatch; M4: repo-checks integration).
+- Modified: `scripts/lib/render.mjs` (M2: balanced vs adversarial render policy split; M4: `repo_checks` rendering section).
+- New: `scripts/lib/validators/review-structural.mjs` (M1).
+- New: `scripts/lib/repo-checks.mjs` (M4).
+- New: `scripts/lib/review-rerank.mjs` (M5).
+- Modified: `prompts/review.md` (M2 split; M2.1 failure-path-trace requirement) and `prompts/adversarial-review.md` (M2 split + bounded challenge surfaces).
+- Modified: `commands/review.md`, `commands/adversarial-review.md` (argument hints).
+- Modified: `schemas/review-output.schema.json` (M0 confidence_tier + validation_signals).
+- Modified: `test-automation/review-eval/scripts/run-experiment.mjs` (M3 mode flag; PA2 fixture worktree checkout + v2 CSV; M5 rerank columns), `summarize.mjs`.
+- New: `test-automation/review-eval/results/v0.4.8/` — `m3-measurement.csv` (pre-PA1, retained as historical artifact), `m3-measurement-v2.csv` (PA3 fixture-aware), `m21-review-calibration.csv` (M2.1), `m5-reflection-roi.csv` (#36), corresponding dogfood markdown packets, and ~50 sidecar payload JSONs.
+- New: `tests/git.test.mjs`, `tests/repo-checks.test.mjs`, `tests/review-eval-harness.test.mjs`, `tests/review-focus-rejection.test.mjs`, `tests/review-rerank.test.mjs`, `tests/run-review-pass-metadata.test.mjs`, `tests/schema-m0.test.mjs`, `tests/structural-validators.test.mjs`, `tests/template-contract.test.mjs`, `tests/pass-metadata.test.mjs`. Modified: `tests/render.test.mjs`, `tests/review-payload.test.mjs`.
+- New: `docs/plans/2026-04-22-review-fabrication-root-cause-design.md`, `…v2-archived.md`, `2026-04-24-review-architecture-v1.md`, `2026-04-24-review-design-external-baseline.md`, `2026-04-24-review-implementation-roadmap.md`, `2026-04-25-pa1-review-context-fix-design.md`, `2026-04-25-m6-graduation-design.md`. New: `docs/repo-checks.md`.
 
 ## Verification Plan
 
 | Layer | Tool | Pass criterion |
 |---|---|---|
 | Static | `npm run check` | All modules parse; import graph resolves |
-| Unit | `npm test` | 170/170 pass (115 baseline + 34 review-payload + 7 bigmodel-errors + 14 chat-request-body) |
-| Manifest | `check-plugin-manifest.sh` | Version 0.4.7 consistent across 3 JSON files |
-| CHANGELOG | `check-changelog-updated.sh` | `## v0.4.7` section present |
-| Leak guard | `check-no-local-paths.sh` | No internal paths leaked (corpus/results excluded) |
-| Cross-AI | `check-cross-ai-review.mjs` | adversarial review referenced |
-| Companion UAT | reuse v0.4.5 scenarios | Still PASS — v0.4.7 additive only |
-| Adversarial | `/codex:adversarial-review` preferred, else `/glm:adversarial-review` | No unresolved CRITICAL/HIGH |
-| Gitea CI | `ai-quality-gate.yml` + `pr-check.yml` | both green |
-| GitHub CI | same 2 workflows | both green |
-| **Release gate** | `bash scripts/ci/check-release-ready.sh v0.4.7` | Package/manifests match tag; CHANGELOG section exists; release_card is Status READY and Scope Completion COMPLETE |
-| **Expanded sweep data** | `node test-automation/review-eval/scripts/summarize.mjs results/v0.4.7/expanded-sweep.csv` + final audit script | 457 rows, 457 payloads, 0 SCHEMA_ECHO, 0 known_false_files hits across all payloads, 0 out-of-allowed citations on C1. Effective-N: C1=44/43/42 all schema-pass; C2=14/15, 14/15, 12/12; C3=77/81, 76/83, 78/84. Fisher exact on C3 p=0.5348 / 0.7466 / 0.7812. Upstream failures: 38/457 overall, 25/308 in Phase 7d. Typed non-upstream parse failures: 12/457 including TRUNCATED_JSON 1. |
+| Unit | `npm test` (= `node --test`) | 312/312 pass on `develop`@2080924 |
+| Manifest | `bash scripts/ci/check-plugin-manifest.sh` | Version is **0.4.8** consistent across `package.json` / `.claude-plugin/plugin.json` / `.claude-plugin/marketplace.json` (after step 16). |
+| CHANGELOG | `bash scripts/ci/check-changelog-updated.sh` | `## v0.4.8` section present (header de-`unreleased` after step 17). |
+| Leak guard | `bash scripts/ci/check-no-local-paths.sh` | No internal paths leaked. |
+| Cross-AI | `node scripts/ci/check-cross-ai-review.mjs` | Cross-AI review documented per PR. |
+| Co-Authored-By | `bash scripts/ci/check-coauthored-by.sh` | All AI-authored commits carry the trailer. |
+| Gitea CI | `AI Quality Gate` + `PR Check` workflows | Both green on `release/v0.4.8` PR + `develop → main` PR. |
+| GitHub CI | Same | Both green after GitHub mirror push. |
+| **Release gate** | `bash scripts/ci/check-release-ready.sh v0.4.8` | Manifests match tag; CHANGELOG section exists; release_card.md is `Status: READY` and `Scope Completion: COMPLETE` (after step 16+17). |
+| Local exercise | Manual `/glm:review --base v0.4.7` on a small repo PR | Returns `inputMode=inline-diff` with real diff content (post-PA1). Optionally `--reflect` exercises the M5 lane. |
 
-## Local Verification
+## Local Verification (current state, develop @ 2080924)
 
-- `npm run ci:local` green after final doc/gate corrections: syntax
-  check, 170/170 tests, path-leak guard, plugin manifest validation,
-  AI quality gate, CHANGELOG update gate, and Co-Authored-By trailer
-  check all passed.
-- Phase 7c sweep 2026-04-21 ~82 min wall time: 30 C3 runs from
-  `/tmp/glm-eval-A` (d5fa754) + 34 C1 runs from `/tmp/glm-eval-B`
-  (7766943), zero parallel-append collisions.
-- Phase 7d sweep 2026-04-22 ~3h wall time: 225 C3 runs from
-  `/tmp/glm-eval-A` + 83 C1 runs from `/tmp/glm-eval-B`, total 308
-  appended, CSV now at 457 data rows. 25 upstream errors (8.12%).
-- Codex cross-review 2026-04-22: independently recomputed CSV row
-  count, effective-N per cell, schema-compliance rates, Fisher
-  exact p-values, 227-finding citation audit, and grep for
-  reference_runtime/governance.py/workflow_governor across all 457
-  payloads. All Claude-claimed numbers verified within ±0.01;
-  Codex surfaced 2 doc-consistency fixes (applied in amendment).
+- `node --test` on `develop`@`2080924`: **312/312 pass** (12 new test files vs v0.4.7; 14543/-182 line delta across 102 files).
+- `npm run ci:local` on `develop`@`2080924`: lint + tests + path-leak guard + plugin manifest + AI quality gate + CHANGELOG gate + Co-Authored-By gate **all green**.
+- Independent claude-code review of #36 (M5 ROI evidence): all CSV averages and tier counts recomputed independently and matched dogfood/CHANGELOG claims; sidecar spot-check confirmed rerank pass executed (durationMs=12085 on the spot-checked run, model=glm-5.1, initial 3 → final 1 with the kept finding being a real cross-checked technical defect).
+- Mirror to GitHub `develop` succeeded (FF-only, `20b9372 → 2080924`). GitHub side warns that 4 commits in this range are unsigned; the warning is admin-override-accepted on this repo, not a release blocker.
 
 ## CI Evidence
 
-To be populated after Gitea feature PR + main PR CI runs complete.
+To be filled in after the `release/v0.4.8` PR + `develop → main` PR runs complete on Gitea, plus the corresponding mirror runs on GitHub. Per-merged-PR CI greens for v0.4.8 to date (already verified at merge time):
+
+| PR | Title | CI status (at merge) |
+|---|---|---|
+| #19 | feat(m0) review substrate | 3/3 green |
+| #20 | feat(m1) structural validators | 3/3 green |
+| #21 | feat(m2) real mode split | 3/3 green |
+| #22 | feat(m3) review-mode measurement | 3/3 green |
+| #23 | fix(v0.4.8) review cleanup observations | 3/3 green |
+| #24 | feat(m4) repo-owned checks | 3/3 green |
+| #25 | test(m3) measurement evidence | 3/3 green |
+| #27 | feat(m5) reflection rerank | 3/3 green |
+| #28 | fix(pa1) review-context fail-closed | 3/3 green |
+| #29 | fix(pa2) fixture worktree harness | 3/3 green |
+| #30 | test(pa3) fixture-aware M3 v2 baseline | 3/3 green |
+| #33 | fix(m2.1) failure-path tracing | 3/3 green |
+| #34 | docs(m6) graduation decision | 3/3 green |
+| #35 | test(m5) ROI harness instrumentation | 3/3 green |
+| #36 | test(m5) ROI evidence | 3/3 green |
 
 ## Rollback
 
-Extremely low risk.
+Low risk. v0.4.8 is additive plus measurement-infra repair; no dependency bumps, no schema migrations, no config-file format changes. Users do not need to re-run `/glm:setup`.
 
-- **Immediate**: `git revert` the feature PR merge commit on main. The
-  parse-layer defenses + sampling CLI flags stop running; v0.4.6
-  behavior restored. Evaluation harness files remain (they're
-  self-contained under `test-automation/` and do not execute at
-  runtime).
-- **Full**: revert to v0.4.6 tag, delete tag v0.4.7, unmark GitHub
-  release Latest, re-mark v0.4.6 Latest.
-- Zero config-file mutations by this release; users never need to
-  re-run `/glm:setup`.
-- Sanity-sweep CSV is informational only; deleting it would have no
-  functional effect.
+- **PA1 fail-closed**: if a user has a workflow that depends on `/glm:review` quietly skipping diff content above 2 files / 256 KB (which would have produced fabricated or refusal-style output anyway), they can override per call with `--max-diff-files <N>` and `--max-diff-bytes <BYTES>`. Full rollback would `git revert` PR #28 + #29 to restore the pre-PA1 self-collect path; not recommended given the fabrication evidence.
+- **M5 reflection**: opt-in only; no default behaviour change. Disabling means simply not passing `--reflect`.
+- **M2.1 prompt tightening**: the failure-path-trace requirement is a real prompt change shipped on review only. If it produces too many no-ship results in production, revert PR #33 alone (single-PR rollback path) or relax the failure-path-trace clause in `prompts/review.md` and recut.
+- **Full rollback**: `git revert` the `develop → main` merge commit; delete tag `v0.4.8`; unmark `Latest` on Gitea + GitHub releases; re-mark `v0.4.7` `Latest` on both. This restores v0.4.7 entirely; the v0.4.8 review-eval data files remain on disk as historical artifacts but no runtime/CI consumes them.
+
+## Approval ask (when ready)
+
+This card moves from `DRAFT` → `READY` after the manifest bump + CHANGELOG header change land on `develop`. At that point the approval ask becomes:
+
+```text
+Release approval request — glm-plugin-cc v0.4.8
+- Scope: M0–M6 + PA1–PA3 + M2.1 (negative result, prompt change shipped) +
+  M5 ROI evidence (#36)
+- Ref: develop@<post-manifest-bump-sha>
+- Evidence: 312/312 + ci:local green at 2080924; per-PR CI 3/3 green for
+  PRs #19–#36; M5 ROI evidence independently re-verified; PA1+PA2+PA3
+  measurement-infra repair landed.
+- Open in-scope work: none
+- Ask: admin-bypass merge `release/v0.4.8` → `develop` → `main`, then tag
+  v0.4.8, then publish Gitea + GitHub releases as `Latest`.
+```
