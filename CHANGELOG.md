@@ -122,6 +122,13 @@ confidence scores, and confidence tiers. If the optional second pass fails or
 does not return a usable parsed payload, the command keeps the first-pass
 result and records the rerank failure instead of silently overwriting evidence.
 
+**Measurement support** (`test-automation/review-eval/scripts/run-experiment.mjs`,
+`test-automation/review-eval/scripts/summarize.mjs`): the fixture-aware
+review-eval harness now records `reflect=on|off`, `reflect_model`, rerank
+status/timing, and initial vs final rerank tier distributions. This lets issue
+#31 evaluate M5 ROI on corrected PA2/PA3 fixtures instead of relying on the
+invalid pre-PA2 measurement.
+
 ### M4 — Repo-owned checks v0.1
 
 **Repo-owned checks** (`.glm/checks/`, `scripts/lib/repo-checks.mjs`):
