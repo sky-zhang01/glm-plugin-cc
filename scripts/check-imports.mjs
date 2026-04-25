@@ -33,6 +33,7 @@ const LIB_MODULES = [
   "preset-config.mjs",
   "process.mjs",
   "prompts.mjs",
+  "repo-checks.mjs",
   "render.mjs",
   "state.mjs",
   "tracked-jobs.mjs",

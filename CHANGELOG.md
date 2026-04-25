@@ -1,5 +1,250 @@
 # Changelog
 
+## v0.4.8
+
+### M6 — Challenge-surface graduation decision (closed: no graduation)
+
+**Decision** (`docs/plans/2026-04-25-m6-graduation-design.md`): apply the
+roadmap §5.7 graduation rule (distinct context / deterministic validation
+hooks / distinct severity-report structure) to all six adversarial-review
+challenge surfaces. Tag every PA3 v2 baseline finding to its surface, then
+evaluate.
+
+**Result**: zero surfaces meet the rule. Correctness-under-stress and
+test-strategy fail because deterministic validation would require shell or
+test execution (M4 explicitly excludes this). Operability and
+compatibility/version-skew are already covered by repo-owned checks
+(`.glm/checks/`). State/data-integrity, trust-boundaries, and
+test-strategy do not have ≥20% adoption-driving signal in current evidence
+to justify a distinct context-collection step. Trust-boundary graduation
+would also push toward "general security pipeline", which M5/M6 non-goals
+explicitly exclude.
+
+**Net effect**: no code change. All six surfaces remain as adversarial-mode
+prompt tags. Re-open conditions documented in the design doc:
+deterministic-check signal in >20% of findings on a domain-heavy fixture,
+adoption shift to security-sensitive workloads, or a recurring class
+unencodable as `.glm/checks/`.
+
+**Out of scope (separate tracks)**:
+- balanced-mode 0-findings problem → issue #32 / M2.1
+- M5 reflection ROI revalidation on PA2 harness → issue #31
+- v0.4.8 release tag + GitHub mirror
+
+### PA1 — Production review-context fix (fail-closed on big diff)
+
+**Root cause** (`scripts/lib/git.mjs::collectReviewContext`): the prior
+defaults of 2 files / 256 KB silently fell back to a "self-collect" mode
+that shipped only commit log, diff stat, and changed-file list. The remote
+BigModel runtime has no git access, so self-collect produced honest refusals
+in balanced review (no findings) or fabricated whole-file findings in
+adversarial review (cited `file:1` to `file:end-of-file` with
+`anchor_literal_found=fail`). M3 measurement payloads include the model
+self-report: *"only commit log, diff stat, list of changed files... a
+substantive review is impossible without the diff"*.
+
+**Behavior change**: the inline-diff budget is raised to 50 files / 384 KB
+(≈110K tokens; ~18K-token headroom under 128K-token glm-4.6/5.1 input
+contexts). Beyond that, `collectReviewContext` throws
+`ReviewContextDiffTooLargeError` (`errorCode=DIFF_TOO_LARGE`,
+`retry=never`) with an actionable message naming `--max-diff-files` /
+`--max-diff-bytes` overrides and the scope-narrowing path. Companion
+catches this and emits a structured failure shape rather than a silent
+stat-only review.
+
+**Removed**: the "self-collect" `inputMode` branch, the
+`buildAdversarialCollectionGuidance` "inspect yourself with git commands"
+guidance string, and the `includeDiff: false` opt-out path. Every successful
+`collectReviewContext` return now carries `inputMode: "inline-diff"`.
+
+**Implications for prior v0.4.8 evidence**: the M3 measurement matrix
+(`test-automation/review-eval/results/v0.4.8/m3-measurement.csv`) is
+retained as historical artifact but should not be used to support the M5
+entry condition. PA2 (measurement-harness fixture-aware checkout) and PA3
+(re-baseline) follow as separate work; the v0.4.8 release tag is blocked
+on PA3 evidence.
+
+**New flags**: `--max-diff-files <N>` and `--max-diff-bytes <BYTES>` on
+`review` and `adversarial-review` subcommands.
+
+**Tests**: new `tests/git.test.mjs` covers small-diff inline path,
+file-cap throw, byte-cap throw, override widening, non-finite override
+clamping, dual-cap exceeded message, and the
+`inputMode != "self-collect"` invariant.
+
+### PA2 — Fixture-aware measurement harness checkout
+
+**Measurement target fix** (`test-automation/review-eval/scripts/run-experiment.mjs`):
+the review-eval harness now reads each fixture's `meta.json`, checks out the
+fixture `head_ref` in a temporary detached git worktree, and runs the companion
+against that worktree with the fixture `base_ref`. This prevents PA1/M3
+measurement runs from accidentally reviewing the current development branch
+instead of the pinned fixture diff.
+
+**Evidence hygiene**: PA2 rows default to `m3-measurement-v2.csv` so they
+cannot append to the invalid PA1/M3 CSV shape. CSV rows now include
+`base_ref` and `head_ref`, and payload sidecars store the same refs in their
+`cell` metadata. Citation scoring also reads cited files from the fixture
+worktree rather than the current repository checkout, so the harness and
+validator inspect the same candidate code.
+
+### M2.1 — Balanced review calibration experiment
+
+**Prompt calibration** (`prompts/review.md`): balanced review now requires a
+concrete failure-path trace before returning `approve` for runtime files,
+hooks, scripts, schema migrations, or config surfaces. It also tells the model
+not to treat release cards, changelogs, plans, or test-count summaries as proof
+of correctness without checking implementation or test behavior in the provided
+context.
+
+**Measurement result** (`test-automation/review-eval/results/v0.4.8/m21-review-calibration.csv`):
+the PA2 fixture-aware harness was rerun for C1 and C2 balanced review at
+`temperature=0`, `seed=42`, `thinking=off`, `N=3` each. The prompt now names
+failure-path traces in approve summaries, but still emits 0 findings for both
+fixtures (`P0/C0/D0/R0`, citation accuracy 1.00). This is recorded as a
+negative calibration result: M2.1 cannot be closed by prompt hardening alone,
+and follow-up work must define stronger acceptance fixtures or compare against
+human-labeled expected findings rather than tuning against adversarial output.
+
+### M5 — Optional reflection / rerank lane
+
+**Opt-in second pass** (`scripts/glm-companion.mjs`,
+`scripts/lib/review-rerank.mjs`): `/glm:review` and
+`/glm:adversarial-review` now accept `--reflect` plus optional
+`--reflect-model <model>`. The default review path remains one GLM review call
+plus local validation/repo checks. When enabled, the reflection pass sees the
+first-pass parsed result, validation telemetry, and repo-check output; it is
+asked to drop weak findings or sharpen evidence rather than broaden scope.
+
+**Auditability and fallback**: rerank metadata is stored under
+`passes.rerank` and `result.rerank`, including initial vs final finding counts,
+confidence scores, and confidence tiers. If the optional second pass fails or
+does not return a usable parsed payload, the command keeps the first-pass
+result and records the rerank failure instead of silently overwriting evidence.
+
+**Measurement support** (`test-automation/review-eval/scripts/run-experiment.mjs`,
+`test-automation/review-eval/scripts/summarize.mjs`): the fixture-aware
+review-eval harness now records `reflect=on|off`, `reflect_model`, rerank
+status/timing, and initial vs final rerank tier distributions. This lets issue
+#31 evaluate M5 ROI on corrected PA2/PA3 fixtures instead of relying on the
+invalid pre-PA2 measurement.
+
+**ROI evidence** (`test-automation/review-eval/results/v0.4.8/m5-reflection-roi.csv`,
+`test-automation/review-eval/results/v0.4.8/m5-reflection-roi-dogfood.md`):
+the corrected PA2 harness was run on C1 and C2 adversarial review cells with
+reflection off/on (N=3 each, temperature=0, seed=42, thinking=off). Reflection
+completed in all 6 reflected runs, but the outcome is mixed: C1 citation
+accuracy moved **0.78 → 0.67**, cross-checked findings moved **5 → 3**, and
+average latency moved **37.7s → 62.3s**; C2 citation accuracy stayed **1.00**,
+cross-checked findings moved **3 → 4**, proposed findings moved **0 → 1**, and
+average latency moved **38.6s → 69.2s**. M5 therefore remains opt-in for
+v0.4.8 and is not promoted to default-on review behavior.
+
+### M4 — Repo-owned checks v0.1
+
+**Repo-owned checks** (`.glm/checks/`, `scripts/lib/repo-checks.mjs`):
+adds an optional local policy surface with exactly two check kinds:
+`grep-exists` and `grep-notpresent`. Checks are hard-schema JSON/YAML
+objects, scan only files in the reviewed target set, and perform literal
+text matching. No shell commands, `test-passes`, arbitrary scripts, or
+free-form markdown execution enter the review path.
+
+**Runtime and rendering** (`scripts/glm-companion.mjs`, `scripts/lib/render.mjs`):
+`/glm:review` and `/glm:adversarial-review` now attach repo check output as a
+separate `repo_checks` section in the stored result and human render. Repo
+checks are not merged into model `findings`, do not rerank findings, and do
+not by themselves change the model verdict. Invalid check config is surfaced as
+repo-check config failure rather than silently ignored.
+
+### M3 — Measurement parity and dogfood packet lane
+
+**Review-eval harness** (`test-automation/review-eval/scripts/run-experiment.mjs`):
+adds `--mode review|adversarial-review` so the same fixture/cell sweep can
+exercise balanced review and adversarial review. Balanced mode intentionally
+sends no trailing focus text, and adversarial mode now defaults to the same
+no-focus measurement input so mode comparisons are not contaminated by prompt
+asymmetry. The harness can still intentionally exercise the adversarial
+focus-text contract with `--adversarial-focus "<focus text>"`, recorded in the
+CSV's `adversarial_focus` column. CSV rows now record `mode`,
+post-validation `confidence_tier` distribution, rejected count,
+`passes.model.durationMs`, and `passes.validation` status/timing.
+
+**Summary and dogfood artifacts** (`test-automation/review-eval/scripts/summarize.mjs`):
+summaries now group by mode and print tier/pass-timing columns. A new
+`--dogfood-packet <markdown>` option writes a repeatable file-based review
+packet with the candidate git ref, per-mode summary cells, sampled findings
+from payload sidecars, and human spot-check notes. This gives later rerank /
+cross-model verifier decisions evidence from local artifacts instead of chat
+transcripts.
+
+### M2 — Real mode split for balanced vs adversarial review
+
+**Renderer defaults** (`scripts/lib/render.mjs`): `/glm:review` and
+`/glm:adversarial-review` now use distinct default human-output policies while
+preserving one shared stored result object. Balanced review shows findings at
+`cross-checked` or stronger confidence tier, `medium` or higher severity, and
+caps visible findings at 5. Adversarial review shows `proposed` or stronger,
+`low` or higher, and caps visible findings at 15. Findings hidden by tier,
+severity, or cap remain available in stored JSON via `/glm:result --json`.
+
+**Prompt and command contract** (`prompts/*.md`, `commands/*.md`): balanced
+review is now explicitly calibrated as a concise ship/no-ship review, while
+adversarial review declares bounded challenge surfaces for stress behavior,
+state/data integrity, trust boundaries touched by the diff, compatibility,
+operability, and risky-path test strategy. The adversarial mode remains a code
+review lens, not a general pentest or security-scanner surface.
+
+### M1 — Structural validators and confidence-tier wiring
+
+**Structural validation** (`scripts/lib/validators/review-structural.mjs`):
+adds the first local deterministic validation pass for parsed review findings:
+`file_in_target`, `line_range_in_file`, `anchor_literal_found`, and
+`known_false_reference_absent`. File/line/known-false failures become
+`rejected`; anchor misses remain `proposed` with an explicit failed signal so
+soft grounding gaps are visible without over-dropping high-level findings.
+
+**Runtime wiring** (`scripts/glm-companion.mjs`): `/glm:review` and
+`/glm:adversarial-review` now validate the sanitized parsed payload before
+rendering, storing, or returning `--json`. Stored jobs include
+`passes.validation` telemetry with tier counts and signal counts. The default
+runtime still performs one remote GLM review call; validation is local and
+post-parse.
+
+**Renderer behavior** (`scripts/lib/render.mjs`): pipeline-assigned
+`cross-checked` / `proposed` tiers render in the finding suffix. `rejected`
+findings stay in stored JSON with their `validation_signals`, but are hidden
+from default human output with a count and a `--json` inspection hint.
+
+### M0 — Evidence substrate (schema + renderer + focus-text enforcement)
+
+**Schema** (`schemas/review-output.schema.json`): add two optional finding
+fields — `confidence_tier` (enum: proposed / cross-checked /
+deterministically-validated / rejected) and `validation_signals` (array of
+`{kind, result, artifact?}` objects). Both fields are optional; all existing
+v0.4.7 findings remain valid without change.
+
+**Renderer/storage substrate** (`scripts/lib/render.mjs`): the schema accepts
+the new evidence fields, but M0 treats them as pipeline-owned rather than
+model-owned. `normalizeReviewFinding` clamps any model-supplied valid
+`confidence_tier` to `proposed` and drops model-supplied
+`validation_signals`; M1 is responsible for assigning real validator-backed
+tiers and signals. Findings without M0 fields remain byte-identical to the
+v0.4.7 render baseline. Exports `normalizeReviewFindingM0` alias,
+`sanitizeReviewResultForStorageM0`, and `validateFindingWithNewFields` helper
+for test use.
+
+**Pass-level metadata** (`scripts/lib/tracked-jobs.mjs`): `runTrackedJob`
+now records `passes.model = {status, durationMs}` on both success and failure
+paths. `validation` and `rerank` pass slots initialized to `null` as M1/M5
+placeholders. Old stored jobs without `passes` replay via `/glm:result`
+without error.
+
+**Breaking change** (`scripts/glm-companion.mjs`): `/glm:review` now rejects
+trailing focus text with a usage error and non-zero exit. Previously the
+companion silently collected positionals and injected them into `USER_FOCUS`,
+contradicting the command contract documented in `commands/review.md`.
+`/glm:adversarial-review` behavior is unchanged (focus text still accepted).
+
 ## v0.4.7 — 2026-04-22
 
 **Release path**: v0.4.7-beta1 was cut on 2026-04-22 at commit
@@ -217,8 +462,10 @@ failure mode at any temperature under the current model snapshot.
     issue #7 success criteria.
   - Each fixture ships `meta.json` (provenance: base/head refs,
     line/byte counts, touched-file list) and `ground-truth.json`
-    (`allowed_files` + `known_false_files` universal hallucination
-    signal list + `expected_bugs` curated for that diff scope).
+    (`allowed_files` + `known_false_files` wrong-project sentinel list
+    + `expected_bugs` curated for that diff scope). `known_false_files`
+    is deliberately narrow evidence from the workflow-governor incident,
+    not a generic hallucination detector.
 - **v0.4.7 sweep data artifacts**:
   - `results/v0.4.7/sanity-sweep.csv` — original 9-run v1-strictness
     data (preserved for reference; old `schema_compliance` used a

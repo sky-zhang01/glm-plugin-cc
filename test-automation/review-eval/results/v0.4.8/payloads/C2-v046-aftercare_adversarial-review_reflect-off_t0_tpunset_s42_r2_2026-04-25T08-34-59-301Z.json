@@ -1,0 +1,125 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "base": "8fc1b98",
+    "head": "d5fa754",
+    "mode": "adversarial-review",
+    "adversarialFocus": "",
+    "reflect": false,
+    "reflectModel": null,
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "off",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 1,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 37387,
+    "model_duration_ms": 36759,
+    "validation_status": "completed",
+    "validation_duration_ms": 21,
+    "rerank_status": "",
+    "rerank_duration_ms": 0,
+    "rerank_initial_findings": 0,
+    "rerank_final_findings": 0,
+    "rerank_initial_tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 0,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rerank_final_tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 0,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 1,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 36759
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 21,
+      "totalFindings": 1,
+      "tierCounts": {
+        "proposed": 0,
+        "cross_checked": 1,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 4,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    "rerank": null
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The retry wrapper classifies a successful HTTP response with a valid GLM JSON payload containing an `error.code` (e.g., `1305`) as a failure and triggers a retry loop. This causes silent data loss: if a 2xx response returns a valid model output and a concurrent error payload, the retry wrapper will discard the result and spin on transient error codes. The classifier runs before the HTTP status check, meaning any application-level error code takes absolute precedence over 200 OK responses.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Vendor error extraction runs on 2xx success responses, causing potential silent retries and data loss",
+        "body": "In `glm-client.mjs` at line 398+, `extractBigModelErrorCode(responseText)` runs on the raw response body regardless of the HTTP status code (e.g., 200 OK). If the BigModel API ever returns a response with both a successful top-level payload (e.g., `choices`) and an `error.code` field simultaneously, or if a 200 OK response is ever misclassified by `extractBigModelErrorCode`, `classifyBigModelError` maps it to a transient error (e.g., `retry: \"immediate\"` for 1302 or 1305). `withRetry` in `retry.mjs` then sees `result.failureMessage` is non-null and `result.retry === \"immediate\"`, triggering an unnecessary retry. The previous successful result is entirely discarded because `withRetry` only returns the result of the *final* attempt.\n\nEven if the vendor API normally does not return 200 OK with error codes, there is no defensive check here, and the classification path actively bypasses the HTTP status guard (`if (!response.ok)`). Thus, any edge case or API regression resulting in a mixed payload results in repeated API calls and data loss for the user.\n\nAdditionally, `classifyResultForRetry` in `retry.mjs` defines success as `!result?.failureMessage && !result?.parseError`. If `runChatRequest` returns a valid `parsed` payload alongside an extracted `failureMessage` from a concurrent `error.code`, it is treated as a failure.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 397,
+        "line_end": 405,
+        "confidence": 0.85,
+        "recommendation": "Wrap the `extractBigModelErrorCode` extraction in a guard: `if (!response.ok)`. This ensures that vendor application-level error parsing only occurs when the HTTP status indicates a failure. For example:\n\njavascript\nif (!response.ok) {\n  const vendorCode = extractBigModelErrorCode(responseText);\n  if (vendorCode) {\n    const vendor = classifyBigModelError(vendorCode, responseText, { endpoint, model });\n    return failureShape(vendor.message, vendor.errorCode, {\n      rawResponse: responseText,\n      vendorCode: vendor.vendorCode,\n      vendorMessage: vendor.vendorMessage,\n      retry: vendor.retry\n    });\n  }\n}",
+        "confidence_tier": "cross-checked",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "scripts/lib/glm-client.mjs"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 397-405 within 608"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "pass",
+            "artifact": "matched anchor: extractBigModelErrorCode(responseText)"
+          }
+        ]
+      }
+    ],
+    "next_steps": [
+      "Move the `extractBigModelErrorCode` block inside a `if (!response.ok)` guard in `runChatRequest` to prevent valid 2xx responses from being misclassified as transient failures.",
+      "Add a test case in `tests/retry.test.mjs` or a corresponding integration test to assert that an HTTP 200 response with a valid `rawOutput` does not trigger the retry mechanism.",
+      "Verify that the UAT suite (Scenarios A-J) covers a mixed-payload or boundary HTTP status response to ensure observability of this path in future releases."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\": \"needs-attention\", \"summary\": \"The retry wrapper classifies a successful HTTP response with a valid GLM JSON payload containing an `error.code` (e.g., `1305`) as a failure and triggers a retry loop. This causes silent data loss: if a 2xx response returns a valid model output and a concurrent error payload, the retry wrapper will discard the result and spin on transient error codes. The classifier runs before the HTTP status check, meaning any application-level error code takes absolute precedence over 200 OK responses.\", \"findings\": [{\"severity\": \"high\", \"title\": \"Vendor error extraction runs on 2xx success responses, causing potential silent retries and data loss\", \"body\": \"In `glm-client.mjs` at line 398+, `extractBigModelErrorCode(responseText)` runs on the raw response body regardless of the HTTP status code (e.g., 200 OK). If the BigModel API ever returns a response with both a successful top-level payload (e.g., `choices`) and an `error.code` field simultaneously, or if a 200 OK response is ever misclassified by `extractBigModelErrorCode`, `classifyBigModelError` maps it to a transient error (e.g., `retry: \\\"immediate\\\"` for 1302 or 1305). `withRetry` in `retry.mjs` then sees `result.failureMessage` is non-null and `result.retry === \\\"immediate\\\"`, triggering an unnecessary retry. The previous successful result is entirely discarded because `withRetry` only returns the result of the *final* attempt.\\n\\nEven if the vendor API normally does not return 200 OK with error codes, there is no defensive check here, and the classification path actively bypasses the HTTP status guard (`if (!response.ok)`). Thus, any edge case or API regression resulting in a mixed payload results in repeated API calls and data loss for the user.\\n\\nAdditionally, `classifyResultForRetry` in `retry.mjs` defines success as `!result?.failureMessage && !result?.parseError`. If `runChatRequest` returns a valid `parsed` payload alongside an extracted `failureMessage` from a concurrent `error.code`, it is treated as a failure.\", \"file\": \"scripts/lib/glm-client.mjs\", \"line_start\": 397, \"line_end\": 405, \"confidence\": 0.85, \"recommendation\": \"Wrap the `extractBigModelErrorCode` extraction in a guard: `if (!response.ok)`. This ensures that vendor application-level error parsing only occurs when the HTTP status indicates a failure. For example:\\n\\njavascript\\nif (!response.ok) {\\n  const vendorCode = extractBigModelErrorCode(responseText);\\n  if (vendorCode) {\\n    const vendor = classifyBigModelError(vendorCode, responseText, { endpoint, model });\\n    return failureShape(vendor.message, vendor.errorCode, {\\n      rawResponse: responseText,\\n      vendorCode: vendor.vendorCode,\\n      vendorMessage: vendor.vendorMessage,\\n      retry: vendor.retry\\n    });\\n  }\\n}\", \"confidence_tier\": \"proposed\", \"validation_signals\": [{\"kind\": \"initial_confidence_score\", \"result\": \"pass\", \"artifact\": \"0.85 - Direct code trace of control flow bypassing HTTP status\"}, {\"kind\": \"file_in_target\", \"result\": \"pass\", \"artifact\": \"scripts/lib/glm-client.mjs\"}, {\"kind\": \"line_range_in_file\", \"result\": \"pass\", \"artifact\": \"397-405\"}, {\"kind\": \"anchor_literal_found\", \"result\": \"pass\", \"artifact\": \"extractBigModelErrorCode(responseText)\"}, {\"kind\": \"known_false_reference_absent\", \"result\": \"pass\", \"artifact\": \"No assumptions about external packages outside the diff\"}]}], \"next_steps\": [\"Move the `extractBigModelErrorCode` block inside a `if (!response.ok)` guard in `runChatRequest` to prevent valid 2xx responses from being misclassified as transient failures.\", \"Add a test case in `tests/retry.test.mjs` or a corresponding integration test to assert that an HTTP 200 response with a valid `rawOutput` does not trigger the retry mechanism.\", \"Verify that the UAT suite (Scenarios A-J) covers a mixed-payload or boundary HTTP status response to ensure observability of this path in future releases.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-25T08:34:59.309Z"
+}

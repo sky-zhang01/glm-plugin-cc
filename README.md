@@ -108,8 +108,8 @@ Priority for model + endpoint: CLI flag > config file > built-in default
 | Command | Purpose |
 |---|---|
 | `/glm:setup [--preset ...] [--base-url ...] [--default-model ...] [--ping]` | Pick endpoint preset, optionally probe connectivity. |
-| `/glm:review [--base <ref>] [--scope auto\|working-tree\|branch] [--model <name>] [--thinking on\|off] [focus text]` | Balanced review of git diff. Returns structured JSON per `schemas/review-output.schema.json`. |
-| `/glm:adversarial-review [same flags] [focus text]` | Aggressive review prioritizing defects + design challenges. |
+| `/glm:review [--base <ref>] [--scope auto\|working-tree\|branch] [--model <name>] [--thinking on\|off] [--reflect]` | Balanced review of git diff. Returns structured JSON per `schemas/review-output.schema.json`. `/glm:review` rejects trailing focus text — use `/glm:adversarial-review` for custom framing. |
+| `/glm:adversarial-review [same flags] [--reflect] [focus text]` | Aggressive review prioritizing defects + design challenges. `--reflect` opts into one additional reflection/rerank pass. |
 | `/glm:task [--system <prompt>] [--model <name>] [--thinking on\|off] [prompt]` | Free-form GLM call. |
 | `/glm:rescue [same flags]` | Delegate to the `glm-rescue` subagent for stuck/blocked work. |
 | `/glm:status [job-id] [--all]` | List local job history (no server polling — GLM is stateless). |

@@ -1,0 +1,70 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "base": "8fc1b98",
+    "head": "d5fa754",
+    "mode": "review",
+    "adversarialFocus": "",
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "off",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 14756,
+    "model_duration_ms": 13997,
+    "validation_status": "completed",
+    "validation_duration_ms": 0,
+    "tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 0,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 13997
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 0,
+      "totalFindings": 0,
+      "tierCounts": {
+        "proposed": 0,
+        "cross_checked": 0,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 0,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    "rerank": null
+  },
+  "parsed": {
+    "verdict": "approve",
+    "summary": "The v0.4.6 release is well-structured and ready to ship. It adds a BigModel vendor error-code dispatch table, an automatic retry/backoff mechanism for transient errors (1302, 1305, network timeouts, HTTP 500/502/503/504), and retires a chronically broken verify-release.yml workflow in favor of a local pre-push gate script. The implementation is solid: vendor codes are correctly classified with appropriate retry semantics (immediate vs. never vs. after-cooldown), the retry wrapper properly enforces wall-clock budget including call durations, and unknown vendor codes conservatively default to no-retry. The HTTP status fallback chain in glm-client.mjs is preserved as a safety net below the new vendor code extraction. Tests comprehensively cover the error table integrity, retry classification, backoff math, budget enforcement, and transient gateway error handling (findings from the adversarial review). The CI replacement script accurately mirrors the deleted workflow's four checks and is correctly wired into the pre-push hook.",
+    "findings": [],
+    "next_steps": []
+  },
+  "rawOutputHead": "{\"verdict\":\"approve\",\"summary\":\"The v0.4.6 release is well-structured and ready to ship. It adds a BigModel vendor error-code dispatch table, an automatic retry/backoff mechanism for transient errors (1302, 1305, network timeouts, HTTP 500/502/503/504), and retires a chronically broken verify-release.yml workflow in favor of a local pre-push gate script. The implementation is solid: vendor codes are correctly classified with appropriate retry semantics (immediate vs. never vs. after-cooldown), the retry wrapper properly enforces wall-clock budget including call durations, and unknown vendor codes conservatively default to no-retry. The HTTP status fallback chain in glm-client.mjs is preserved as a safety net below the new vendor code extraction. Tests comprehensively cover the error table integrity, retry classification, backoff math, budget enforcement, and transient gateway error handling (findings from the adversarial review). The CI replacement script accurately mirrors the deleted workflow's four checks and is correctly wired into the pre-push hook.\",\"findings\":[],\"next_steps\":[]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-25T06:35:29.232Z"
+}

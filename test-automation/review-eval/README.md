@@ -30,6 +30,26 @@ review-eval/
         └── sanity-sweep.csv        # 9-call output (temp ∈ {0.0, 0.5, 1.0} × N=3)
 ```
 
+## M3 mode coverage
+
+The harness now has an explicit `--mode` switch:
+
+```bash
+node test-automation/review-eval/scripts/run-experiment.mjs \
+  --mode review --fixture C2-v046-aftercare --runs 3 \
+  --out test-automation/review-eval/results/v0.4.8/m3-measurement.csv
+
+node test-automation/review-eval/scripts/run-experiment.mjs \
+  --mode adversarial-review --fixture C2-v046-aftercare --runs 3 \
+  --out test-automation/review-eval/results/v0.4.8/m3-measurement.csv
+```
+
+By default, neither mode receives trailing focus text. This keeps balanced and
+adversarial rows comparable: the only planned variable is review mode. To
+exercise the adversarial focus-text contract intentionally, pass
+`--adversarial-focus "<focus text>"`; the value is recorded in the CSV's
+`adversarial_focus` column.
+
 ## Non-goals for v0.4.7 sanity sweep (original scope, superseded by expanded sweep)
 
 - No top_p / thinking / seed parameter sweep (scope reduction per issue #7 comment).
@@ -41,11 +61,16 @@ review-eval/
 
 | Metric | Source | Meaning |
 |---|---|---|
+| `adversarial_focus` | harness args | optional focus string supplied only through `--adversarial-focus`; empty by default for mode parity |
 | `schema_compliance` | parse check | JSON parseable AND has verdict/summary/findings |
 | `schema_echo` | `classifyReviewPayload` | returned the schema definition instead of findings |
 | `invalid_shape` | `classifyReviewPayload` | parseable but missing required fields |
 | `citation_accuracy` | grep-based | fraction of findings whose file:line range + distinctive tokens actually exist in cited file |
 | `latency_ms` | wall-clock | single-attempt round-trip |
+| `model_duration_ms` | job `passes.model` | duration recorded by the companion for the model pass |
+| `validation_status`, `validation_duration_ms` | job `passes.validation` | structural validator pass status/timing |
+| `tier_proposed`, `tier_cross_checked`, `tier_deterministically_validated`, `tier_rejected` | parsed findings | `confidence_tier` distribution after local validation |
+| `rejected_count` | parsed findings | count hidden from default human output but preserved in JSON |
 | `input_tokens`, `output_tokens` | response meta | BigModel-reported token usage |
 | `errorCode` | companion result | one of SCHEMA_ECHO, INVALID_SHAPE, SERVICE_OVERLOADED, null, etc. |
 
@@ -67,3 +92,17 @@ Before any default sampling change ships, the chosen combo must achieve on C2:
 - Latency/cost regression within 2× baseline
 
 If no combo meets all four: DO NOT change defaults. Record the negative result in CHANGELOG + `results/v0.4.7/sanity-sweep.csv`.
+
+## Dogfood packet
+
+After a measurement run, create a repeatable review packet from local files:
+
+```bash
+node test-automation/review-eval/scripts/summarize.mjs \
+  --dogfood-packet test-automation/review-eval/results/v0.4.8/m3-dogfood.md \
+  test-automation/review-eval/results/v0.4.8/m3-measurement.csv
+```
+
+The packet records the candidate git ref, per-mode summary cells, sampled
+findings from payload sidecars, and human spot-check notes. It is deliberately
+file-based so M3 evidence does not depend on chat history or memory.

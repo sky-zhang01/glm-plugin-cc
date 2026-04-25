@@ -1,0 +1,190 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "base": "8fc1b98",
+    "head": "d5fa754",
+    "mode": "adversarial-review",
+    "adversarialFocus": "",
+    "reflect": true,
+    "reflectModel": null,
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "off",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 1,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 74929,
+    "model_duration_ms": 61979,
+    "validation_status": "completed",
+    "validation_duration_ms": 36,
+    "rerank_status": "completed",
+    "rerank_duration_ms": 12085,
+    "rerank_initial_findings": 3,
+    "rerank_final_findings": 1,
+    "rerank_initial_tier_distribution": {
+      "proposed": 1,
+      "cross_checked": 1,
+      "deterministically_validated": 0,
+      "rejected": 1
+    },
+    "rerank_final_tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 1,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 1,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 61979
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 36,
+      "totalFindings": 1,
+      "tierCounts": {
+        "proposed": 0,
+        "cross_checked": 1,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 4,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    "rerank": {
+      "status": "completed",
+      "durationMs": 12085,
+      "model": "glm-5.1",
+      "initial": {
+        "verdict": "needs-attention",
+        "summary": "The retry/backoff logic for BigModel error codes is well-structured, but the wall-clock budget enforcement in `retry.mjs` contains a subtle time calculation flaw that causes it to over-estimate elapsed time. Specifically, it captures `callDurationMs` using `now()` but then recalculates `elapsedSoFarMs` using the same `now()` timestamp without subtracting this duration, effectively double-counting the execution time of the failed HTTP call. This artificially constricts the retry budget, potentially preventing valid retries that should fit within the 90-second limit.",
+        "totalFindings": 3,
+        "tierCounts": {
+          "proposed": 1,
+          "cross_checked": 1,
+          "deterministically_validated": 0,
+          "rejected": 1
+        },
+        "findings": [
+          {
+            "severity": "high",
+            "title": "Wall-clock budget miscalculation causes premature retry aborts",
+            "file": "scripts/lib/retry.mjs",
+            "line_start": 162,
+            "line_end": 181,
+            "confidence": 0.65,
+            "confidence_tier": "cross-checked"
+          },
+          {
+            "severity": "medium",
+            "title": "Pre-push hook reads stdin without fallback, blocking interactive push flows",
+            "file": "scripts/hooks/pre-push",
+            "line_start": 38,
+            "line_end": 56,
+            "confidence": 0.45,
+            "confidence_tier": "rejected"
+          },
+          {
+            "severity": "medium",
+            "title": "Retry budget test assertion assumes deterministic timing that may not hold with jitter",
+            "file": "tests/retry.test.mjs",
+            "line_start": 187,
+            "line_end": 205,
+            "confidence": 0.4,
+            "confidence_tier": "proposed"
+          }
+        ]
+      },
+      "final": {
+        "verdict": "needs-attention",
+        "summary": "Reranked review: Retained one high-severity finding regarding wall-clock budget calculation inconsistency. Rejected two findings due to failed local validation (invalid line ranges, rejected tier, and missing anchors).",
+        "totalFindings": 1,
+        "tierCounts": {
+          "proposed": 0,
+          "cross_checked": 1,
+          "deterministically_validated": 0,
+          "rejected": 0
+        },
+        "findings": [
+          {
+            "severity": "high",
+            "title": "Wall-clock budget miscalculation causes premature retry aborts",
+            "file": "scripts/lib/retry.mjs",
+            "line_start": 162,
+            "line_end": 181,
+            "confidence": 0.85,
+            "confidence_tier": "cross-checked"
+          }
+        ]
+      }
+    }
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "Reranked review: Retained one high-severity finding regarding wall-clock budget calculation inconsistency. Rejected two findings due to failed local validation (invalid line ranges, rejected tier, and missing anchors).",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Wall-clock budget miscalculation causes premature retry aborts",
+        "body": "In `scripts/lib/retry.mjs`, the `withRetry` function calculates both `callDurationMs` and `elapsedSoFarMs` sequentially after an attempt completes. If any asynchronous yielding occurs between `callStartMs` and the first `now()` invocation, the `elapsedSoFarMs` calculation might include overhead, causing a discrepancy between the intended budget check and the actual elapsed time. To eliminate observability gaps and ensure the reported attempt history perfectly aligns with the time budget check, both measurements should be derived from a single, consistent timestamp snapshot.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 162,
+        "line_end": 181,
+        "confidence": 0.85,
+        "recommendation": "Refactor the timing logic to use a single snapshot of `now()` after the attempt completes, and derive both `callDurationMs` and `elapsedSoFarMs` from it:\njavascript\nconst afterCallMs = now();\nconst callDurationMs = afterCallMs - callStartMs;\nconst elapsedSoFarMs = afterCallMs - cycleStartMs;",
+        "confidence_tier": "cross-checked",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "scripts/lib/retry.mjs"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 162-181 within 203"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "pass",
+            "artifact": "matched anchor: callDurationMs"
+          }
+        ]
+      }
+    ],
+    "next_steps": [
+      "Refactor the timing logic in `scripts/lib/retry.mjs` to use a single consistent timestamp snapshot for `callDurationMs` and `elapsedSoFarMs`.",
+      "Add unit tests to verify the retry budget handles exact boundary conditions without double-counting execution time."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"Reranked review: Retained one high-severity finding regarding wall-clock budget calculation inconsistency. Rejected two findings due to failed local validation (invalid line ranges, rejected tier, and missing anchors).\",\"findings\":[{\"severity\":\"high\",\"title\":\"Wall-clock budget miscalculation causes premature retry aborts\",\"body\":\"In `scripts/lib/retry.mjs`, the `withRetry` function calculates both `callDurationMs` and `elapsedSoFarMs` sequentially after an attempt completes. If any asynchronous yielding occurs between `callStartMs` and the first `now()` invocation, the `elapsedSoFarMs` calculation might include overhead, causing a discrepancy between the intended budget check and the actual elapsed time. To eliminate observability gaps and ensure the reported attempt history perfectly aligns with the time budget check, both measurements should be derived from a single, consistent timestamp snapshot.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":162,\"line_end\":181,\"confidence\":0.85,\"recommendation\":\"Refactor the timing logic to use a single snapshot of `now()` after the attempt completes, and derive both `callDurationMs` and `elapsedSoFarMs` from it:\\njavascript\\nconst afterCallMs = now();\\nconst callDurationMs = afterCallMs - callStartMs;\\nconst elapsedSoFarMs = afterCallMs - cycleStartMs;\\n\"}],\"next_steps\":[\"Refactor the timing logic in `scripts/lib/retry.mjs` to use a single consistent timestamp snapshot for `callDurationMs` and `elapsedSoFarMs`.\",\"Add unit tests to verify the retry budget handles exact boundary conditions without double-counting execution time.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-25T08:38:56.827Z"
+}

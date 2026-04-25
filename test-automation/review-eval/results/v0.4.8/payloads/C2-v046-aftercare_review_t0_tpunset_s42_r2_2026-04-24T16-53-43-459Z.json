@@ -1,0 +1,70 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "mode": "review",
+    "adversarialFocus": "",
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "on",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 31379,
+    "model_duration_ms": 30810,
+    "validation_status": "completed",
+    "validation_duration_ms": 0,
+    "tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 0,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 30810
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 0,
+      "totalFindings": 0,
+      "tierCounts": {
+        "proposed": 0,
+        "cross_checked": 0,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 0,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    "rerank": null
+  },
+  "parsed": {
+    "verdict": "approve",
+    "summary": "The repository context provides a high-level summary and list of changed files for the `fix/v048-m4-repo-checks` branch, which adds bounded repo-owned review checks (M4 milestone). However, the actual diff content (the code changes themselves) was not included in the prompt. Because there is no diff to review, no material findings can be identified or reported. The change is approved by default due to lack of reviewable content, but a true review requires the diff.",
+    "findings": [],
+    "next_steps": [
+      "Provide the actual diff content (e.g., output of `git diff main...fix/v048-m4-repo-checks`) in the prompt so that a substantive code review can be performed."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"approve\",\"summary\":\"The repository context provides a high-level summary and list of changed files for the `fix/v048-m4-repo-checks` branch, which adds bounded repo-owned review checks (M4 milestone). However, the actual diff content (the code changes themselves) was not included in the prompt. Because there is no diff to review, no material findings can be identified or reported. The change is approved by default due to lack of reviewable content, but a true review requires the diff.\",\"findings\":[],\"next_steps\":[\"Provide the actual diff content (e.g., output of `git diff main...fix/v048-m4-repo-checks`) in the prompt so that a substantive code review can be performed.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-24T16:53:43.459Z"
+}

@@ -1,0 +1,189 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "base": "eb47b5f",
+    "head": "7766943",
+    "mode": "adversarial-review",
+    "adversarialFocus": "",
+    "reflect": false,
+    "reflectModel": null,
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "off",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 43418,
+    "model_duration_ms": 42734,
+    "validation_status": "completed",
+    "validation_duration_ms": 54,
+    "rerank_status": "",
+    "rerank_duration_ms": 0,
+    "rerank_initial_findings": 0,
+    "rerank_final_findings": 0,
+    "rerank_initial_tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 0,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rerank_final_tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 0,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "tier_distribution": {
+      "proposed": 1,
+      "cross_checked": 2,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 42734
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 54,
+      "totalFindings": 3,
+      "tierCounts": {
+        "proposed": 1,
+        "cross_checked": 2,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 11,
+        "fail": 0,
+        "skip": 1
+      }
+    },
+    "rerank": null
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "This release introduces an interactive menu for handling API keys and configurations in `/glm:setup`. However, the prompt-layer instructions lack sanitization guards for the new \"Custom endpoint\" and \"Rotate API key\" flows, inviting command injection. Additionally, replacing the silent exit with an `AskUserQuestion` menu breaks existing automated/smoke-testing workflows by forcing an interactive prompt that requires a tool-response to proceed, risking silent timeouts.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Command Injection via Unsanitized User Input in Custom Endpoint",
+        "body": "In the 'Custom endpoint' flow, the prompt asks the user for a URL and passes it directly into a CLI command: `--preset custom --base-url <url>`. Because `commands/setup.md` is a prompt and not compiled code, this relies on the LLM correctly sanitizing shell metacharacters (e.g., `;`, `&&`, backticks) instead of passing them literally to the shell. If interpreted strictly, this creates a highly dangerous command injection vector.",
+        "file": "commands/setup.md",
+        "line_start": 35,
+        "line_end": 36,
+        "confidence": 0.9,
+        "recommendation": "Add an explicit, strong guard in the prompt instructions below the affected lines: 'CRITICAL: The extracted base-url MUST be sanitized. Strictly reject or strip any input containing shell metacharacters (spaces, ;, &, |, `, $, etc.) and validate it matches a strict URL format starting with https:// before execution.'",
+        "confidence_tier": "cross-checked",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "commands/setup.md"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 35-36 within 48"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "pass",
+            "artifact": "matched anchor: --preset custom --base-url <url>"
+          }
+        ]
+      },
+      {
+        "severity": "medium",
+        "title": "Breaking Change for Automated Contexts via Forced Interactive Menu",
+        "body": "The `release_card.md` claims 'No breaking changes' and that automated callers passing explicit flags are unaffected. However, if `$ARGUMENTS` is empty but `preset_id` and `has_api_key` are set (a common state for automated smoke checks or scripts relying on the previous 'silent exit' success path), the new behavior forces an `AskUserQuestion` interactive prompt. If this is run in a non-interactive environment or a context where tool responses are not automatically provided, the workflow will hang indefinitely or fail, constituting an undocumented breaking change.",
+        "file": "commands/setup.md",
+        "line_start": 27,
+        "line_end": 46,
+        "confidence": 0.8,
+        "recommendation": "Provide an explicit non-interactive escape hatch. Add instructions for the skill to check for a non-interactive environment or a specific argument (e.g., `--non-interactive` or `--ci`) to fall back to the v0.4.3 silent success exit, or explicitly document this behavioral change in the release notes.",
+        "confidence_tier": "cross-checked",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "commands/setup.md"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 27-46 within 48"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "pass",
+            "artifact": "matched anchor: $ARGUMENTS"
+          }
+        ]
+      },
+      {
+        "severity": "low",
+        "title": "Lack of Error-Handling Instructions for Nested Menu Actions",
+        "body": "The instructions for actions like 'Ping test' and 'Switch preset' state 'Show stdout verbatim' and 'Rerun companion with the chosen preset'. However, they lack error-handling instructions. If the companion fails (e.g., network timeout, invalid state, malformed config), the prompt does not specify how to react. This could lead to verbose JSON error dumps or unhandled states in the UI.",
+        "file": "commands/setup.md",
+        "line_start": 33,
+        "line_end": 42,
+        "confidence": 0.7,
+        "recommendation": "Append error-handling instructions to each menu action branch (e.g., 'If the companion returns a non-zero exit code or a JSON error object, parse the error using formatUserFacingError, display a concise error message to the user, and stop.'",
+        "confidence_tier": "proposed",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "commands/setup.md"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 33-42 within 48"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "skip",
+            "artifact": "no stable anchor candidate in finding text"
+          }
+        ]
+      }
+    ],
+    "next_steps": [
+      "Add strict sanitization and validation instructions for the 'Custom endpoint' URL before it is passed to the companion CLI.",
+      "Verify that no automated workflows rely on running a bare `/glm:setup` command and expecting a silent exit. If they do, implement a non-interactive fallback.",
+      "Add explicit instructions for handling companion failures (non-zero exit codes or runtime errors) in the generated menu actions."
+    ]
+  },
+  "rawOutputHead": "{\"$schema\": \"https://-schema.org/draft/2020-12/schema\", \"verdict\": \"needs-attention\", \"summary\": \"This release introduces an interactive menu for handling API keys and configurations in `/glm:setup`. However, the prompt-layer instructions lack sanitization guards for the new \\\"Custom endpoint\\\" and \\\"Rotate API key\\\" flows, inviting command injection. Additionally, replacing the silent exit with an `AskUserQuestion` menu breaks existing automated/smoke-testing workflows by forcing an interactive prompt that requires a tool-response to proceed, risking silent timeouts.\", \"findings\": [{\"severity\": \"high\", \"title\": \"Command Injection via Unsanitized User Input in Custom Endpoint\", \"body\": \"In the 'Custom endpoint' flow, the prompt asks the user for a URL and passes it directly into a CLI command: `--preset custom --base-url <url>`. Because `commands/setup.md` is a prompt and not compiled code, this relies on the LLM correctly sanitizing shell metacharacters (e.g., `;`, `&&`, backticks) instead of passing them literally to the shell. If interpreted strictly, this creates a highly dangerous command injection vector.\", \"file\": \"commands/setup.md\", \"line_start\": 35, \"line_end\": 36, \"confidence\": 0.9, \"recommendation\": \"Add an explicit, strong guard in the prompt instructions below the affected lines: 'CRITICAL: The extracted base-url MUST be sanitized. Strictly reject or strip any input containing shell metacharacters (spaces, ;, &, |, `, $, etc.) and validate it matches a strict URL format starting with https:// before execution.'\", \"confidence_tier\": \"proposed\", \"validation_signals\": [{\"kind\": \"anchor_literal_found\", \"result\": \"pass\", \"artifact\": \"--preset custom --base-url\"}, {\"kind\": \"line_range_in_file\", \"result\": \"pass\", \"artifact\": \"35-36\"}]}, {\"severity\": \"medium\", \"title\": \"Breaking Change for Automated Contexts via Forced Interactive Menu\", \"body\": \"The `release_card.md` claims 'No breaking changes' and that automated callers passing explicit flags are unaffected. However, if `$ARGUMENTS` is empty but `preset_id` and `has_api_key` are set (a common state for automated smoke checks or scripts relying on the previous 'silent exit' success path), the new behavior forces an `AskUserQuestion` interactive prompt. If this is run in a non-interactive environment or a context where tool responses are not automatically provided, the workflow will hang indefinitely or fail, constituting an undocumented breaking change.\", \"file\": \"commands/setup.md\", \"line_start\": 27, \"line_end\": 46, \"confidence\": 0.8, \"recommendation\": \"Provide an explicit non-interactive escape hatch. Add instructions for the skill to check for a non-interactive environment or a specific argument (e.g., `--non-interactive` or `--ci`) to fall back to the v0.4.3 silent success exit, or explicitly document this behavioral change in the release notes.\", \"confidence_tier\": \"proposed\", \"validation_signals\": [{\"kind\": \"anchor_literal_found\", \"result\": \"pass\", \"artifact\": \"AskUserQuestion exactly once\"}, {\"kind\": \"line_range_in_file\", \"result\": \"pass\", \"artifact\": \"27-46\"}]}, {\"severity\": \"low\", \"title\": \"Lack of Error-Handling Instructions for Nested Menu Actions\", \"body\": \"The instructions for actions like 'Ping test' and 'Switch preset' state 'Show stdout verbatim' and 'Rerun companion with the chosen preset'. However, they lack error-handling instructions. If the companion fails (e.g., network timeout, invalid state, malformed config), the prompt does not specify how to react. This could lead to verbose JSON error dumps or unhandled states in the UI.\", \"file\": \"commands/setup.md\", \"line_start\": 33, \"line_end\": 42, \"confidence\": 0.7, \"recommendation\": \"Append error-handling instructions to each menu action branch (e.g., 'If the companion returns a non-zero exit code or a JSON error object, parse the error using formatUserFacingError, display a concise error message to the user, and stop.'\", \"confidence_tier\": \"proposed\", \"validation_signals\": [{\"kind\": \"anchor_literal_found\", \"result\": \"pass\", \"artifact\": \"Show stdout verbatim.\"}, {\"kind\": \"line_range_in_file\", \"result\": \"pass\", \"artifact\": \"33-42\"}]}], \"next_steps\": [\"Add strict sanitization and validation instructions for the 'Custom endpoint' URL before it is passed to the companion CLI.\", \"Verify that no automated workflows rely on running a bare `/glm:setup` command and expecting a silent exit. If they do, implement a non-interactive fallback.\", \"Add explicit instructions for handling companion failures (non-zero exit codes or runtime errors) in the generated menu actions.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-25T08:29:48.555Z"
+}

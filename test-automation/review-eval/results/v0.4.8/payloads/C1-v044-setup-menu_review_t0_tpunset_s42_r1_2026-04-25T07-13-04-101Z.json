@@ -1,0 +1,74 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "base": "eb47b5f",
+    "head": "7766943",
+    "mode": "review",
+    "adversarialFocus": "",
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "off",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 15784,
+    "model_duration_ms": 15133,
+    "validation_status": "completed",
+    "validation_duration_ms": 0,
+    "tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 0,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 15133
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 0,
+      "totalFindings": 0,
+      "tierCounts": {
+        "proposed": 0,
+        "cross_checked": 0,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 0,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    "rerank": null
+  },
+  "parsed": {
+    "verdict": "approve",
+    "summary": "The diff implements two surgical, low-risk changes: (1) a UX improvement in the `commands/setup.md` skill command that adds an interactive `AskUserQuestion` menu when `/glm:setup` is run bare on an already-configured system, and (2) an un-scoping of the `package.` name from `@skylab/glm-plugin-cc` to `glm-plugin-cc`. Failure path trace: if the new menu is malformed or `AskUserQuestion` fails, the skill prompt simply errors, leaving the existing configuration untouched since the companion script itself is unchanged and all actions are user-initiated. Explicit flags bypass the menu entirely, preserving all automated/scripted workflows. The `package.` rename has zero functional impact on a `\"private\": true` package with no internal importers. Version parity is correctly maintained across all three JSON metadata files. No code, schema, or API surfaces are modified.",
+    "findings": [],
+    "next_steps": [
+      "Execute the 6 manual UAT scenarios (A-F) outlined in the release card to verify the interactive menu behaves correctly in a live Claude Code session.",
+      "Run `npm run ci:local` to confirm static checks, the 65 existing tests, and manifest validation all pass.",
+      "Run the planned `/codex:adversarial-review` on the full feature branch context."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"approve\",\"summary\":\"The diff implements two surgical, low-risk changes: (1) a UX improvement in the `commands/setup.md` skill command that adds an interactive `AskUserQuestion` menu when `/glm:setup` is run bare on an already-configured system, and (2) an un-scoping of the `package.` name from `@skylab/glm-plugin-cc` to `glm-plugin-cc`. Failure path trace: if the new menu is malformed or `AskUserQuestion` fails, the skill prompt simply errors, leaving the existing configuration untouched since the companion script itself is unchanged and all actions are user-initiated. Explicit flags bypass the menu entirely, preserving all automated/scripted workflows. The `package.` rename has zero functional impact on a `\\\"private\\\": true` package with no internal importers. Version parity is correctly maintained across all three JSON metadata files. No code, schema, or API surfaces are modified.\",\"findings\":[],\"next_steps\":[\"Execute the 6 manual UAT scenarios (A-F) outlined in the release card to verify the interactive menu behaves correctly in a live Claude Code session.\",\"Run `npm run ci:local` to confirm static checks, the 65 existing tests, and manifest validation all pass.\",\"Run the planned `/codex:adversarial-review` on the full feature branch context.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-25T07:13:04.102Z"
+}

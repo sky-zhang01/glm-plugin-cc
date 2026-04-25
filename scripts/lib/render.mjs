@@ -11,14 +11,88 @@ function severityRank(severity) {
   }
 }
 
+const TIER_RANK = new Map([
+  ["proposed", 0],
+  ["cross-checked", 1],
+  ["deterministically-validated", 2]
+]);
+
+const REVIEW_RENDER_POLICIES = {
+  review: {
+    minTier: "cross-checked",
+    minSeverity: "medium",
+    cap: 5,
+    emptyMessage: "No material findings meet the balanced review default policy."
+  },
+  "adversarial-review": {
+    minTier: "proposed",
+    minSeverity: "low",
+    cap: 15,
+    emptyMessage: "No adversarial findings met the default challenge threshold."
+  }
+};
+
+function tierRank(tier) {
+  return TIER_RANK.has(tier) ? TIER_RANK.get(tier) : null;
+}
+
+function findingMeetsRenderPolicy(finding, policy) {
+  if (!policy) {
+    return true;
+  }
+  const minTierRank = tierRank(policy.minTier);
+  const findingTierRank = tierRank(finding.confidence_tier);
+  if (minTierRank !== null && (findingTierRank === null || findingTierRank < minTierRank)) {
+    return false;
+  }
+  if (severityRank(finding.severity) > severityRank(policy.minSeverity)) {
+    return false;
+  }
+  return true;
+}
+
+function applyReviewRenderPolicy(findings, policy) {
+  const eligible = [];
+  let policyHiddenCount = 0;
+  for (const finding of findings) {
+    if (findingMeetsRenderPolicy(finding, policy)) {
+      eligible.push(finding);
+    } else {
+      policyHiddenCount += 1;
+    }
+  }
+  const visible = policy ? eligible.slice(0, policy.cap) : eligible;
+  const capHiddenCount = policy ? Math.max(eligible.length - visible.length, 0) : 0;
+  return { visible, policyHiddenCount, capHiddenCount };
+}
+
 function formatLineRange(finding) {
   if (!finding.line_start) {
     return "";
   }
-  if (!finding.line_end || finding.line_end === finding.line_start) {
+  if (!finding.line_end || finding.line_end <= finding.line_start) {
     return `:${finding.line_start}`;
   }
   return `:${finding.line_start}-${finding.line_end}`;
+}
+
+function appendRepoChecksSection(lines, repoChecks) {
+  if (!repoChecks || repoChecks.status === "skipped") {
+    return;
+  }
+  lines.push("", "Repo checks:");
+  if (Array.isArray(repoChecks.errors) && repoChecks.errors.length > 0) {
+    for (const error of repoChecks.errors) {
+      lines.push(`- [config-fail] ${error}`);
+    }
+  }
+  for (const check of repoChecks.checks ?? []) {
+    const message = check.message ? ` — ${check.message}` : "";
+    lines.push(`- [${check.result}] ${check.id} (${check.kind}, scanned ${check.scanned_files} file(s))${message}`);
+    for (const violation of check.violations ?? []) {
+      lines.push(`  - ${violation.file}:${violation.line} ${violation.match}`);
+    }
+  }
 }
 
 function validateReviewResultShape(data) {
@@ -40,13 +114,18 @@ function validateReviewResultShape(data) {
   return null;
 }
 
-function normalizeReviewFinding(finding, index) {
+// Valid confidence_tier values per M0 schema extension.
+const CONFIDENCE_TIER_VALUES = new Set([
+  "proposed",
+  "cross-checked",
+  "deterministically-validated",
+  "rejected"
+]);
+
+function normalizeReviewFinding(finding, index, options = {}) {
   const source = finding && typeof finding === "object" && !Array.isArray(finding) ? finding : {};
   const lineStart = Number.isInteger(source.line_start) && source.line_start > 0 ? source.line_start : null;
-  const lineEnd =
-    Number.isInteger(source.line_end) && source.line_end > 0 && (!lineStart || source.line_end >= lineStart)
-      ? source.line_end
-      : lineStart;
+  const lineEnd = Number.isInteger(source.line_end) && source.line_end > 0 ? source.line_end : lineStart;
   // Schema requires confidence ∈ [0, 1]. Keep it when GLM returned a valid
   // number; otherwise leave it null so renderers can flag the gap instead
   // of silently presenting findings without any confidence signal.
@@ -55,26 +134,106 @@ function normalizeReviewFinding(finding, index) {
       ? source.confidence
       : null;
 
-  return {
+  // M0 default: confidence_tier is a PIPELINE-ASSIGNED evidence state per
+  // architecture doc §6.2. At M0 there is no structural validator pass
+  // (M1 delivers it), so any tier the model self-reports is untrusted.
+  // Clamp to `proposed` whenever the model returned a valid enum value;
+  // drop entirely if the claim is missing or malformed. This prevents a
+  // hallucinated `deterministically-validated` from rendering as if a
+  // real validator had confirmed it. M1 will replace this clamp with a
+  // post-normalization validator pass that sets tier from actual checks.
+  const sourceTier =
+    typeof source.confidence_tier === "string" && CONFIDENCE_TIER_VALUES.has(source.confidence_tier)
+      ? source.confidence_tier
+      : undefined;
+  const confidenceTier = sourceTier
+    ? options.preserveEvidenceFields
+      ? sourceTier
+      : "proposed"
+    : undefined;
+
+  const normalized = {
     severity: typeof source.severity === "string" && source.severity.trim() ? source.severity.trim() : "low",
     title: typeof source.title === "string" && source.title.trim() ? source.title.trim() : `Finding ${index + 1}`,
     body: typeof source.body === "string" && source.body.trim() ? source.body.trim() : "No details provided.",
-    file: typeof source.file === "string" && source.file.trim() ? source.file.trim() : "unknown",
+    file: typeof source.file === "string" && source.file.trim() ? source.file : "unknown",
     line_start: lineStart,
     line_end: lineEnd,
     confidence,
     recommendation: typeof source.recommendation === "string" ? source.recommendation.trim() : ""
   };
+
+  if (confidenceTier !== undefined) {
+    normalized.confidence_tier = confidenceTier;
+  }
+  if (options.preserveEvidenceFields && Array.isArray(source.validation_signals)) {
+    normalized.validation_signals = source.validation_signals;
+  }
+
+  return normalized;
 }
 
-function normalizeReviewResultData(data) {
+// Exported alias used by M0 tests to test normalization with new fields.
+// This is the same function — the alias exists so tests can import it
+// by name without coupling to the internal unexported name.
+export { normalizeReviewFinding as normalizeReviewFindingM0 };
+
+// Valid finding field names (all optional fields included) for additionalProperties guard.
+const VALID_FINDING_FIELDS = new Set([
+  "severity",
+  "title",
+  "body",
+  "file",
+  "line_start",
+  "line_end",
+  "confidence",
+  "recommendation",
+  "confidence_tier",
+  "validation_signals"
+]);
+
+/**
+ * Validate a single finding object against the known field set.
+ * Returns null when valid, or an error string naming the unknown field.
+ * This mirrors the `additionalProperties: false` constraint from the schema.
+ */
+export function validateFindingWithNewFields(finding) {
+  if (!finding || typeof finding !== "object" || Array.isArray(finding)) {
+    return "Finding must be a plain object.";
+  }
+  for (const key of Object.keys(finding)) {
+    if (!VALID_FINDING_FIELDS.has(key)) {
+      return `Unknown field in finding: ${key}`;
+    }
+  }
+  return null;
+}
+
+function normalizeReviewResultData(data, options = {}) {
   return {
     verdict: data.verdict.trim(),
     summary: data.summary.trim(),
-    findings: data.findings.map((finding, index) => normalizeReviewFinding(finding, index)),
+    findings: data.findings.map((finding, index) => normalizeReviewFinding(finding, index, options)),
     next_steps: data.next_steps
       .filter((step) => typeof step === "string" && step.trim())
       .map((step) => step.trim())
+  };
+}
+
+export function sanitizeReviewResultForStorageM0(parsedResult) {
+  if (!parsedResult?.parsed) {
+    return parsedResult;
+  }
+  if (parsedResult.failureMessage || parsedResult.parseError) {
+    return parsedResult;
+  }
+  const validationError = validateReviewResultShape(parsedResult.parsed);
+  if (validationError) {
+    return parsedResult;
+  }
+  return {
+    ...parsedResult,
+    parsed: normalizeReviewResultData(parsedResult.parsed)
   };
 }
 
@@ -235,6 +394,27 @@ export function renderSetupReport(report) {
 }
 
 export function renderReviewResult(parsedResult, meta) {
+  const failureDetail = parsedResult.failureMessage || parsedResult.parseError;
+  if (failureDetail) {
+    const lines = [
+      `# GLM ${meta.reviewLabel}`,
+      "",
+      `Target: ${meta.targetLabel}`,
+      "GLM did not return valid structured JSON.",
+      "",
+      `- Error: ${failureDetail}`
+    ];
+
+    if (parsedResult.rawOutput) {
+      lines.push("", "Raw final message:", "", "```text", parsedResult.rawOutput, "```");
+    }
+
+    appendRepoChecksSection(lines, parsedResult.repo_checks);
+    appendReasoningSection(lines, meta.reasoningSummary ?? parsedResult.reasoningSummary);
+
+    return `${lines.join("\n").trimEnd()}\n`;
+  }
+
   if (!parsedResult.parsed) {
     const lines = [
       `# GLM ${meta.reviewLabel}`,
@@ -248,6 +428,7 @@ export function renderReviewResult(parsedResult, meta) {
       lines.push("", "Raw final message:", "", "```text", parsedResult.rawOutput, "```");
     }
 
+    appendRepoChecksSection(lines, parsedResult.repo_checks);
     appendReasoningSection(lines, meta.reasoningSummary ?? parsedResult.reasoningSummary);
 
     return `${lines.join("\n").trimEnd()}\n`;
@@ -268,13 +449,25 @@ export function renderReviewResult(parsedResult, meta) {
       lines.push("", "Raw final message:", "", "```text", parsedResult.rawOutput, "```");
     }
 
+    appendRepoChecksSection(lines, parsedResult.repo_checks);
     appendReasoningSection(lines, meta.reasoningSummary ?? parsedResult.reasoningSummary);
 
     return `${lines.join("\n").trimEnd()}\n`;
   }
 
-  const data = normalizeReviewResultData(parsedResult.parsed);
-  const findings = [...data.findings].sort((left, right) => severityRank(left.severity) - severityRank(right.severity));
+  const data = normalizeReviewResultData(parsedResult.parsed, {
+    preserveEvidenceFields: parsedResult.validationApplied === true
+  });
+  const rejectedCount = data.findings.filter((finding) => finding.confidence_tier === "rejected").length;
+  const sortedFindings = data.findings
+    .filter((finding) => finding.confidence_tier !== "rejected")
+    .sort((left, right) => severityRank(left.severity) - severityRank(right.severity));
+  const renderPolicy = REVIEW_RENDER_POLICIES[meta.reviewMode] ?? null;
+  const {
+    visible: findings,
+    policyHiddenCount,
+    capHiddenCount
+  } = applyReviewRenderPolicy(sortedFindings, renderPolicy);
   const lines = [
     `# GLM ${meta.reviewLabel}`,
     "",
@@ -286,7 +479,11 @@ export function renderReviewResult(parsedResult, meta) {
   ];
 
   if (findings.length === 0) {
-    lines.push("No material findings.");
+    if (renderPolicy) {
+      lines.push(renderPolicy.emptyMessage);
+    } else {
+      lines.push(rejectedCount > 0 ? "No material findings visible in default output." : "No material findings.");
+    }
   } else {
     lines.push("Findings:");
     for (const finding of findings) {
@@ -295,8 +492,12 @@ export function renderReviewResult(parsedResult, meta) {
         typeof finding.confidence === "number"
           ? ` · conf ${finding.confidence.toFixed(2)}`
           : "";
+      const tierSuffix =
+        typeof finding.confidence_tier === "string"
+          ? ` · tier ${finding.confidence_tier}`
+          : "";
       lines.push(
-        `- [${finding.severity}${confidenceSuffix}] ${finding.title} (${finding.file}${lineSuffix})`
+        `- [${finding.severity}${confidenceSuffix}${tierSuffix}] ${finding.title} (${finding.file}${lineSuffix})`
       );
       lines.push(`  ${finding.body}`);
       if (finding.recommendation) {
@@ -304,6 +505,24 @@ export function renderReviewResult(parsedResult, meta) {
       }
     }
   }
+  if (renderPolicy && (policyHiddenCount > 0 || capHiddenCount > 0)) {
+    const hiddenParts = [];
+    if (policyHiddenCount > 0) {
+      hiddenParts.push(`${policyHiddenCount} below tier/severity policy`);
+    }
+    if (capHiddenCount > 0) {
+      hiddenParts.push(`${capHiddenCount} beyond cap ${renderPolicy.cap}`);
+    }
+    lines.push(
+      "",
+      `Findings hidden by ${meta.reviewLabel} default policy: ${hiddenParts.join(", ")}. Use --json or /glm:result --json to inspect the full stored result.`
+    );
+  }
+  if (rejectedCount > 0) {
+    lines.push("", `Rejected findings hidden from default output: ${rejectedCount}. Use --json or /glm:result --json to inspect validation signals.`);
+  }
+
+  appendRepoChecksSection(lines, parsedResult.repo_checks);
 
   if (data.next_steps.length > 0) {
     lines.push("", "Next steps:");
