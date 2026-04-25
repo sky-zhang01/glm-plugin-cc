@@ -2,6 +2,35 @@
 
 ## v0.4.8 (unreleased)
 
+### M6 — Challenge-surface graduation decision (closed: no graduation)
+
+**Decision** (`docs/plans/2026-04-25-m6-graduation-design.md`): apply the
+roadmap §5.7 graduation rule (distinct context / deterministic validation
+hooks / distinct severity-report structure) to all six adversarial-review
+challenge surfaces. Tag every PA3 v2 baseline finding to its surface, then
+evaluate.
+
+**Result**: zero surfaces meet the rule. Correctness-under-stress and
+test-strategy fail because deterministic validation would require shell or
+test execution (M4 explicitly excludes this). Operability and
+compatibility/version-skew are already covered by repo-owned checks
+(`.glm/checks/`). State/data-integrity, trust-boundaries, and
+test-strategy do not have ≥20% adoption-driving signal in current evidence
+to justify a distinct context-collection step. Trust-boundary graduation
+would also push toward "general security pipeline", which M5/M6 non-goals
+explicitly exclude.
+
+**Net effect**: no code change. All six surfaces remain as adversarial-mode
+prompt tags. Re-open conditions documented in the design doc:
+deterministic-check signal in >20% of findings on a domain-heavy fixture,
+adoption shift to security-sensitive workloads, or a recurring class
+unencodable as `.glm/checks/`.
+
+**Out of scope (separate tracks)**:
+- balanced-mode 0-findings problem → issue #32 / M2.1
+- M5 reflection ROI revalidation on PA2 harness → issue #31
+- v0.4.8 release tag + GitHub mirror
+
 ### PA1 — Production review-context fix (fail-closed on big diff)
 
 **Root cause** (`scripts/lib/git.mjs::collectReviewContext`): the prior
