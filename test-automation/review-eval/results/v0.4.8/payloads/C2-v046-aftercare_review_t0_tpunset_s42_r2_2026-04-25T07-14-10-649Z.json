@@ -1,0 +1,70 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "base": "8fc1b98",
+    "head": "d5fa754",
+    "mode": "review",
+    "adversarialFocus": "",
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "off",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 16672,
+    "model_duration_ms": 15992,
+    "validation_status": "completed",
+    "validation_duration_ms": 1,
+    "tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 0,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 15992
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 1,
+      "totalFindings": 0,
+      "tierCounts": {
+        "proposed": 0,
+        "cross_checked": 0,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 0,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    "rerank": null
+  },
+  "parsed": {
+    "verdict": "approve",
+    "summary": "The v0.4.6 release is a solid and defensible change. It correctly introduces a BigModel error-code dispatch table based on official documentation, a well-reasoned retry/backoff mechanism, and cleanly retires a chronically-failing CI workflow in favor of a local pre-push hook gate. The implementation is covered by comprehensive unit tests (totaling 49 new tests) that lock in the correct behavior for error dispatch, retry logic, backoff math, budget enforcement, and state transitions. A concrete failure-path trace of the retry loop (transient 1305 error -> backoff sleep -> success) confirms the state machine behaves as intended. Budget enforcement correctly accounts for wall-clock time, and network/gateway errors are safely retried while terminal user errors are not. The removal of the never-working GitHub workflow and its replacement with a local shell script is a reliable operational improvement. The change is shippable as-is.",
+    "findings": [],
+    "next_steps": []
+  },
+  "rawOutputHead": "{\"verdict\":\"approve\",\"summary\":\"The v0.4.6 release is a solid and defensible change. It correctly introduces a BigModel error-code dispatch table based on official documentation, a well-reasoned retry/backoff mechanism, and cleanly retires a chronically-failing CI workflow in favor of a local pre-push hook gate. The implementation is covered by comprehensive unit tests (totaling 49 new tests) that lock in the correct behavior for error dispatch, retry logic, backoff math, budget enforcement, and state transitions. A concrete failure-path trace of the retry loop (transient 1305 error -> backoff sleep -> success) confirms the state machine behaves as intended. Budget enforcement correctly accounts for wall-clock time, and network/gateway errors are safely retried while terminal user errors are not. The removal of the never-working GitHub workflow and its replacement with a local shell script is a reliable operational improvement. The change is shippable as-is.\",\"findings\":[],\"next_steps\":[]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-25T07:14:10.649Z"
+}

@@ -1,0 +1,74 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "base": "eb47b5f",
+    "head": "7766943",
+    "mode": "review",
+    "adversarialFocus": "",
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "off",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 17178,
+    "model_duration_ms": 16582,
+    "validation_status": "completed",
+    "validation_duration_ms": 1,
+    "tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 0,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 16582
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 1,
+      "totalFindings": 0,
+      "tierCounts": {
+        "proposed": 0,
+        "cross_checked": 0,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 0,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    "rerank": null
+  },
+  "parsed": {
+    "verdict": "approve",
+    "summary": "The change is defensible as-is. It introduces a version bump to 0.4.4 across metadata files and modifies the `/glm:setup` command instructions to add an interactive menu when the setup is already configured. I traced the failure path: if a user is already configured and runs bare `/glm:setup`, the command previously exited silently with raw JSON; now it correctly surfaces a menu. If a user passes explicit flags (e.g., `--ping`), the diff explicitly maintains the old short-circuit behavior, preserving backward compatibility. The change removes the scoped `@skylab` package name, which has no functional impact since the package is private. The release_card.md documents the release state as READY pending manual UAT and CI verification, which is acceptable for a documentation/metadata-only change.",
+    "findings": [],
+    "next_steps": [
+      "Execute the manual UAT scenarios (A-F) outlined in the release_card.md to validate the new interactive menu in a live Claude Code session.",
+      "Run `npm run ci:local` and ensure Gitea/GitHub CI checks pass to confirm version parity and metadata consistency before tagging v0.4.4.",
+      "Ensure any screenshots or JSON evidence from Scenario C (Rotate API key) are scrubbed of actual API keys before committing to `test-automation/uat-reports/v0.4.4/`."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"approve\",\"summary\":\"The change is defensible as-is. It introduces a version bump to 0.4.4 across metadata files and modifies the `/glm:setup` command instructions to add an interactive menu when the setup is already configured. I traced the failure path: if a user is already configured and runs bare `/glm:setup`, the command previously exited silently with raw JSON; now it correctly surfaces a menu. If a user passes explicit flags (e.g., `--ping`), the diff explicitly maintains the old short-circuit behavior, preserving backward compatibility. The change removes the scoped `@skylab` package name, which has no functional impact since the package is private. The release_card.md documents the release state as READY pending manual UAT and CI verification, which is acceptable for a documentation/metadata-only change.\",\"findings\":[],\"next_steps\":[\"Execute the manual UAT scenarios (A-F) outlined in the release_card.md to validate the new interactive menu in a live Claude Code session.\",\"Run `npm run ci:local` and ensure Gitea/GitHub CI checks pass to confirm version parity and metadata consistency before tagging v0.4.4.\",\"Ensure any screenshots or JSON evidence from Scenario C (Rotate API key) are scrubbed of actual API keys before committing to `test-automation/uat-reports/v0.4.4/`.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-25T07:13:33.120Z"
+}

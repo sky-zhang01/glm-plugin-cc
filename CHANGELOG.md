@@ -59,6 +59,24 @@ cannot append to the invalid PA1/M3 CSV shape. CSV rows now include
 worktree rather than the current repository checkout, so the harness and
 validator inspect the same candidate code.
 
+### M2.1 — Balanced review calibration experiment
+
+**Prompt calibration** (`prompts/review.md`): balanced review now requires a
+concrete failure-path trace before returning `approve` for runtime files,
+hooks, scripts, schema migrations, or config surfaces. It also tells the model
+not to treat release cards, changelogs, plans, or test-count summaries as proof
+of correctness without checking implementation or test behavior in the provided
+context.
+
+**Measurement result** (`test-automation/review-eval/results/v0.4.8/m21-review-calibration.csv`):
+the PA2 fixture-aware harness was rerun for C1 and C2 balanced review at
+`temperature=0`, `seed=42`, `thinking=off`, `N=3` each. The prompt now names
+failure-path traces in approve summaries, but still emits 0 findings for both
+fixtures (`P0/C0/D0/R0`, citation accuracy 1.00). This is recorded as a
+negative calibration result: M2.1 cannot be closed by prompt hardening alone,
+and follow-up work must define stronger acceptance fixtures or compare against
+human-labeled expected findings rather than tuning against adversarial output.
+
 ### M5 — Optional reflection / rerank lane
 
 **Opt-in second pass** (`scripts/glm-companion.mjs`,

@@ -171,6 +171,20 @@ test("adversarial prompt declares bounded challenge surfaces without becoming a 
   assert.match(prompt, /not a general pentest\/security platform/);
 });
 
+test("balanced prompt requires concrete failure-path tracing before approval", () => {
+  const prompt = fs.readFileSync(
+    path.join(repoRoot, "prompts", "review.md"),
+    "utf8"
+  );
+  assert.match(prompt, /Before returning `approve`/);
+  assert.match(prompt, /failure-path trace/);
+  assert.match(prompt, /runtime files, hooks, scripts, schema migrations, or config surfaces/);
+  assert.match(prompt, /transient failure -> terminal failure/);
+  assert.match(prompt, /multi-ref push -> tag gate failure/);
+  assert.match(prompt, /release cards, changelogs, plans, and test-count summaries/);
+  assert.match(prompt, /not as proof that the implementation is correct/);
+});
+
 test("command docs declare the M2 renderer default split", () => {
   const reviewCommand = fs.readFileSync(path.join(repoRoot, "commands", "review.md"), "utf8");
   const adversarialCommand = fs.readFileSync(
