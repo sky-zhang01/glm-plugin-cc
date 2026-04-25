@@ -329,12 +329,16 @@ function formatUntrackedFile(cwd, relativePath) {
   return [`### ${relativePath}`, "```", buffer.toString("utf8").trimEnd(), "```"].join("\n");
 }
 
+function formatUntrackedFiles(cwd, untrackedFiles) {
+  return untrackedFiles.map((file) => formatUntrackedFile(cwd, file)).join("\n\n");
+}
+
 function collectWorkingTreeContext(cwd, state) {
   const status = gitChecked(cwd, ["status", "--short", "--untracked-files=all"]).stdout.trim();
   const changedFiles = listUniqueFiles(state.staged, state.unstaged, state.untracked);
   const stagedDiff = gitChecked(cwd, ["diff", "--cached", "--binary", "--no-ext-diff", "--submodule=diff"]).stdout;
   const unstagedDiff = gitChecked(cwd, ["diff", "--binary", "--no-ext-diff", "--submodule=diff"]).stdout;
-  const untrackedBody = state.untracked.map((file) => formatUntrackedFile(cwd, file)).join("\n\n");
+  const untrackedBody = formatUntrackedFiles(cwd, state.untracked);
   const parts = [
     formatSection("Git Status", status),
     formatSection("Staged Diff", stagedDiff),
@@ -383,6 +387,7 @@ export function collectReviewContext(cwd, target, options = {}) {
 
   if (target.mode === "working-tree") {
     const state = getWorkingTreeState(repoRoot);
+    const untrackedBody = formatUntrackedFiles(repoRoot, state.untracked);
     diffBytes = measureCombinedGitOutputBytes(
       repoRoot,
       [
@@ -391,6 +396,7 @@ export function collectReviewContext(cwd, target, options = {}) {
       ],
       maxInlineDiffBytes
     );
+    diffBytes += Buffer.byteLength(untrackedBody, "utf8");
     fileCount = state.changeCount;
     if (fileCount > maxInlineFiles || diffBytes > maxInlineDiffBytes) {
       throw new ReviewContextDiffTooLargeError({

@@ -103,6 +103,24 @@ describe("collectReviewContext — PA1 fail-closed on big diff", () => {
     );
   });
 
+  it("counts formatted untracked file bodies toward the byte budget", () => {
+    const repo = makeRepo();
+    commitInitial(repo, { "a.js": "const a = 1;\n" });
+    fs.writeFileSync(path.join(repo, "new-large.txt"), "x".repeat(1024) + "\n", "utf8");
+
+    assert.throws(
+      () => collectReviewContext(repo, { mode: "working-tree", label: "working tree diff" }, { maxInlineDiffBytes: 100 }),
+      (err) => {
+        assert.ok(err instanceof ReviewContextDiffTooLargeError);
+        assert.equal(err.kind, "DIFF_TOO_LARGE");
+        assert.ok(err.diffBytes > 100);
+        assert.equal(err.maxInlineDiffBytes, 100);
+        assert.match(err.message, /diff bytes \d+ > 100/);
+        return true;
+      }
+    );
+  });
+
   it("respects per-call overrides that widen the budget", () => {
     const repo = makeRepo();
     const initial = {};
