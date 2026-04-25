@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.4.8 (unreleased)
+## v0.4.8
 
 ### M6 — Challenge-surface graduation decision (closed: no graduation)
 
