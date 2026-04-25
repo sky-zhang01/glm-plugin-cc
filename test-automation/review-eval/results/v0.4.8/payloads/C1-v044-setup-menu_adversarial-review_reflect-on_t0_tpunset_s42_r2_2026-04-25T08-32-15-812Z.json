@@ -1,0 +1,222 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "base": "eb47b5f",
+    "head": "7766943",
+    "mode": "adversarial-review",
+    "adversarialFocus": "",
+    "reflect": true,
+    "reflectModel": null,
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "off",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 2,
+    "citation_accuracy": 0.5,
+    "citation_false_file_hits": 0,
+    "latency_ms": 52658,
+    "model_duration_ms": 36502,
+    "validation_status": "completed",
+    "validation_duration_ms": 32,
+    "rerank_status": "completed",
+    "rerank_duration_ms": 15562,
+    "rerank_initial_findings": 2,
+    "rerank_final_findings": 2,
+    "rerank_initial_tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 2,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rerank_final_tier_distribution": {
+      "proposed": 1,
+      "cross_checked": 1,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "tier_distribution": {
+      "proposed": 1,
+      "cross_checked": 1,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 36502
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 32,
+      "totalFindings": 2,
+      "tierCounts": {
+        "proposed": 1,
+        "cross_checked": 1,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 7,
+        "fail": 1,
+        "skip": 0
+      }
+    },
+    "rerank": {
+      "status": "completed",
+      "durationMs": 15562,
+      "model": "glm-5.1",
+      "initial": {
+        "verdict": "needs-attention",
+        "summary": "The change introduces stateful branching in a prompt-based skill definition without any safeguards against user model divergence, effectively shipping an untested control flow for sensitive operations like secret rotation. This creates a high risk of silent failures and data corruption.",
+        "totalFindings": 2,
+        "tierCounts": {
+          "proposed": 0,
+          "cross_checked": 2,
+          "deterministically_validated": 0,
+          "rejected": 0
+        },
+        "findings": [
+          {
+            "severity": "high",
+            "title": "Reliance on deterministic state transitions in prompt execution for critical workflows",
+            "file": "commands/setup.md",
+            "line_start": 29,
+            "line_end": 48,
+            "confidence": 0.85,
+            "confidence_tier": "cross-checked"
+          },
+          {
+            "severity": "medium",
+            "title": "Potential silent configuration reset via injection in custom endpoint path",
+            "file": "commands/setup.md",
+            "line_start": 35,
+            "line_end": 38,
+            "confidence": 0.75,
+            "confidence_tier": "cross-checked"
+          }
+        ]
+      },
+      "final": {
+        "verdict": "needs-attention",
+        "summary": "The change introduces stateful control flow and complex branching logic within a prompt file (`commands/setup.md`) for critical operations, without automated tests or deterministic state machine guarantees. Relying on the interpreting LLM to manage these state transitions risks silent failures and configuration corruption.",
+        "totalFindings": 2,
+        "tierCounts": {
+          "proposed": 1,
+          "cross_checked": 1,
+          "deterministically_validated": 0,
+          "rejected": 0
+        },
+        "findings": [
+          {
+            "severity": "high",
+            "title": "Untested control flow for critical operations via LLM prompt interpretation",
+            "file": "commands/setup.md",
+            "line_start": 29,
+            "line_end": 48,
+            "confidence": 0.9,
+            "confidence_tier": "proposed"
+          },
+          {
+            "severity": "medium",
+            "title": "Risk of malformed custom endpoint configuration",
+            "file": "commands/setup.md",
+            "line_start": 35,
+            "line_end": 38,
+            "confidence": 0.8,
+            "confidence_tier": "cross-checked"
+          }
+        ]
+      }
+    }
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The change introduces stateful control flow and complex branching logic within a prompt file (`commands/setup.md`) for critical operations, without automated tests or deterministic state machine guarantees. Relying on the interpreting LLM to manage these state transitions risks silent failures and configuration corruption.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Untested control flow for critical operations via LLM prompt interpretation",
+        "body": "The diff introduces branching logic and interactive menus in `commands/setup.md`. Because this file is a prompt executed by an LLM, state transitions for sensitive operations like API key rotation are non-deterministic and cannot be covered by standard unit tests. The release card explicitly acknowledges this testing gap, leaving a critical workflow entirely reliant on model interpretation without safeguards against divergent paths.",
+        "file": "commands/setup.md",
+        "line_start": 29,
+        "line_end": 48,
+        "confidence": 0.9,
+        "recommendation": "Refactor the interactive branching logic into an explicit, deterministic state machine within the companion script (`scripts/glm-companion.mjs`) instead of managing control flow via prompt text.",
+        "confidence_tier": "proposed",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "commands/setup.md"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 29-48 within 48"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "fail",
+            "artifact": "no explicit anchor found near cited lines: commands/setup.md, scripts/glm-companion.mjs"
+          }
+        ]
+      },
+      {
+        "severity": "medium",
+        "title": "Risk of malformed custom endpoint configuration",
+        "body": "The 'Custom endpoint' path instructs the interpreting model to pass a user-provided URL via `--preset custom --base-url <url>`. If the model mangles the URL (e.g., retaining trailing slashes or injecting unwanted quotes), it may pass an invalid value to the script. Depending on the script's error handling, this could result in a silent configuration overwrite with an invalid endpoint.",
+        "file": "commands/setup.md",
+        "line_start": 35,
+        "line_end": 38,
+        "confidence": 0.8,
+        "recommendation": "Implement strict defensive validation for the `--base-url` flag within the companion script and add explicit formatting constraints for the URL in the prompt to prevent malformed inputs.",
+        "confidence_tier": "cross-checked",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "commands/setup.md"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 35-38 within 48"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "pass",
+            "artifact": "matched anchor: --preset custom --base-url <url>"
+          }
+        ]
+      }
+    ],
+    "next_steps": [
+      "Move the interactive state machine for `/glm:setup` into the deterministic companion script to eliminate reliance on LLM interpretation for state transitions.",
+      "Add defensive validation for the `--base-url` parameter within `scripts/glm-companion.mjs` to strictly verify URL formatting before writing to the configuration."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The change introduces stateful control flow and complex branching logic within a prompt file (`commands/setup.md`) for critical operations, without automated tests or deterministic state machine guarantees. Relying on the interpreting LLM to manage these state transitions risks silent failures and configuration corruption.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Untested control flow for critical operations via LLM prompt interpretation\",\"body\":\"The diff introduces branching logic and interactive menus in `commands/setup.md`. Because this file is a prompt executed by an LLM, state transitions for sensitive operations like API key rotation are non-deterministic and cannot be covered by standard unit tests. The release card explicitly acknowledges this testing gap, leaving a critical workflow entirely reliant on model interpretation without safeguards against divergent paths.\",\"file\":\"commands/setup.md\",\"line_start\":29,\"line_end\":48,\"confidence\":0.9,\"recommendation\":\"Refactor the interactive branching logic into an explicit, deterministic state machine within the companion script (`scripts/glm-companion.mjs`) instead of managing control flow via prompt text.\"},{\"severity\":\"medium\",\"title\":\"Risk of malformed custom endpoint configuration\",\"body\":\"The 'Custom endpoint' path instructs the interpreting model to pass a user-provided URL via `--preset custom --base-url <url>`. If the model mangles the URL (e.g., retaining trailing slashes or injecting unwanted quotes), it may pass an invalid value to the script. Depending on the script's error handling, this could result in a silent configuration overwrite with an invalid endpoint.\",\"file\":\"commands/setup.md\",\"line_start\":35,\"line_end\":38,\"confidence\":0.8,\"recommendation\":\"Implement strict defensive validation for the `--base-url` flag within the companion script and add explicit formatting constraints for the URL in the prompt to prevent malformed inputs.\"}],\"next_steps\":[\"Move the interactive state machine for `/glm:setup` into the deterministic companion script to eliminate reliance on LLM interpretation for state transitions.\",\"Add defensive validation for the `--base-url` parameter within `scripts/glm-companion.mjs` to strictly verify URL formatting before writing to the configuration.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-25T08:32:15.827Z"
+}

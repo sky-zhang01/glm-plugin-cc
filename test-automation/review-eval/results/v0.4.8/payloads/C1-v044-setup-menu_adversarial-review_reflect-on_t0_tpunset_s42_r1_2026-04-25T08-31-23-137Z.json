@@ -1,0 +1,232 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "base": "eb47b5f",
+    "head": "7766943",
+    "mode": "adversarial-review",
+    "adversarialFocus": "",
+    "reflect": true,
+    "reflectModel": null,
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "off",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 2,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 57413,
+    "model_duration_ms": 38138,
+    "validation_status": "completed",
+    "validation_duration_ms": 45,
+    "rerank_status": "completed",
+    "rerank_duration_ms": 18604,
+    "rerank_initial_findings": 3,
+    "rerank_final_findings": 2,
+    "rerank_initial_tier_distribution": {
+      "proposed": 1,
+      "cross_checked": 2,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rerank_final_tier_distribution": {
+      "proposed": 1,
+      "cross_checked": 1,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "tier_distribution": {
+      "proposed": 1,
+      "cross_checked": 1,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 38138
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 45,
+      "totalFindings": 2,
+      "tierCounts": {
+        "proposed": 1,
+        "cross_checked": 1,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 7,
+        "fail": 1,
+        "skip": 0
+      }
+    },
+    "rerank": {
+      "status": "completed",
+      "durationMs": 18604,
+      "model": "glm-5.1",
+      "initial": {
+        "verdict": "needs-attention",
+        "summary": "The change adds an interactive menu to the `/glm:setup` skill for managing API keys and presets, alongside a package rename and version bump. It presents a high-risk API key rotation and overwrite mechanism without any client-side safety guarantees or guardrails. The diff is entirely untested by the existing automated suite, making the lack of idempotency guarantees and user input validation a dangerous combination for irreversible state changes.",
+        "totalFindings": 3,
+        "tierCounts": {
+          "proposed": 1,
+          "cross_checked": 2,
+          "deterministically_validated": 0,
+          "rejected": 0
+        },
+        "findings": [
+          {
+            "severity": "high",
+            "title": "API Key Rotation Lacks Confirmation and Validation Guardrails",
+            "file": "commands/setup.md",
+            "line_start": 33,
+            "line_end": 34,
+            "confidence": 0.85,
+            "confidence_tier": "cross-checked"
+          },
+          {
+            "severity": "medium",
+            "title": "Missing Idempotency and Re-entrancy Guards in Branch Dispatch",
+            "file": "commands/setup.md",
+            "line_start": 31,
+            "line_end": 41,
+            "confidence": 0.75,
+            "confidence_tier": "cross-checked"
+          },
+          {
+            "severity": "high",
+            "title": "Untested Irreversible State Mutation",
+            "file": "commands/setup.md",
+            "line_start": 27,
+            "line_end": 41,
+            "confidence": 0.9,
+            "confidence_tier": "proposed"
+          }
+        ]
+      },
+      "final": {
+        "verdict": "needs-attention",
+        "summary": "The change introduces an LLM-driven configuration menu that enables irreversible API key rotation without input validation or confirmation safeguards. Lacking automated tests for this orchestration path, the implementation relies heavily on error-free LLM extraction and routing, presenting a high risk of accidental invalidation of production secrets.",
+        "totalFindings": 2,
+        "tierCounts": {
+          "proposed": 1,
+          "cross_checked": 1,
+          "deterministically_validated": 0,
+          "rejected": 0
+        },
+        "findings": [
+          {
+            "severity": "high",
+            "title": "API Key Rotation Lacks Confirmation and Validation Guardrails",
+            "file": "commands/setup.md",
+            "line_start": 33,
+            "line_end": 34,
+            "confidence": 0.9,
+            "confidence_tier": "cross-checked"
+          },
+          {
+            "severity": "medium",
+            "title": "Missing Re-entrancy Guards in Branch Dispatch",
+            "file": "commands/setup.md",
+            "line_start": 31,
+            "line_end": 41,
+            "confidence": 0.8,
+            "confidence_tier": "proposed"
+          }
+        ]
+      }
+    }
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The change introduces an LLM-driven configuration menu that enables irreversible API key rotation without input validation or confirmation safeguards. Lacking automated tests for this orchestration path, the implementation relies heavily on error-free LLM extraction and routing, presenting a high risk of accidental invalidation of production secrets.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "API Key Rotation Lacks Confirmation and Validation Guardrails",
+        "body": "Instructing the LLM to extract user input 'verbatim' and immediately run the configuration command allows an irreversible overwrite of the existing API key. If the user accidentally pastes malformed, whitespace-laden, or incorrect data, the skill will silently destroy the valid key. There are no client-side validation, format checks, or user confirmation prompts to prevent this destructive mutation.",
+        "file": "commands/setup.md",
+        "line_start": 33,
+        "line_end": 34,
+        "confidence": 0.9,
+        "recommendation": "Implement a client-side validation guardrail before overwriting. 1. Before executing the companion command, validate the input format (e.g., minimum length, absence of spaces). 2. Add a confirmation step: \"You are about to overwrite your existing API key. Are you sure? (y/n)\". 3. Test the new key via `--ping` before committing the overwrite to ensure the new configuration is valid.",
+        "confidence_tier": "cross-checked",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "commands/setup.md"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 33-34 within 48"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "pass",
+            "artifact": "matched anchor: --ping"
+          }
+        ]
+      },
+      {
+        "severity": "medium",
+        "title": "Missing Re-entrancy Guards in Branch Dispatch",
+        "body": "The instruction 'Each option is terminal' relies on the LLM's interpretation to prevent the menu from showing again after an action completes. Because the companion script will output a new JSON state (e.g., `has_api_key: true`), an LLM rigidly following the branch rules could fall into a re-entrancy loop and re-show the interactive menu instead of terminating.",
+        "file": "commands/setup.md",
+        "line_start": 31,
+        "line_end": 41,
+        "confidence": 0.8,
+        "recommendation": "Add an explicit state guard to the prompt instructions to prevent re-entrancy. For example: 'After successfully executing a chosen action and showing its stdout, ALWAYS stop. Do not re-evaluate the new configuration state or show the action menu again.'",
+        "confidence_tier": "proposed",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "commands/setup.md"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 31-41 within 48"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "fail",
+            "artifact": "no explicit anchor found near cited lines: has_api_key: true"
+          }
+        ]
+      }
+    ],
+    "next_steps": [
+      "Implement strict input validation and a confirmation requirement before allowing the 'Rotate API key' action to overwrite existing secrets.",
+      "Explicitly hardcode a 'STOP' instruction in the prompt after action execution to deterministically prevent the interactive menu from re-triggering.",
+      "Expand automated testing to cover the new LLM orchestration paths, specifically injecting malformed inputs to ensure configurations aren't silently destroyed."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The change introduces an LLM-driven configuration menu that enables irreversible API key rotation without input validation or confirmation safeguards. Lacking automated tests for this orchestration path, the implementation relies heavily on error-free LLM extraction and routing, presenting a high risk of accidental invalidation of production secrets.\",\"findings\":[{\"severity\":\"high\",\"title\":\"API Key Rotation Lacks Confirmation and Validation Guardrails\",\"body\":\"Instructing the LLM to extract user input 'verbatim' and immediately run the configuration command allows an irreversible overwrite of the existing API key. If the user accidentally pastes malformed, whitespace-laden, or incorrect data, the skill will silently destroy the valid key. There are no client-side validation, format checks, or user confirmation prompts to prevent this destructive mutation.\",\"file\":\"commands/setup.md\",\"line_start\":33,\"line_end\":34,\"confidence\":0.9,\"recommendation\":\"Implement a client-side validation guardrail before overwriting. 1. Before executing the companion command, validate the input format (e.g., minimum length, absence of spaces). 2. Add a confirmation step: \\\"You are about to overwrite your existing API key. Are you sure? (y/n)\\\". 3. Test the new key via `--ping` before committing the overwrite to ensure the new configuration is valid.\"},{\"severity\":\"medium\",\"title\":\"Missing Re-entrancy Guards in Branch Dispatch\",\"body\":\"The instruction 'Each option is terminal' relies on the LLM's interpretation to prevent the menu from showing again after an action completes. Because the companion script will output a new JSON state (e.g., `has_api_key: true`), an LLM rigidly following the branch rules could fall into a re-entrancy loop and re-show the interactive menu instead of terminating.\",\"file\":\"commands/setup.md\",\"line_start\":31,\"line_end\":41,\"confidence\":0.8,\"recommendation\":\"Add an explicit state guard to the prompt instructions to prevent re-entrancy. For example: 'After successfully executing a chosen action and showing its stdout, ALWAYS stop. Do not re-evaluate the new configuration state or show the action menu again.'\"}],\"next_steps\":[\"Implement strict input validation and a confirmation requirement before allowing the 'Rotate API key' action to overwrite existing secrets.\",\"Explicitly hardcode a 'STOP' instruction in the prompt after action execution to deterministically prevent the interactive menu from re-triggering.\",\"Expand automated testing to cover the new LLM orchestration paths, specifically injecting malformed inputs to ensure configurations aren't silently destroyed.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-25T08:31:23.153Z"
+}

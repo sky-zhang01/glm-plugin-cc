@@ -1,0 +1,88 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "base": "8fc1b98",
+    "head": "d5fa754",
+    "mode": "adversarial-review",
+    "adversarialFocus": "",
+    "reflect": false,
+    "reflectModel": null,
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "off",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 29509,
+    "model_duration_ms": 28911,
+    "validation_status": "completed",
+    "validation_duration_ms": 0,
+    "rerank_status": "",
+    "rerank_duration_ms": 0,
+    "rerank_initial_findings": 0,
+    "rerank_final_findings": 0,
+    "rerank_initial_tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 0,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rerank_final_tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 0,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 0,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 28911
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 0,
+      "totalFindings": 0,
+      "tierCounts": {
+        "proposed": 0,
+        "cross_checked": 0,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 0,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    "rerank": null
+  },
+  "parsed": {
+    "verdict": "approve",
+    "summary": "The v0.4.6 change introduces well-scoped BigModel error dispatch and bounded retry logic, backed by 50 dedicated tests covering backoff math, budget exhaustion, and transient vs. terminal failure semantics. No material defects were found. The pre-push release gate is a safe replacement for the broken CI workflow. The change is safe to ship.",
+    "findings": [],
+    "next_steps": []
+  },
+  "rawOutputHead": "{\"$schema\":\"https://-schema.org/draft/2020-12/schema\",\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"verdict\",\"summary\",\"findings\",\"next_steps\"],\"properties\":{\"verdict\":{\"type\":\"string\",\"enum\":[\"approve\",\"needs-attention\"]},\"summary\":{\"type\":\"string\",\"minLength\":1},\"findings\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"severity\",\"title\",\"body\",\"file\",\"line_start\",\"line_end\",\"confidence\",\"recommendation\"],\"properties\":{\"severity\":{\"type\":\"string\",\"enum\":[\"critical\",\"high\",\"medium\",\"low\"]},\"title\":{\"type\":\"string\",\"minLength\":1},\"body\":{\"type\":\"string\",\"minLength\":1},\"file\":{\"type\":\"string\",\"minLength\":1},\"line_start\":{\"type\":\"integer\",\"minimum\":1},\"line_end\":{\"type\":\"integer\",\"minimum\":1},\"confidence\":{\"type\":\"number\",\"minimum\":0,\"maximum\":1},\"recommendation\":{\"type\":\"string\"},\"confidence_tier\":{\"type\":\"string\",\"enum\":[\"proposed\",\"cross-checked\",\"deterministically-validated\",\"rejected\"]},\"validation_signals\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"kind\",\"result\"],\"properties\":{\"kind\":{\"type\":\"string\",\"enum\":[\"initial_confidence_score\",\"file_in_target\",\"line_range_in_file\",\"anchor_literal_found\",\"known_false_reference_absent\",\"repo_check\",\"test_result\",\"command_result\"]},\"result\":{\"type\":\"string\",\"enum\":[\"pass\",\"fail\",\"skip\"]},\"artifact\":{\"type\":\"string\"}}}}}}},\"next_steps\":{\"type\":\"array\",\"items\":{\"type\":\"string\",\"minLength\":1}}},\"verdict\":\"approve\",\"summary\":\"The v0.4.6 change introduces well-scoped BigModel error dispatch and bounded retry logic, backed by 50 dedicated tests covering backoff math, budget exhaustion, and transient vs. terminal failure semantics. No material defects were found. The pre-push release gate is a safe replacement for the broken CI workflow. The change is safe to ship.\",\"findings\":[],\"next_steps\":[]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-25T08:35:28.820Z"
+}

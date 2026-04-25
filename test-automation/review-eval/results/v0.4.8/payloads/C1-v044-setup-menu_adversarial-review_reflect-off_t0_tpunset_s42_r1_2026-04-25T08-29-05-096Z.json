@@ -1,0 +1,158 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "base": "eb47b5f",
+    "head": "7766943",
+    "mode": "adversarial-review",
+    "adversarialFocus": "",
+    "reflect": false,
+    "reflectModel": null,
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "off",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 2,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 32770,
+    "model_duration_ms": 31783,
+    "validation_status": "completed",
+    "validation_duration_ms": 53,
+    "rerank_status": "",
+    "rerank_duration_ms": 0,
+    "rerank_initial_findings": 0,
+    "rerank_final_findings": 0,
+    "rerank_initial_tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 0,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rerank_final_tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 0,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "tier_distribution": {
+      "proposed": 1,
+      "cross_checked": 1,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 31783
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 53,
+      "totalFindings": 2,
+      "tierCounts": {
+        "proposed": 1,
+        "cross_checked": 1,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 7,
+        "fail": 1,
+        "skip": 0
+      }
+    },
+    "rerank": null
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The release card explicitly notes that Local Verification, CI Evidence, and User Acceptance Testing (UAT) have not yet been executed. Shipping a UX-altering configuration and secret-management menu without live validation introduces a high risk of silent failures and user-facing regressions that automated tests cannot catch.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Release Marked as READY Despite Missing UAT and CI Evidence",
+        "body": "The release card is marked `Status: READY` and explicitly bypasses maintainer approval requirements. However, it simultaneously states that Local Verification and CI Evidence are 'not yet run (DRAFT state)'. Furthermore, the verification plan requires 6 manual UAT scenarios (A-F) to pass before shipping because unit tests cannot exercise the Claude-side `AskUserQuestion` flow. Proceeding with an auto-merge and tagging `v0.4.4` before these gates pass violates the documented quality invariants and risks releasing a broken interactive menu to users.",
+        "file": "release_card.md",
+        "line_start": 1,
+        "line_end": 2,
+        "confidence": 1,
+        "recommendation": "Revert the release card status to `DRAFT`. Execute the 6 manual UAT scenarios and run `npm run ci:local`. Only elevate the status to `READY` and proceed with the auto-merge after all evidence is recorded in the `test-automation/uat-reports/v0.4.4/` directory.",
+        "confidence_tier": "cross-checked",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "release_card.md"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 1-2 within 232"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "pass",
+            "artifact": "matched anchor: Status: READY"
+          }
+        ]
+      },
+      {
+        "severity": "medium",
+        "title": "Lack of Error Handling Specification for Invalid User Input in Menu",
+        "body": "The new interactive menu in `commands/setup.md` relies on the LLM correctly parsing subsequent user input (e.g., whitespace-stripped API keys, base URLs, or nested menu choices). If the user provides malformed data (e.g., an invalid URL for 'Custom endpoint' or non-text input), the prompt does not specify a fallback or error loop. This leaves the error handling to the LLM's discretion, risking silent failures, unvalidated writes, or a confusing user experience if the companion script errors out.",
+        "file": "commands/setup.md",
+        "line_start": 29,
+        "line_end": 40,
+        "confidence": 0.8,
+        "recommendation": "Add explicit guardrails in `commands/setup.md` for the input-dependent menu options. For 'Custom endpoint', specify that if the URL is invalid or the companion fails, the LLM should report the error verbatim and abort (or offer to retry). For 'Rotate API key', specify that the companion's stdout must be checked for success confirmation.",
+        "confidence_tier": "proposed",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "commands/setup.md"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 29-40 within 48"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "fail",
+            "artifact": "no explicit anchor found near cited lines: commands/setup.md"
+          }
+        ]
+      }
+    ],
+    "next_steps": [
+      "Change `release_card.md` status from `READY` to `DRAFT`.",
+      "Perform the 6 manual UAT scenarios outlined in the Verification Plan to confirm the `AskUserQuestion` flows behave correctly.",
+      "Run `npm run ci:local` to validate static analysis, unit tests, and manifest parity.",
+      "Update the `release_card.md` with the results of the UAT and CI checks before merging."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The release card explicitly notes that Local Verification, CI Evidence, and User Acceptance Testing (UAT) have not yet been executed. Shipping a UX-altering configuration and secret-management menu without live validation introduces a high risk of silent failures and user-facing regressions that automated tests cannot catch.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Release Marked as READY Despite Missing UAT and CI Evidence\",\"body\":\"The release card is marked `Status: READY` and explicitly bypasses maintainer approval requirements. However, it simultaneously states that Local Verification and CI Evidence are 'not yet run (DRAFT state)'. Furthermore, the verification plan requires 6 manual UAT scenarios (A-F) to pass before shipping because unit tests cannot exercise the Claude-side `AskUserQuestion` flow. Proceeding with an auto-merge and tagging `v0.4.4` before these gates pass violates the documented quality invariants and risks releasing a broken interactive menu to users.\",\"file\":\"release_card.md\",\"line_start\":1,\"line_end\":2,\"confidence\":1,\"confidence_tier\":\"deterministically-validated\",\"validation_signals\":[{\"kind\":\"anchor_literal_found\",\"result\":\"pass\",\"artifact\":\"Status: READY\"},{\"kind\":\"anchor_literal_found\",\"result\":\"pass\",\"artifact\":\"Local Verification: not yet run (DRAFT state)\"}],\"recommendation\":\"Revert the release card status to `DRAFT`. Execute the 6 manual UAT scenarios and run `npm run ci:local`. Only elevate the status to `READY` and proceed with the auto-merge after all evidence is recorded in the `test-automation/uat-reports/v0.4.4/` directory.\"},{\"severity\":\"medium\",\"title\":\"Lack of Error Handling Specification for Invalid User Input in Menu\",\"body\":\"The new interactive menu in `commands/setup.md` relies on the LLM correctly parsing subsequent user input (e.g., whitespace-stripped API keys, base URLs, or nested menu choices). If the user provides malformed data (e.g., an invalid URL for 'Custom endpoint' or non-text input), the prompt does not specify a fallback or error loop. This leaves the error handling to the LLM's discretion, risking silent failures, unvalidated writes, or a confusing user experience if the companion script errors out.\",\"file\":\"commands/setup.md\",\"line_start\":29,\"line_end\":40,\"confidence\":0.8,\"confidence_tier\":\"proposed\",\"validation_signals\":[{\"kind\":\"line_range_in_file\",\"result\":\"pass\",\"artifact\":\"commands/setup.md:29-40\"}],\"recommendation\":\"Add explicit guardrails in `commands/setup.md` for the input-dependent menu options. For 'Custom endpoint', specify that if the URL is invalid or the companion fails, the LLM should report the error verbatim and abort (or offer to retry). For 'Rotate API key', specify that the companion's stdout must be checked for success confirmation.\"}],\"next_steps\":[\"Change `release_card.md` status from `READY` to `DRAFT`.\",\"Perform the 6 manual UAT scenarios outlined in the Verification Plan to confirm the `AskUserQuestion` flows behave correctly.\",\"Run `npm run ci:local` to validate static analysis, unit tests, and manifest parity.\",\"Update the `release_card.md` with the results of the UAT and CI checks before merging.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-25T08:29:05.113Z"
+}

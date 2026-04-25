@@ -1,0 +1,156 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "base": "8fc1b98",
+    "head": "d5fa754",
+    "mode": "adversarial-review",
+    "adversarialFocus": "",
+    "reflect": false,
+    "reflectModel": null,
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "off",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 2,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 48914,
+    "model_duration_ms": 48170,
+    "validation_status": "completed",
+    "validation_duration_ms": 43,
+    "rerank_status": "",
+    "rerank_duration_ms": 0,
+    "rerank_initial_findings": 0,
+    "rerank_final_findings": 0,
+    "rerank_initial_tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 0,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rerank_final_tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 0,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 2,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 48170
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 43,
+      "totalFindings": 2,
+      "tierCounts": {
+        "proposed": 0,
+        "cross_checked": 2,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 8,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    "rerank": null
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The v0.4.6 release introduces critical observability gaps and a potential silent retry-loop regression. First, the `parseError` suppression in `classifyResultForRetry` silently swallows API schema changes and partial responses, dropping errors on the floor. Second, the wall-clock budget check uses stale timing data, allowing the user-facing progress callback to falsely report `willRetry: true` moments before the budget check forces an immediate exit, breaking observability and state invariants. These issues combined risk hiding upstream failures and misrepresenting system state.",
+    "findings": [
+      {
+        "severity": "critical",
+        "title": "Silent suppression of parse errors risks hiding upstream API changes and partial data corruption",
+        "body": "The `classifyResultForRetry` function in `retry.mjs` defines a \"success path\" condition that intentionally treats HTTP 200 responses with a `parseError` (e.g., an unexpected JSON schema or broken payload) as a terminal success (`\"stop\"`). This explicitly overrides previous behavior where a parse error would halt execution. If the upstream BigModel API alters its response schema, this logic will silently accept the broken payload, hide the malformed data, and report a false success to the user.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 97,
+        "line_end": 103,
+        "confidence": 1,
+        "recommendation": "Modify the success condition in `classifyResultForRetry` to strictly require valid output and prevent retrying parse errors: `if (!result?.failureMessage && !result?.parseError && (result?.rawOutput || result?.parsed)) return \"stop\";`",
+        "confidence_tier": "cross-checked",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "scripts/lib/retry.mjs"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 97-103 within 203"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "pass",
+            "artifact": "matched anchor: \"stop\""
+          }
+        ]
+      },
+      {
+        "severity": "high",
+        "title": "Stale timestamp in budget enforcement causes observability callback invariant violation",
+        "body": "In `scripts/lib/retry.mjs`, the wall-clock budget validation relies on an `elapsedSoFarMs` value captured *before* the synchronous `onAttempt` callback. However, the `willRetry` and `delayMs` fields passed to this callback are calculated using a later `withinBudget` check. This creates a timing inconsistency where the callback can be invoked with `willRetry: true` and a non-zero delay immediately before the loop evaluates `if (!willRetry)` to true and exits, violating the callback's contract and misleading UI progress trackers.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 149,
+        "line_end": 172,
+        "confidence": 0.95,
+        "recommendation": "Recalculate `elapsedSoFarMs` immediately before the `if (onAttempt)` invocation, or determine `willRetry` earlier in the iteration so the callback's state contract is deterministically consistent with the loop's exit condition.",
+        "confidence_tier": "cross-checked",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "scripts/lib/retry.mjs"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 149-172 within 203"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "pass",
+            "artifact": "matched anchor: elapsedSoFarMs"
+          }
+        ]
+      }
+    ],
+    "next_steps": [
+      "Fix the `classifyResultForRetry` success path logic to stop suppressing `parseError` failures.",
+      "Align the timing capture for `elapsedSoFarMs` in `withRetry` to ensure the `onAttempt` callback accurately reflects the final `willRetry` decision without invariant violations."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The v0.4.6 release introduces critical observability gaps and a potential silent retry-loop regression. First, the `parseError` suppression in `classifyResultForRetry` silently swallows API schema changes and partial responses, dropping errors on the floor. Second, the wall-clock budget check uses stale timing data, allowing the user-facing progress callback to falsely report `willRetry: true` moments before the budget check forces an immediate exit, breaking observability and state invariants. These issues combined risk hiding upstream failures and misrepresenting system state.\",\"findings\":[{\"severity\":\"critical\",\"title\":\"Silent suppression of parse errors risks hiding upstream API changes and partial data corruption\",\"body\":\"The `classifyResultForRetry` function in `retry.mjs` defines a \\\"success path\\\" condition that intentionally treats HTTP 200 responses with a `parseError` (e.g., an unexpected JSON schema or broken payload) as a terminal success (`\\\"stop\\\"`). This explicitly overrides previous behavior where a parse error would halt execution. If the upstream BigModel API alters its response schema, this logic will silently accept the broken payload, hide the malformed data, and report a false success to the user.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":97,\"line_end\":103,\"confidence\":1,\"recommendation\":\"Modify the success condition in `classifyResultForRetry` to strictly require valid output and prevent retrying parse errors: `if (!result?.failureMessage && !result?.parseError && (result?.rawOutput || result?.parsed)) return \\\"stop\\\";`\",\"confidence_tier\":\"deterministically-validated\",\"validation_signals\":[{\"kind\":\"anchor_literal_found\",\"result\":\"pass\",\"artifact\":\"if (!result?.failureMessage && !result?.parseError)\"},{\"kind\":\"file_in_target\",\"result\":\"pass\",\"artifact\":\"scripts/lib/retry.mjs\"}]},{\"severity\":\"high\",\"title\":\"Stale timestamp in budget enforcement causes observability callback invariant violation\",\"body\":\"In `scripts/lib/retry.mjs`, the wall-clock budget validation relies on an `elapsedSoFarMs` value captured *before* the synchronous `onAttempt` callback. However, the `willRetry` and `delayMs` fields passed to this callback are calculated using a later `withinBudget` check. This creates a timing inconsistency where the callback can be invoked with `willRetry: true` and a non-zero delay immediately before the loop evaluates `if (!willRetry)` to true and exits, violating the callback's contract and misleading UI progress trackers.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":149,\"line_end\":172,\"confidence\":0.95,\"recommendation\":\"Recalculate `elapsedSoFarMs` immediately before the `if (onAttempt)` invocation, or determine `willRetry` earlier in the iteration so the callback's state contract is deterministically consistent with the loop's exit condition.\",\"confidence_tier\":\"cross-checked\",\"validation_signals\":[{\"kind\":\"line_range_in_file\",\"result\":\"pass\",\"artifact\":\"149-172\"},{\"kind\":\"anchor_literal_found\",\"result\":\"pass\",\"artifact\":\"const elapsedSoFarMs = now() - cycleStartMs;\"},{\"kind\":\"anchor_literal_found\",\"result\":\"pass\",\"artifact\":\"if (onAttempt)\"}]}],\"next_steps\":[\"Fix the `classifyResultForRetry` success path logic to stop suppressing `parseError` failures.\",\"Align the timing capture for `elapsedSoFarMs` in `withRetry` to ensure the `onAttempt` callback accurately reflects the final `willRetry` decision without invariant violations.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-25T08:34:21.913Z"
+}
