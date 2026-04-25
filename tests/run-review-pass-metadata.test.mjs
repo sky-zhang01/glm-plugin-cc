@@ -228,9 +228,18 @@ describe("runReview wiring — glm-companion.mjs writeJobFile path", () => {
         ? companionSource.slice(runReviewStart)
         : companionSource.slice(runReviewStart, runReviewStart + 1 + nextTopLevel);
 
-    const outputStart = runReviewBody.indexOf("outputCommandResult(");
-    assert.ok(outputStart !== -1, "runReview must call outputCommandResult");
-    const outputRegion = runReviewBody.slice(outputStart, outputStart + 700);
+    // PA1 (v0.4.8) added a fail-closed outputCommandResult call for the
+    // ReviewContextDiffTooLargeError path. Locate the success-path call
+    // specifically (the one carrying `storedResult`) instead of grabbing the
+    // first occurrence in the function body.
+    const successCallMatch = runReviewBody.match(
+      /outputCommandResult\([\s\S]*?result:\s*storedResult[\s\S]*?\);/
+    );
+    assert.ok(
+      successCallMatch,
+      "runReview must call outputCommandResult with the sanitized storedResult"
+    );
+    const outputRegion = successCallMatch[0];
     assert.match(
       outputRegion,
       /result:\s*storedResult/,
