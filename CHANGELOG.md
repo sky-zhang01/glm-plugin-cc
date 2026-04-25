@@ -2,6 +2,47 @@
 
 ## v0.4.8 (unreleased)
 
+### PA1 — Production review-context fix (fail-closed on big diff)
+
+**Root cause** (`scripts/lib/git.mjs::collectReviewContext`): the prior
+defaults of 2 files / 256 KB silently fell back to a "self-collect" mode
+that shipped only commit log, diff stat, and changed-file list. The remote
+BigModel runtime has no git access, so self-collect produced honest refusals
+in balanced review (no findings) or fabricated whole-file findings in
+adversarial review (cited `file:1` to `file:end-of-file` with
+`anchor_literal_found=fail`). M3 measurement payloads include the model
+self-report: *"only commit log, diff stat, list of changed files... a
+substantive review is impossible without the diff"*.
+
+**Behavior change**: the inline-diff budget is raised to 50 files / 384 KB
+(≈110K tokens; ~18K-token headroom under 128K-token glm-4.6/5.1 input
+contexts). Beyond that, `collectReviewContext` throws
+`ReviewContextDiffTooLargeError` (`errorCode=DIFF_TOO_LARGE`,
+`retry=never`) with an actionable message naming `--max-diff-files` /
+`--max-diff-bytes` overrides and the scope-narrowing path. Companion
+catches this and emits a structured failure shape rather than a silent
+stat-only review.
+
+**Removed**: the "self-collect" `inputMode` branch, the
+`buildAdversarialCollectionGuidance` "inspect yourself with git commands"
+guidance string, and the `includeDiff: false` opt-out path. Every successful
+`collectReviewContext` return now carries `inputMode: "inline-diff"`.
+
+**Implications for prior v0.4.8 evidence**: the M3 measurement matrix
+(`test-automation/review-eval/results/v0.4.8/m3-measurement.csv`) is
+retained as historical artifact but should not be used to support the M5
+entry condition. PA2 (measurement-harness fixture-aware checkout) and PA3
+(re-baseline) follow as separate work; the v0.4.8 release tag is blocked
+on PA3 evidence.
+
+**New flags**: `--max-diff-files <N>` and `--max-diff-bytes <BYTES>` on
+`review` and `adversarial-review` subcommands.
+
+**Tests**: new `tests/git.test.mjs` covers small-diff inline path,
+file-cap throw, byte-cap throw, override widening, non-finite override
+clamping, dual-cap exceeded message, and the
+`inputMode != "self-collect"` invariant.
+
 ### M5 — Optional reflection / rerank lane
 
 **Opt-in second pass** (`scripts/glm-companion.mjs`,

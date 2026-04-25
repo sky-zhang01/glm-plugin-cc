@@ -16,7 +16,12 @@ import {
   runGlmReview,
   runGlmTask
 } from "./lib/glm-client.mjs";
-import { collectReviewContext, ensureGitRepository, resolveReviewTarget } from "./lib/git.mjs";
+import {
+  collectReviewContext,
+  ensureGitRepository,
+  resolveReviewTarget,
+  ReviewContextDiffTooLargeError
+} from "./lib/git.mjs";
 import {
   applyPreset,
   listPresets,
@@ -75,8 +80,8 @@ function printUsage() {
     [
       "Usage:",
       "  node scripts/glm-companion.mjs setup [--preset ...] [--api-key <key>] [--ping] [--enable-review-gate|--disable-review-gate] [--json]",
-      "  node scripts/glm-companion.mjs review [--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--temperature <0-2>] [--top-p <0-1>] [--seed <int>] [--reflect] [--reflect-model <model>] [--json]",
-      "  node scripts/glm-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--model <model>] [--thinking on|off] [--temperature <0-2>] [--top-p <0-1>] [--seed <int>] [--reflect] [--reflect-model <model>] [--json] [focus text]",
+      "  node scripts/glm-companion.mjs review [--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--max-diff-files <N>] [--max-diff-bytes <BYTES>] [--model <model>] [--thinking on|off] [--temperature <0-2>] [--top-p <0-1>] [--seed <int>] [--reflect] [--reflect-model <model>] [--json]",
+      "  node scripts/glm-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope auto|working-tree|branch] [--max-diff-files <N>] [--max-diff-bytes <BYTES>] [--model <model>] [--thinking on|off] [--temperature <0-2>] [--top-p <0-1>] [--seed <int>] [--reflect] [--reflect-model <model>] [--json] [focus text]",
       "  node scripts/glm-companion.mjs task [--system <text>] [--model <model>] [--thinking on|off] [--json] [prompt]",
       "  node scripts/glm-companion.mjs rescue [--system <text>] [--model <model>] [--thinking on|off] [--json] [prompt]",
       "  node scripts/glm-companion.mjs status [job-id] [--all] [--json]",
@@ -369,7 +374,11 @@ async function runReview(argv, { adversarial }) {
       // server-side default (current v0.4.6 behavior preserved). Ranges
       // are validated in glm-client's assignOptionalSamplingParam —
       // out-of-range values are silently dropped, not rejected.
-      "temperature", "top-p", "seed", "frequency-penalty", "presence-penalty", "reflect-model"
+      "temperature", "top-p", "seed", "frequency-penalty", "presence-penalty", "reflect-model",
+      // PA1 (v0.4.8): inline-diff budget overrides. Defaults are 50 files /
+      // 384 KB. Pass higher values to allow larger reviews; pass lower values
+      // to force fail-closed earlier. See git.mjs::collectReviewContext.
+      "max-diff-files", "max-diff-bytes"
     ],
     // `wait` / `background` are no-ops here — declared so parseArgs consumes
     // them instead of leaking into positionals as focus text. Real detach
@@ -397,7 +406,45 @@ async function runReview(argv, { adversarial }) {
 
   ensureGitRepository(cwd);
   const target = resolveReviewTarget(cwd, { base: options.base, scope: options.scope });
-  const reviewContext = collectReviewContext(cwd, target);
+  const maxDiffFilesOverride = parseIntOrUndefined(options["max-diff-files"]);
+  const maxDiffBytesOverride = parseIntOrUndefined(options["max-diff-bytes"]);
+  let reviewContext;
+  try {
+    reviewContext = collectReviewContext(cwd, target, {
+      maxInlineFiles: maxDiffFilesOverride,
+      maxInlineDiffBytes: maxDiffBytesOverride
+    });
+  } catch (err) {
+    if (err instanceof ReviewContextDiffTooLargeError) {
+      const reviewLabel = adversarial ? "GLM adversarial review" : "GLM review";
+      const failureResult = {
+        rawOutput: "",
+        failureMessage: err.message,
+        errorCode: err.kind,
+        retry: "never",
+        diagnostics: {
+          fileCount: err.fileCount,
+          diffBytes: err.diffBytes,
+          maxInlineFiles: err.maxInlineFiles,
+          maxInlineDiffBytes: err.maxInlineDiffBytes
+        }
+      };
+      outputCommandResult(
+        {
+          command: adversarial ? "adversarial-review" : "review",
+          jobId: null,
+          result: failureResult,
+          rendered: err.message,
+          meta: { reviewLabel },
+          passes: null
+        },
+        err.message,
+        Boolean(options.json)
+      );
+      process.exit(1);
+    }
+    throw err;
+  }
 
   // Dispatch to the mode-specific template. Pre-fix, runReview always
   // loaded `adversarial-review.md` regardless of mode, and passed keys
