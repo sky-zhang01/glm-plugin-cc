@@ -1,0 +1,70 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "base": "eb47b5f",
+    "head": "7766943",
+    "mode": "review",
+    "adversarialFocus": "",
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "off",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 10283,
+    "model_duration_ms": 9659,
+    "validation_status": "completed",
+    "validation_duration_ms": 0,
+    "tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 0,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 9659
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 0,
+      "totalFindings": 0,
+      "tierCounts": {
+        "proposed": 0,
+        "cross_checked": 0,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 0,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    "rerank": null
+  },
+  "parsed": {
+    "verdict": "approve",
+    "summary": "The change looks solid and shippable as-is. It is a minor version bump (v0.4.3 to v0.4.4) primarily focused on UX polish and metadata cleanup. The core functional change involves adding an interactive `AskUserQuestion` menu to `commands/setup.md` for users who invoke `/glm:setup` when already fully configured, safely mapping new menu options to existing CLI flags handled by the unchanged companion script. The secondary change is the removal of the `@skylab` npm scope from `package.`, which has zero functional impact since the package is private and unscoped in its imports. All version bumps and changelog updates are consistent, and the rollback strategy is low-risk.",
+    "findings": [],
+    "next_steps": []
+  },
+  "rawOutputHead": "{\"verdict\":\"approve\",\"summary\":\"The change looks solid and shippable as-is. It is a minor version bump (v0.4.3 to v0.4.4) primarily focused on UX polish and metadata cleanup. The core functional change involves adding an interactive `AskUserQuestion` menu to `commands/setup.md` for users who invoke `/glm:setup` when already fully configured, safely mapping new menu options to existing CLI flags handled by the unchanged companion script. The secondary change is the removal of the `@skylab` npm scope from `package.`, which has zero functional impact since the package is private and unscoped in its imports. All version bumps and changelog updates are consistent, and the rollback strategy is low-risk.\",\"findings\":[],\"next_steps\":[]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-25T06:33:07.612Z"
+}

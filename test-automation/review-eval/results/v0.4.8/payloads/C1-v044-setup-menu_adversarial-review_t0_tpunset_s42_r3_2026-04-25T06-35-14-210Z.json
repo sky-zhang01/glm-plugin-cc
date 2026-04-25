@@ -1,0 +1,171 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "base": "eb47b5f",
+    "head": "7766943",
+    "mode": "adversarial-review",
+    "adversarialFocus": "",
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "off",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 36222,
+    "model_duration_ms": 35589,
+    "validation_status": "completed",
+    "validation_duration_ms": 55,
+    "tier_distribution": {
+      "proposed": 1,
+      "cross_checked": 2,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 35589
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 55,
+      "totalFindings": 3,
+      "tierCounts": {
+        "proposed": 1,
+        "cross_checked": 2,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 11,
+        "fail": 1,
+        "skip": 0
+      }
+    },
+    "rerank": null
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "该 PR 在已配置的状态下为 `/glm:setup` 引入了一个多层交互式菜单。虽然功能性行为被隔离在一个提示文件中，但新的 UX 流程严重依赖于 Claude 的指令遵循，以正确处理诸如覆盖现有 API 密钥或更改预设等破坏性操作。该流程缺乏足够的提示级别防护措施，无法防止重复执行、密钥意外泄露以及恶意构造的输入。鉴于这些风险，该变更需要改进。",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "在破坏性预设更改期间缺乏状态覆盖防护",
+        "body": "在“切换预设”选项中，用户可以更改为不同的预设或自定义端点。说明指出“使用选定的预设重新运行辅助程序；原样显示标准输出”。然而，没有任何指令明确处理或验证 `preset_id` 或 `base_url` 是否被覆盖。如果重新运行由于故障或超时而中途失败，用户可能会被置于一种损坏或模棱两可的状态，即新的 `base_url` 已部分写入，但与新的 `preset_id` 不匹配，并且没有明确的回滚机制。",
+        "file": "commands/setup.md",
+        "line_start": 29,
+        "line_end": 43,
+        "confidence": 0.8,
+        "recommendation": "添加一条指令，要求在继续覆盖预设之前捕获当前配置状态（例如，保存 `preset_id` 和 `base_url`），并在重新运行辅助程序失败时提供明确的回退/恢复步骤。",
+        "confidence_tier": "proposed",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "commands/setup.md"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 29-43 within 48"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "fail",
+            "artifact": "no explicit anchor found near cited lines: preset_id, base_url"
+          }
+        ]
+      },
+      {
+        "severity": "medium",
+        "title": "重新进入可能导致重复的破坏性操作",
+        "body": "指令规定“每个选项都是终止性的”。然而，LLM 可能很容易无法遵守这一约束，如果用户在动作后发布后续消息，可能会再次调用 `AskUserQuestion`。对于“轮换 API 密钥”或“切换预设”等动作，重新进入可能导致无意的重复状态覆盖、重复的 HTTP 请求或令人困惑的 UX 行为，在没有足够防护的情况下信任 LMs 的已知问题加剧了这一风险。",
+        "file": "commands/setup.md",
+        "line_start": 29,
+        "line_end": 31,
+        "confidence": 0.9,
+        "recommendation": "加强反重复防护。添加明确的指令，例如：“在执行选定动作并显示输出后，在回复后续消息时，你必须将任何进一步的问题视为一个全新的、单一轮次的对话，并且你绝不能重新打开此菜单。”",
+        "confidence_tier": "cross-checked",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "commands/setup.md"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 29-31 within 48"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "pass",
+            "artifact": "matched anchor: AskUserQuestion"
+          }
+        ]
+      },
+      {
+        "severity": "medium",
+        "title": "“自定义端点”URL 缺乏输入验证约束",
+        "body": "“自定义端点”路径要求用户粘贴一个 URL，该 URL 随后直接传递给 `--preset custom --base-url <url>`。提示只要求一个以 `https://…` 开头的 URL。没有明确的指令指示 Claude 拒绝可疑输入（例如，非 HTTPS URL、本地文件路径、或注入 shell 的字符），这可能导致底层辅助程序脚本处理无效输入，潜在引发未处理的异常或静默失败。",
+        "file": "commands/setup.md",
+        "line_start": 38,
+        "line_end": 39,
+        "confidence": 0.85,
+        "recommendation": "在指令中添加明确的输入验证要求：'在接受自定义端点之前，验证它以 https:// 开头，并且不包含 shell 特殊字符或空格。如果无效，要求用户重新输入一个有效的 HTTPS URL。'",
+        "confidence_tier": "cross-checked",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "commands/setup.md"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 38-39 within 48"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "pass",
+            "artifact": "matched anchor: --preset custom --base-url <url>"
+          }
+        ]
+      }
+    ],
+    "next_steps": [
+      "向交互式菜单步骤添加明确的防护措施，以防止重新进入和重复执行。",
+      "加强“自定义端点”路径的 URL 输入验证。",
+      "在指令中定义破坏性操作（如预设切换）的失败/回滚机制。"
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"该 PR 在已配置的状态下为 `/glm:setup` 引入了一个多层交互式菜单。虽然功能性行为被隔离在一个提示文件中，但新的 UX 流程严重依赖于 Claude 的指令遵循，以正确处理诸如覆盖现有 API 密钥或更改预设等破坏性操作。该流程缺乏足够的提示级别防护措施，无法防止重复执行、密钥意外泄露以及恶意构造的输入。鉴于这些风险，该变更需要改进。\",\"findings\":[{\"severity\":\"high\",\"title\":\"在破坏性预设更改期间缺乏状态覆盖防护\",\"body\":\"在“切换预设”选项中，用户可以更改为不同的预设或自定义端点。说明指出“使用选定的预设重新运行辅助程序；原样显示标准输出”。然而，没有任何指令明确处理或验证 `preset_id` 或 `base_url` 是否被覆盖。如果重新运行由于故障或超时而中途失败，用户可能会被置于一种损坏或模棱两可的状态，即新的 `base_url` 已部分写入，但与新的 `preset_id` 不匹配，并且没有明确的回滚机制。\",\"file\":\"commands/setup.md\",\"line_start\":29,\"line_end\":43,\"confidence\":0.8,\"recommendation\":\"添加一条指令，要求在继续覆盖预设之前捕获当前配置状态（例如，保存 `preset_id` 和 `base_url`），并在重新运行辅助程序失败时提供明确的回退/恢复步骤。\",\"validation_signals\":[{\"kind\":\"initial_confidence_score\",\"result\":\"pass\",\"artifact\":\"0.8\"},{\"kind\":\"anchor_literal_found\",\"result\":\"pass\",\"artifact\":\"Switch preset\"},{\"kind\":\"line_range_in_file\",\"result\":\"pass\",\"artifact\":\"29-43\"}]},{\"severity\":\"medium\",\"title\":\"重新进入可能导致重复的破坏性操作\",\"body\":\"指令规定“每个选项都是终止性的”。然而，LLM 可能很容易无法遵守这一约束，如果用户在动作后发布后续消息，可能会再次调用 `AskUserQuestion`。对于“轮换 API 密钥”或“切换预设”等动作，重新进入可能导致无意的重复状态覆盖、重复的 HTTP 请求或令人困惑的 UX 行为，在没有足够防护的情况下信任 LMs 的已知问题加剧了这一风险。\",\"file\":\"commands/setup.md\",\"line_start\":29,\"line_end\":31,\"confidence\":0.9,\"recommendation\":\"加强反重复防护。添加明确的指令，例如：“在执行选定动作并显示输出后，在回复后续消息时，你必须将任何进一步的问题视为一个全新的、单一轮次的对话，并且你绝不能重新打开此菜单。”\",\"validation_signals\":[{\"kind\":\"initial_confidence_score\",\"result\":\"pass\",\"artifact\":\"0.9\"},{\"kind\":\"anchor_literal_found\",\"result\":\"pass\",\"artifact\":\"Each option is terminal\"},{\"kind\":\"line_range_in_file\",\"result\":\"pass\",\"artifact\":\"29-31\"}]},{\"severity\":\"medium\",\"title\":\"“自定义端点”URL 缺乏输入验证约束\",\"body\":\"“自定义端点”路径要求用户粘贴一个 URL，该 URL 随后直接传递给 `--preset custom --base-url <url>`。提示只要求一个以 `https://…` 开头的 URL。没有明确的指令指示 Claude 拒绝可疑输入（例如，非 HTTPS URL、本地文件路径、或注入 shell 的字符），这可能导致底层辅助程序脚本处理无效输入，潜在引发未处理的异常或静默失败。\",\"file\":\"commands/setup.md\",\"line_start\":38,\"line_end\":39,\"confidence\":0.85,\"recommendation\":\"在指令中添加明确的输入验证要求：'在接受自定义端点之前，验证它以 https:// 开头，并且不包含 shell 特殊字符或空格。如果无效，要求用户重新输入一个有效的 HTTPS URL。'\",\"validation_signals\":[{\"kind\":\"initial_confidence_score\",\"result\":\"pass\",\"artifact\":\"0.85\"},{\"kind\":\"anchor_literal_found\",\"result\":\"pass\",\"artifact\":\"Custom endpoint\"},{\"kind\":\"line_range_in_file\",\"result\":\"pass\",\"artifact\":\"38-39\"}]}],\"next_steps\":[\"向交互式菜单步骤添加明确的防护措施，以防止重新进入和重复执行。\",\"加强“自定义端点”路径的 URL 输入验证。\",\"在指令中定义破坏性操作（如预设切换）的失败/回滚机制。\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-25T06:35:14.230Z"
+}

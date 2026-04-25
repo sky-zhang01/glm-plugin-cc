@@ -1,0 +1,171 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "base": "8fc1b98",
+    "head": "d5fa754",
+    "mode": "adversarial-review",
+    "adversarialFocus": "",
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "off",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 45470,
+    "model_duration_ms": 44707,
+    "validation_status": "completed",
+    "validation_duration_ms": 53,
+    "tier_distribution": {
+      "proposed": 1,
+      "cross_checked": 2,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 44707
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 53,
+      "totalFindings": 3,
+      "tierCounts": {
+        "proposed": 1,
+        "cross_checked": 2,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 11,
+        "fail": 1,
+        "skip": 0
+      }
+    },
+    "rerank": null
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The retry/backoff mechanism in v0.4.6 has a critical state mutation bug that causes valid results from successful retries to be overwritten by terminal errors. In `withRetry`, if an initial transient failure (e.g., HTTP 502) is followed by a permanent failure (e.g., HTTP 401 Auth), the final attempt throws. The catch block assigns the transient result to the `result` variable, completely masking the permanent error and returning misleading diagnostic information. Additionally, the new pre-push hook dangerously consumes and discards all stdin using `read -r`, which can shadow or break other chained hooks in a multi-hook configuration.",
+    "findings": [
+      {
+        "severity": "critical",
+        "title": "Successful retry result overwritten by unhandled rejection from terminal error on attempt 2",
+        "body": "In `withRetry`, the `result` variable is scoped outside the `for` loop. If attempt 1 is a transient failure (e.g. HTTP 502, `retry: 'immediate'`), `willRetry` is true, and the loop schedules attempt 2. If attempt 2 is a terminal failure that dynamically throws a JavaScript error (or invokes a callback path that throws), the `result` is never updated. If the caught error is an instance of `Error`, it is silently discarded, and the stale `result` from attempt 1 is returned, replacing the actual terminal error with a transient error. This completely masks the real failure, potentially resulting in corrupted observability state, infinite unlogged retries, and making production debugging nearly impossible.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 140,
+        "line_end": 170,
+        "confidence": 0.85,
+        "recommendation": "Wrap the `callFn` invocation in a `try...catch` block inside the `for` loop. If an exception is caught, convert it into a terminal failure result shape (e.g., `{ failureMessage: error.message, retry: 'never', errorCode: 'UNHANDLED_EXCEPTION' }`) so it is properly evaluated by `classifyResultForRetry` instead of throwing out of the loop.",
+        "confidence_tier": "cross-checked",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "scripts/lib/retry.mjs"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 140-170 within 203"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "pass",
+            "artifact": "matched anchor: result"
+          }
+        ]
+      },
+      {
+        "severity": "high",
+        "title": "Pre-push hook stdin consumption shadows other hooks",
+        "body": "The `while read -r ...` loop in the pre-push hook completely consumes all stdin. In a standard Git multi-hook setup where multiple scripts are executed sequentially (e.g., via symlinking or a hook manager), the first hook to consume stdin starves all subsequent hooks of any push ref information. This can silently break other local CI checks chained after this hook.",
+        "file": "scripts/hooks/pre-push",
+        "line_start": 38,
+        "line_end": 44,
+        "confidence": 0.9,
+        "recommendation": "Read stdin into a temporary array or variable first, then iterate over the array, leaving stdin unaltered for other processes.\nExample:\nbash\nlocal refs\nrefs=$(cat)\nwhile read -r _local_ref _local_sha remote_ref _remote_sha; do\n  # ...\ndone <<< \"$refs\"",
+        "confidence_tier": "proposed",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "scripts/hooks/pre-push"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 38-44 within 46"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "fail",
+            "artifact": "no explicit anchor found near cited lines: while read -r ..."
+          }
+        ]
+      },
+      {
+        "severity": "medium",
+        "title": "Missing coverage for sequential transient-then-terminal error classification",
+        "body": "The unit tests for `withRetry` fail to test the sequence where an immediately retryable error (like `SERVICE_OVERLOADED`) is followed by a terminal error (like `AUTH_FAILED`). Given that the `withRetry` function handles control flow transitions between attempts, this state change represents a high-risk path that could trigger the aforementioned result masking or unexpected loop breaks if the assumption that `callFn` always returns a valid result shape is violated.",
+        "file": "tests/retry.test.mjs",
+        "line_start": 1,
+        "line_end": 352,
+        "confidence": 0.95,
+        "recommendation": "Add a test case that asserts a transient failure followed by a terminal failure (retry: 'never') returns the terminal failure and does not retry further. Add another test case asserting that if a callback throws an error, it is handled gracefully without returning a stale transient error.",
+        "confidence_tier": "cross-checked",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "tests/retry.test.mjs"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 1-352 within 352"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "pass",
+            "artifact": "matched anchor: withRetry"
+          }
+        ]
+      }
+    ],
+    "next_steps": [
+      "1. Fix the unhandled error state mutation in `scripts/lib/retry.mjs` by wrapping `callFn` in a try/catch.",
+      "2. Refactor `scripts/hooks/pre-push` to read stdin into a variable first to prevent breaking chained hooks.",
+      "3. Add unit tests in `tests/retry.test.mjs` specifically covering sequences of transient-to-terminal errors and unhandled exceptions."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The retry/backoff mechanism in v0.4.6 has a critical state mutation bug that causes valid results from successful retries to be overwritten by terminal errors. In `withRetry`, if an initial transient failure (e.g., HTTP 502) is followed by a permanent failure (e.g., HTTP 401 Auth), the final attempt throws. The catch block assigns the transient result to the `result` variable, completely masking the permanent error and returning misleading diagnostic information. Additionally, the new pre-push hook dangerously consumes and discards all stdin using `read -r`, which can shadow or break other chained hooks in a multi-hook configuration.\",\"findings\":[{\"severity\":\"critical\",\"title\":\"Successful retry result overwritten by unhandled rejection from terminal error on attempt 2\",\"body\":\"In `withRetry`, the `result` variable is scoped outside the `for` loop. If attempt 1 is a transient failure (e.g. HTTP 502, `retry: 'immediate'`), `willRetry` is true, and the loop schedules attempt 2. If attempt 2 is a terminal failure that dynamically throws a JavaScript error (or invokes a callback path that throws), the `result` is never updated. If the caught error is an instance of `Error`, it is silently discarded, and the stale `result` from attempt 1 is returned, replacing the actual terminal error with a transient error. This completely masks the real failure, potentially resulting in corrupted observability state, infinite unlogged retries, and making production debugging nearly impossible.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":140,\"line_end\":170,\"confidence\":0.85,\"recommendation\":\"Wrap the `callFn` invocation in a `try...catch` block inside the `for` loop. If an exception is caught, convert it into a terminal failure result shape (e.g., `{ failureMessage: error.message, retry: 'never', errorCode: 'UNHANDLED_EXCEPTION' }`) so it is properly evaluated by `classifyResultForRetry` instead of throwing out of the loop.\",\"confidence_tier\":\"proposed\",\"validation_signals\":[{\"kind\":\"initial_confidence_score\",\"result\":\"pass\",\"artifact\":\"0.85\"},{\"kind\":\"file_in_target\",\"result\":\"pass\",\"artifact\":\"scripts/lib/retry.mjs\"},{\"kind\":\"line_range_in_file\",\"result\":\"pass\",\"artifact\":\"140-170\"}]},{\"severity\":\"high\",\"title\":\"Pre-push hook stdin consumption shadows other hooks\",\"body\":\"The `while read -r ...` loop in the pre-push hook completely consumes all stdin. In a standard Git multi-hook setup where multiple scripts are executed sequentially (e.g., via symlinking or a hook manager), the first hook to consume stdin starves all subsequent hooks of any push ref information. This can silently break other local CI checks chained after this hook.\",\"file\":\"scripts/hooks/pre-push\",\"line_start\":38,\"line_end\":44,\"confidence\":0.9,\"recommendation\":\"Read stdin into a temporary array or variable first, then iterate over the array, leaving stdin unaltered for other processes.\\nExample:\\nbash\\nlocal refs\\nrefs=$(cat)\\nwhile read -r _local_ref _local_sha remote_ref _remote_sha; do\\n  # ...\\ndone <<< \\\"$refs\\\"\\n\",\"confidence_tier\":\"proposed\",\"validation_signals\":[{\"kind\":\"initial_confidence_score\",\"result\":\"pass\",\"artifact\":\"0.9\"},{\"kind\":\"file_in_target\",\"result\":\"pass\",\"artifact\":\"scripts/hooks/pre-push\"},{\"kind\":\"line_range_in_file\",\"result\":\"pass\",\"artifact\":\"38-44\"}]},{\"severity\":\"medium\",\"title\":\"Missing coverage for sequential transient-then-terminal error classification\",\"body\":\"The unit tests for `withRetry` fail to test the sequence where an immediately retryable error (like `SERVICE_OVERLOADED`) is followed by a terminal error (like `AUTH_FAILED`). Given that the `withRetry` function handles control flow transitions between attempts, this state change represents a high-risk path that could trigger the aforementioned result masking or unexpected loop breaks if the assumption that `callFn` always returns a valid result shape is violated.\",\"file\":\"tests/retry.test.mjs\",\"line_start\":1,\"line_end\":352,\"confidence\":0.95,\"recommendation\":\"Add a test case that asserts a transient failure followed by a terminal failure (retry: 'never') returns the terminal failure and does not retry further. Add another test case asserting that if a callback throws an error, it is handled gracefully without returning a stale transient error.\",\"confidence_tier\":\"proposed\",\"validation_signals\":[{\"kind\":\"initial_confidence_score\",\"result\":\"pass\",\"artifact\":\"0.95\"},{\"kind\":\"file_in_target\",\"result\":\"pass\",\"artifact\":\"tests/retry.test.mjs\"}]}],\"next_steps\":[\"1. Fix the unhandled error state mutation in `scripts/lib/retry.mjs` by wrapping `callFn` in a try/catch.\",\"2. Refactor `scripts/hooks/pre-push` to read stdin into a variable first to prevent breaking chained hooks.\",\"3. Add unit tests in `tests/retry.test.mjs` specifically covering sequences of transient-to-terminal errors and unhandled exceptions.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-25T06:36:44.894Z"
+}

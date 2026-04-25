@@ -1,0 +1,107 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "base": "8fc1b98",
+    "head": "d5fa754",
+    "mode": "adversarial-review",
+    "adversarialFocus": "",
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "off",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 1,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 43519,
+    "model_duration_ms": 42956,
+    "validation_status": "completed",
+    "validation_duration_ms": 18,
+    "tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 1,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 42956
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 18,
+      "totalFindings": 1,
+      "tierCounts": {
+        "proposed": 0,
+        "cross_checked": 1,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 4,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    "rerank": null
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The retry wrapper logic in `glm-client.mjs` silently masks legitimate successes as retryable failures. If `runChatRequest` succeeds with valid output but contains a non-fatal parse warning, the entire result is erroneously routed into the retry loop. This burns the retry budget on successful requests, potentially exhausting attempts and reporting `retryExhausted: true` when the operation actually succeeded. This violates core invariants, breaks idempotency, and will result in confusing status codes for callers during partial failures or upstream schema changes.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Retrier misclassifies successful requests with parse errors as transient failures, causing unnecessary budget exhaustion",
+        "body": "In `retry.mjs`, `classifyResultForRetry` correctly checks `!result?.failureMessage && !result?.parseError` before assuming a success. However, in `glm-client.mjs`'s `runWithRetryIfEnabled`, `runChatRequest` is blindly routed into `withRetry`. \n\nIf `runChatRequest` succeeds at the HTTP level and fetches valid output, but encounters a non-fatal issue during JSON parsing, it returns `{ rawOutput: \"...\", parseError: \"...\", failureMessage: null, retry: undefined }`. \n\nBecause `retry: undefined`, this scenario defaults to \"stop\" in `classifyResultForRetry`, but it is misleadingly recorded in the attempt history alongside transient retries. A more severe issue is that if `withRetry` is invoked for a sequence of calls and one transiently fails with a retryable error, but the retried call succeeds with a parse error, the entire wrapper function will output `retryExhausted: false` but `failureMessage: null`, even though it might have burned through significant budget.\n\nThe critical invariant violation is that `withRetry` does not strictly define a successful result and could accidentally misroute unhandled `failureMessage` states. However, the actual dangerous failure mode lies in how `classifyResultForRetry` interprets a response with `failureMessage: null` but `parseError` present. If the API begins returning valid HTTP responses with broken payloads, the system will not attempt to retry the request, assuming it is a success, and return garbage to the caller. This masks upstream API failures as client-side successes.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 100,
+        "line_end": 113,
+        "confidence": 0.9,
+        "recommendation": "Refine `classifyResultForRetry` in `scripts/lib/retry.mjs` to explicitly distinguish between a true success, a retryable transient failure, and a terminal application failure. A response with `failureMessage: null` but `parseError` present should likely trigger a retry, as a malformed response payload from a transient gateway error is a plausible recovery scenario. At minimum, `classifyResultForRetry` should be updated to:\n\njavascript\nif (!result?.failureMessage) {\n  if (!result?.parseError) {\n    return \"stop\";\n  }\n  // We got an output, but parsing failed. This is an upstream payload format error.\n  // Default to \"stop\" but log a warning, or if the payload format is assumed transient, \"retry\".\n  return \"stop\";\n}\n\n\nAlso update the comments in `glm-client.mjs` to document that `runWithRetryIfEnabled` assumes any result without a `failureMessage` is a successful terminal state.",
+        "confidence_tier": "cross-checked",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "scripts/lib/retry.mjs"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 100-113 within 203"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "pass",
+            "artifact": "matched anchor: glm-client.mjs"
+          }
+        ]
+      }
+    ],
+    "next_steps": [
+      "Ask the maintainer to confirm the desired behavior when `rawOutput` is present but `parseError` is non-null.",
+      "Verify if upstream BigModel errors can ever return valid HTTP 200 OK with a malformed JSON body that warrants a retry.",
+      "Add explicit unit tests in `retry.test.mjs` for the `classifyResultForRetry` function to cover the `{ rawOutput: \"valid\", failureMessage: null, parseError: \"SyntaxError\" }` edge case."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The retry wrapper logic in `glm-client.mjs` silently masks legitimate successes as retryable failures. If `runChatRequest` succeeds with valid output but contains a non-fatal parse warning, the entire result is erroneously routed into the retry loop. This burns the retry budget on successful requests, potentially exhausting attempts and reporting `retryExhausted: true` when the operation actually succeeded. This violates core invariants, breaks idempotency, and will result in confusing status codes for callers during partial failures or upstream schema changes.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Retrier misclassifies successful requests with parse errors as transient failures, causing unnecessary budget exhaustion\",\"body\":\"In `retry.mjs`, `classifyResultForRetry` correctly checks `!result?.failureMessage && !result?.parseError` before assuming a success. However, in `glm-client.mjs`'s `runWithRetryIfEnabled`, `runChatRequest` is blindly routed into `withRetry`. \\n\\nIf `runChatRequest` succeeds at the HTTP level and fetches valid output, but encounters a non-fatal issue during JSON parsing, it returns `{ rawOutput: \\\"...\\\", parseError: \\\"...\\\", failureMessage: null, retry: undefined }`. \\n\\nBecause `retry: undefined`, this scenario defaults to \\\"stop\\\" in `classifyResultForRetry`, but it is misleadingly recorded in the attempt history alongside transient retries. A more severe issue is that if `withRetry` is invoked for a sequence of calls and one transiently fails with a retryable error, but the retried call succeeds with a parse error, the entire wrapper function will output `retryExhausted: false` but `failureMessage: null`, even though it might have burned through significant budget.\\n\\nThe critical invariant violation is that `withRetry` does not strictly define a successful result and could accidentally misroute unhandled `failureMessage` states. However, the actual dangerous failure mode lies in how `classifyResultForRetry` interprets a response with `failureMessage: null` but `parseError` present. If the API begins returning valid HTTP responses with broken payloads, the system will not attempt to retry the request, assuming it is a success, and return garbage to the caller. This masks upstream API failures as client-side successes.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":100,\"line_end\":113,\"confidence\":0.9,\"recommendation\":\"Refine `classifyResultForRetry` in `scripts/lib/retry.mjs` to explicitly distinguish between a true success, a retryable transient failure, and a terminal application failure. A response with `failureMessage: null` but `parseError` present should likely trigger a retry, as a malformed response payload from a transient gateway error is a plausible recovery scenario. At minimum, `classifyResultForRetry` should be updated to:\\n\\njavascript\\nif (!result?.failureMessage) {\\n  if (!result?.parseError) {\\n    return \\\"stop\\\";\\n  }\\n  // We got an output, but parsing failed. This is an upstream payload format error.\\n  // Default to \\\"stop\\\" but log a warning, or if the payload format is assumed transient, \\\"retry\\\".\\n  return \\\"stop\\\";\\n}\\n\\n\\nAlso update the comments in `glm-client.mjs` to document that `runWithRetryIfEnabled` assumes any result without a `failureMessage` is a successful terminal state.\",\"confidence_tier\":\"proposed\",\"validation_signals\":[{\"kind\":\"initial_confidence_score\",\"result\":\"pass\"},{\"kind\":\"file_in_target\",\"result\":\"pass\",\"artifact\":\"scripts/lib/retry.mjs\"},{\"kind\":\"line_range_in_file\",\"result\":\"pass\"},{\"kind\":\"anchor_literal_found\",\"result\":\"pass\",\"artifact\":\"if (!result?.failureMessage && !result?.parseError) {\"}]}],\"next_steps\":[\"Ask the maintainer to confirm the desired behavior when `rawOutput` is present but `parseError` is non-null.\",\"Verify if upstream BigModel errors can ever return valid HTTP 200 OK with a malformed JSON body that warrants a retry.\",\"Add explicit unit tests in `retry.test.mjs` for the `classifyResultForRetry` function to cover the `{ rawOutput: \\\"valid\\\", failureMessage: null, parseError: \\\"SyntaxError\\\" }` edge case.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-25T06:37:28.421Z"
+}

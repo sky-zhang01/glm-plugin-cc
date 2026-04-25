@@ -1,0 +1,171 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "base": "eb47b5f",
+    "head": "7766943",
+    "mode": "adversarial-review",
+    "adversarialFocus": "",
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "off",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 31607,
+    "model_duration_ms": 30993,
+    "validation_status": "completed",
+    "validation_duration_ms": 52,
+    "tier_distribution": {
+      "proposed": 1,
+      "cross_checked": 0,
+      "deterministically_validated": 0,
+      "rejected": 2
+    },
+    "rejected_count": 2,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 30993
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 52,
+      "totalFindings": 3,
+      "tierCounts": {
+        "proposed": 1,
+        "cross_checked": 0,
+        "deterministically_validated": 0,
+        "rejected": 2
+      },
+      "signalCounts": {
+        "pass": 9,
+        "fail": 2,
+        "skip": 1
+      }
+    },
+    "rerank": null
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The change introduces a complex prompt-based interactive menu for `setup` but explicitly refuses to add automated tests for it, relying entirely on a 6-step manual UAT. This is a significant operability gap: prompt-based flows are highly fragile, and without integration tests, state transition regressions (such as breaking automated setups or looping menus) are nearly guaranteed to slip through future code reviews undetected.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Missing Automated Tests for Critical State Transitions",
+        "body": "The diff modifies the primary configuration flow (`/glm:setup`) by adding a complex branching structure with new failure modes (e.g., silent failures, menu looping, failure to exit). However, the release card explicitly states: 'No new tests for companion behavior... skill change is prompt-layer, not Node-layer'. Relying solely on manual UAT for critical auth/API key rotation paths is an operability anti-pattern. Because the prompt instructions dictate state transitions, any minor future change to the system prompt or tool behavior could silently break automated setups or cause the menu to loop endlessly.",
+        "file": "commands/setup.md",
+        "line_start": 33,
+        "line_end": 51,
+        "confidence": 0.92,
+        "recommendation": "Implement automated integration tests that simulate the `$ARGUMENTS` state and validate the resulting tool calls or prompt instructions, rather than relying solely on manual UAT for core configuration paths.",
+        "confidence_tier": "rejected",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "commands/setup.md"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "fail",
+            "artifact": "lines 33-51 outside 1-48"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "pass",
+            "artifact": "matched anchor: /glm:setup"
+          }
+        ]
+      },
+      {
+        "severity": "medium",
+        "title": "Potential for Unhandled Tool Failure in Menu",
+        "body": "The new logic specifies that after choosing a menu option like 'Rotate API key', the companion script should be rerun. If this companion script fails (e.g., disk full, permissions error, API key validation failure), the prompt lacks explicit instructions on how to handle the error state. It might result in a confusing UX or a stalled state, violating the 'Each option is terminal' invariant if the user tries to recover.",
+        "file": "commands/setup.md",
+        "line_start": 37,
+        "line_end": 44,
+        "confidence": 0.85,
+        "recommendation": "Add an explicit instruction in the prompt detailing how to handle companion script errors during menu actions (e.g., 'If the companion script returns an error, display the error and return to the main menu or exit gracefully').",
+        "confidence_tier": "proposed",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "commands/setup.md"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 37-44 within 48"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "skip",
+            "artifact": "no stable anchor candidate in finding text"
+          }
+        ]
+      },
+      {
+        "severity": "low",
+        "title": "Pervasive Use of Fragile Ellipsis in Command Syntax",
+        "body": "The updated `commands/setup.md` frequently uses `node … setup` (with an ellipsis character) to represent the command execution. Depending on how the markdown is parsed or if this instruction is copy-pasted or interpreted literally by an LLM, the ellipsis might lead to malformed commands or inconsistent behavior, compared to using a standard placeholder like `node <path-to-setup> setup`.",
+        "file": "commands/setup.md",
+        "line_start": 25,
+        "line_end": 50,
+        "confidence": 0.65,
+        "recommendation": "Replace the `…` ellipsis with a more explicit placeholder or variable syntax (e.g., `node $COMPANION_PATH setup`) to ensure deterministic interpretation by the agent.",
+        "confidence_tier": "rejected",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "commands/setup.md"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "fail",
+            "artifact": "lines 25-50 outside 1-48"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "pass",
+            "artifact": "matched anchor: node … setup"
+          }
+        ]
+      }
+    ],
+    "next_steps": [
+      "Address the lack of automated tests for the new interactive setup flow before merging.",
+      "Clarify the expected LLM behavior when the companion script fails during an interactive menu action.",
+      "Standardize the companion script invocation path to avoid parsing ambiguity with ellipsis characters."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The change introduces a complex prompt-based interactive menu for `setup` but explicitly refuses to add automated tests for it, relying entirely on a 6-step manual UAT. This is a significant operability gap: prompt-based flows are highly fragile, and without integration tests, state transition regressions (such as breaking automated setups or looping menus) are nearly guaranteed to slip through future code reviews undetected.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Missing Automated Tests for Critical State Transitions\",\"body\":\"The diff modifies the primary configuration flow (`/glm:setup`) by adding a complex branching structure with new failure modes (e.g., silent failures, menu looping, failure to exit). However, the release card explicitly states: 'No new tests for companion behavior... skill change is prompt-layer, not Node-layer'. Relying solely on manual UAT for critical auth/API key rotation paths is an operability anti-pattern. Because the prompt instructions dictate state transitions, any minor future change to the system prompt or tool behavior could silently break automated setups or cause the menu to loop endlessly.\",\"file\":\"commands/setup.md\",\"line_start\":33,\"line_end\":51,\"confidence\":0.92,\"recommendation\":\"Implement automated integration tests that simulate the `$ARGUMENTS` state and validate the resulting tool calls or prompt instructions, rather than relying solely on manual UAT for core configuration paths.\",\"confidence_tier\":\"proposed\",\"validation_signals\":[{\"kind\":\"initial_confidence_score\",\"result\":\"pass\",\"artifact\":\"0.9\"},{\"kind\":\"anchor_literal_found\",\"result\":\"pass\",\"artifact\":\"No new tests for companion behavior\"}]},{\"severity\":\"medium\",\"title\":\"Potential for Unhandled Tool Failure in Menu\",\"body\":\"The new logic specifies that after choosing a menu option like 'Rotate API key', the companion script should be rerun. If this companion script fails (e.g., disk full, permissions error, API key validation failure), the prompt lacks explicit instructions on how to handle the error state. It might result in a confusing UX or a stalled state, violating the 'Each option is terminal' invariant if the user tries to recover.\",\"file\":\"commands/setup.md\",\"line_start\":37,\"line_end\":44,\"confidence\":0.85,\"recommendation\":\"Add an explicit instruction in the prompt detailing how to handle companion script errors during menu actions (e.g., 'If the companion script returns an error, display the error and return to the main menu or exit gracefully').\",\"confidence_tier\":\"proposed\",\"validation_signals\":[{\"kind\":\"initial_confidence_score\",\"result\":\"pass\",\"artifact\":\"0.8\"},{\"kind\":\"anchor_literal_found\",\"result\":\"pass\",\"artifact\":\"run `node … setup --api-key\"}]},{\"severity\":\"low\",\"title\":\"Pervasive Use of Fragile Ellipsis in Command Syntax\",\"body\":\"The updated `commands/setup.md` frequently uses `node … setup` (with an ellipsis character) to represent the command execution. Depending on how the markdown is parsed or if this instruction is copy-pasted or interpreted literally by an LLM, the ellipsis might lead to malformed commands or inconsistent behavior, compared to using a standard placeholder like `node <path-to-setup> setup`.\",\"file\":\"commands/setup.md\",\"line_start\":25,\"line_end\":50,\"confidence\":0.65,\"recommendation\":\"Replace the `…` ellipsis with a more explicit placeholder or variable syntax (e.g., `node $COMPANION_PATH setup`) to ensure deterministic interpretation by the agent.\",\"confidence_tier\":\"proposed\",\"validation_signals\":[{\"kind\":\"initial_confidence_score\",\"result\":\"pass\",\"artifact\":\"0.6\"},{\"kind\":\"anchor_literal_found\",\"result\":\"pass\",\"artifact\":\"node … setup\"}]}],\"next_steps\":[\"Address the lack of automated tests for the new interactive setup flow before merging.\",\"Clarify the expected LLM behavior when the companion script fails during an interactive menu action.\",\"Standardize the companion script invocation path to avoid parsing ambiguity with ellipsis characters.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-25T06:33:59.072Z"
+}
