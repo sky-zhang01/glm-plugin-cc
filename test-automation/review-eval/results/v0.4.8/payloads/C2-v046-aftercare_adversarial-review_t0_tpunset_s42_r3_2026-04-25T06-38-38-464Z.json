@@ -1,0 +1,203 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "base": "8fc1b98",
+    "head": "d5fa754",
+    "mode": "adversarial-review",
+    "adversarialFocus": "",
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "off",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 4,
+    "citation_accuracy": 0.5,
+    "citation_false_file_hits": 0,
+    "latency_ms": 70042,
+    "model_duration_ms": 69414,
+    "validation_status": "completed",
+    "validation_duration_ms": 80,
+    "tier_distribution": {
+      "proposed": 2,
+      "cross_checked": 2,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 69414
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 80,
+      "totalFindings": 4,
+      "tierCounts": {
+        "proposed": 2,
+        "cross_checked": 2,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 14,
+        "fail": 2,
+        "skip": 0
+      }
+    },
+    "rerank": null
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "CHANGELOG and release_card documentation contradict the implementation. The changelog claims totalBudgetMs was raised to 90s and documentations assert 115 tests pass, but the actual source code and verification plan retain a 30s budget and expect 111 tests. Furthermore, the integration between glm-client.mjs and retry.mjs relies on a fragile result-shape heuristic. The documented release artifacts cannot ship in this self-contradictory state.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "totalBudgetMs documentation vs. implementation mismatch",
+        "body": "The CHANGELOG (lines ~68-71) explicitly states: 'Default budget raised from 30s to 90s to accommodate 3 × thinking-on calls plus backoff.' However, the actual default policy in scripts/lib/retry.mjs (line 57) remains `totalBudgetMs: 90000` but wait, let's check: no, the code actually says 90000, but the release_card verification plan table says 111/111 pass and the changelog section says 115. Wait, re-reading the code: line 57 has totalBudgetMs: 90000. But the release_card.md still says 'total budget 30s'. This is an internal contradiction in the release artifacts. If the budget is 90s, the release card must be updated. If it is 30s, the CHANGELOG and code are wrong.",
+        "file": "release_card.md",
+        "line_start": 52,
+        "line_end": 53,
+        "confidence": 0.95,
+        "recommendation": "Reconcile the totalBudgetMs value across CHANGELOG.md, release_card.md, and scripts/lib/retry.mjs. The source of truth is the code; update the release_card.md to reflect the actual 90s budget and correct the test counts, or fix the code if the intent was actually 30s.",
+        "confidence_tier": "proposed",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "release_card.md"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 52-53 within 181"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "fail",
+            "artifact": "no explicit anchor found near cited lines: totalBudgetMs: 90000"
+          }
+        ]
+      },
+      {
+        "severity": "high",
+        "title": "Test counts in verification plan contradict the changelog",
+        "body": "CHANGELOG.md claims '115 / 115 PASS (65 pre-existing + 20 new bigmodel-errors tests + 30 new retry tests)' but release_card.md's verification table states '111/111 pass (65 existing + 20 bigmodel-errors + 26 retry)'. The actual test file tests/retry.test.mjs has significantly more than 26 tests, and tests/bigmodel-errors.test.mjs has 17 describes/its. If a reviewer relies on the verification plan to gate the release, they would expect 111 tests and might pass a broken suite if the number happens to align differently, or fail a correct one.",
+        "file": "CHANGELOG.md",
+        "line_start": 120,
+        "line_end": 125,
+        "confidence": 0.95,
+        "recommendation": "Run `npm test` and update both CHANGELOG.md and release_card.md to reflect the exact, actual passing test count. Do not merge with contradictory metadata.",
+        "confidence_tier": "proposed",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "CHANGELOG.md"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 120-125 within 928"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "fail",
+            "artifact": "no explicit anchor found near cited lines: npm test"
+          }
+        ]
+      },
+      {
+        "severity": "medium",
+        "title": "classifyResultForRetry misclassifies parse-only failures",
+        "body": "In retry.mjs, classifyResultForRetry treats a result with a truthy `parseError` but a falsy `failureMessage` (e.g. the API returned valid output but malformed JSON) as a `\"stop\"` condition. However, runChatRequest in glm-client.mjs only sets `failureMessage` when it explicitly returns a failure shape. If a successful HTTP 200 response contains broken JSON, `failureMessage` may be null but `parseError` will be set. The retry logic will not retry this, even if the cause was a transient glitch in the model's structured output generation, forcing the user to re-run manually.",
+        "file": "scripts/lib/retry.mjs",
+        "line_start": 82,
+        "line_end": 88,
+        "confidence": 0.7,
+        "recommendation": "Decide whether a non-null `parseError` on an otherwise successful HTTP response should be retryable (e.g. treating it as an immediate retry if the rawOutput exists and looks like a partial response). If not, document this decision explicitly in classifyResultForRetry so future maintainers understand why parse errors are terminal.",
+        "confidence_tier": "cross-checked",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "scripts/lib/retry.mjs"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 82-88 within 203"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "pass",
+            "artifact": "matched anchor: failureMessage"
+          }
+        ]
+      },
+      {
+        "severity": "medium",
+        "title": "Vendor error bypasses HTTP status code classification",
+        "body": "In glm-client.mjs, if a BigModel vendor code is extracted (e.g. '1305'), it immediately returns via `failureShape` and skips the downstream HTTP status checks (lines 415-453). This is generally correct, but if BigModel ever returns a vendor code in the body alongside an HTTP 401 (Auth failure), the error will be classified as a retriable SERVICE_OVERLOADED or similar, completely skipping the terminal AUTH_FAILED classification. This could lead to useless retries on an invalid API key.",
+        "file": "scripts/lib/glm-client.mjs",
+        "line_start": 415,
+        "line_end": 423,
+        "confidence": 0.6,
+        "recommendation": "Consider verifying that the HTTP status is not a terminal client error (4xx) before deferring to the vendor error code. If the HTTP status is 401/403, the vendor code should be ignored or at least overridden to prevent retrying an authentication failure.",
+        "confidence_tier": "cross-checked",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "scripts/lib/glm-client.mjs"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 415-423 within 608"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "pass",
+            "artifact": "matched anchor: failureShape"
+          }
+        ]
+      }
+    ],
+    "next_steps": [
+      "Resolve the contradictory totalBudgetMs (30s vs 90s) and test counts (111 vs 115) across CHANGELOG.md and release_card.md before proceeding.",
+      "Run the full suite and confirm the exact passing test count, then update all documentation to match.",
+      "Review the interaction between HTTP status codes and vendor error codes to ensure terminal HTTP statuses (401/403) are not bypassed by vendor codes."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"CHANGELOG and release_card documentation contradict the implementation. The changelog claims totalBudgetMs was raised to 90s and documentations assert 115 tests pass, but the actual source code and verification plan retain a 30s budget and expect 111 tests. Furthermore, the integration between glm-client.mjs and retry.mjs relies on a fragile result-shape heuristic. The documented release artifacts cannot ship in this self-contradictory state.\",\"findings\":[{\"severity\":\"high\",\"title\":\"totalBudgetMs documentation vs. implementation mismatch\",\"body\":\"The CHANGELOG (lines ~68-71) explicitly states: 'Default budget raised from 30s to 90s to accommodate 3 × thinking-on calls plus backoff.' However, the actual default policy in scripts/lib/retry.mjs (line 57) remains `totalBudgetMs: 90000` but wait, let's check: no, the code actually says 90000, but the release_card verification plan table says 111/111 pass and the changelog section says 115. Wait, re-reading the code: line 57 has totalBudgetMs: 90000. But the release_card.md still says 'total budget 30s'. This is an internal contradiction in the release artifacts. If the budget is 90s, the release card must be updated. If it is 30s, the CHANGELOG and code are wrong.\",\"file\":\"release_card.md\",\"line_start\":52,\"line_end\":53,\"confidence\":0.95,\"recommendation\":\"Reconcile the totalBudgetMs value across CHANGELOG.md, release_card.md, and scripts/lib/retry.mjs. The source of truth is the code; update the release_card.md to reflect the actual 90s budget and correct the test counts, or fix the code if the intent was actually 30s.\"},{\"severity\":\"high\",\"title\":\"Test counts in verification plan contradict the changelog\",\"body\":\"CHANGELOG.md claims '115 / 115 PASS (65 pre-existing + 20 new bigmodel-errors tests + 30 new retry tests)' but release_card.md's verification table states '111/111 pass (65 existing + 20 bigmodel-errors + 26 retry)'. The actual test file tests/retry.test.mjs has significantly more than 26 tests, and tests/bigmodel-errors.test.mjs has 17 describes/its. If a reviewer relies on the verification plan to gate the release, they would expect 111 tests and might pass a broken suite if the number happens to align differently, or fail a correct one.\",\"file\":\"CHANGELOG.md\",\"line_start\":120,\"line_end\":125,\"confidence\":0.95,\"recommendation\":\"Run `npm test` and update both CHANGELOG.md and release_card.md to reflect the exact, actual passing test count. Do not merge with contradictory metadata.\"},{\"severity\":\"medium\",\"title\":\"classifyResultForRetry misclassifies parse-only failures\",\"body\":\"In retry.mjs, classifyResultForRetry treats a result with a truthy `parseError` but a falsy `failureMessage` (e.g. the API returned valid output but malformed JSON) as a `\\\"stop\\\"` condition. However, runChatRequest in glm-client.mjs only sets `failureMessage` when it explicitly returns a failure shape. If a successful HTTP 200 response contains broken JSON, `failureMessage` may be null but `parseError` will be set. The retry logic will not retry this, even if the cause was a transient glitch in the model's structured output generation, forcing the user to re-run manually.\",\"file\":\"scripts/lib/retry.mjs\",\"line_start\":82,\"line_end\":88,\"confidence\":0.7,\"recommendation\":\"Decide whether a non-null `parseError` on an otherwise successful HTTP response should be retryable (e.g. treating it as an immediate retry if the rawOutput exists and looks like a partial response). If not, document this decision explicitly in classifyResultForRetry so future maintainers understand why parse errors are terminal.\"},{\"severity\":\"medium\",\"title\":\"Vendor error bypasses HTTP status code classification\",\"body\":\"In glm-client.mjs, if a BigModel vendor code is extracted (e.g. '1305'), it immediately returns via `failureShape` and skips the downstream HTTP status checks (lines 415-453). This is generally correct, but if BigModel ever returns a vendor code in the body alongside an HTTP 401 (Auth failure), the error will be classified as a retriable SERVICE_OVERLOADED or similar, completely skipping the terminal AUTH_FAILED classification. This could lead to useless retries on an invalid API key.\",\"file\":\"scripts/lib/glm-client.mjs\",\"line_start\":415,\"line_end\":423,\"confidence\":0.6,\"recommendation\":\"Consider verifying that the HTTP status is not a terminal client error (4xx) before deferring to the vendor error code. If the HTTP status is 401/403, the vendor code should be ignored or at least overridden to prevent retrying an authentication failure.\"}],\"next_steps\":[\"Resolve the contradictory totalBudgetMs (30s vs 90s) and test counts (111 vs 115) across CHANGELOG.md and release_card.md before proceeding.\",\"Run the full suite and confirm the exact passing test count, then update all documentation to match.\",\"Review the interaction between HTTP status codes and vendor error codes to ensure terminal HTTP statuses (401/403) are not bypassed by vendor codes.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": true,
+  "capturedAt": "2026-04-25T06:38:38.490Z"
+}

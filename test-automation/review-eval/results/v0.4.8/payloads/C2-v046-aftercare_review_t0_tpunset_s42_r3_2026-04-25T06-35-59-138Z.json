@@ -1,0 +1,70 @@
+{
+  "cell": {
+    "fixtureId": "C2-v046-aftercare",
+    "base": "8fc1b98",
+    "head": "d5fa754",
+    "mode": "review",
+    "adversarialFocus": "",
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "off",
+    "runIndex": 3
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 12873,
+    "model_duration_ms": 12141,
+    "validation_status": "completed",
+    "validation_duration_ms": 0,
+    "tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 0,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 12141
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 0,
+      "totalFindings": 0,
+      "tierCounts": {
+        "proposed": 0,
+        "cross_checked": 0,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 0,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    "rerank": null
+  },
+  "parsed": {
+    "verdict": "approve",
+    "summary": "The v0.4.6 change is a well-scoped, well-tested, and solid release. It introduces a BigModel error-code dispatch table with automatic retry/backoff for transient conditions (1302, 1305, HTTP 502/503/504/500, network errors), correctly differentiating them from terminal conditions (1301, 1304, 1308-1310) that should not be retried. It retires a chronically broken CI workflow and replaces it with a reliable local pre-push gate. The new code is covered by 50 new tests (20 for error classification, 30 for retry logic) which rigorously validate the core invariants, budget math, and edge cases. The implementation is pure-additive with no breaking changes to existing callers or error shapes. There are no material correctness, security, or performance issues that should block shipping this diff.",
+    "findings": [],
+    "next_steps": []
+  },
+  "rawOutputHead": "{\"verdict\":\"approve\",\"summary\":\"The v0.4.6 change is a well-scoped, well-tested, and solid release. It introduces a BigModel error-code dispatch table with automatic retry/backoff for transient conditions (1302, 1305, HTTP 502/503/504/500, network errors), correctly differentiating them from terminal conditions (1301, 1304, 1308-1310) that should not be retried. It retires a chronically broken CI workflow and replaces it with a reliable local pre-push gate. The new code is covered by 50 new tests (20 for error classification, 30 for retry logic) which rigorously validate the core invariants, budget math, and edge cases. The implementation is pure-additive with no breaking changes to existing callers or error shapes. There are no material correctness, security, or performance issues that should block shipping this diff.\",\"findings\":[],\"next_steps\":[]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-25T06:35:59.138Z"
+}

@@ -1,0 +1,171 @@
+{
+  "cell": {
+    "fixtureId": "C1-v044-setup-menu",
+    "base": "eb47b5f",
+    "head": "7766943",
+    "mode": "adversarial-review",
+    "adversarialFocus": "",
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "off",
+    "runIndex": 2
+  },
+  "metrics": {
+    "schema_compliance": 1,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 3,
+    "citation_accuracy": 0.667,
+    "citation_false_file_hits": 0,
+    "latency_ms": 38891,
+    "model_duration_ms": 38334,
+    "validation_status": "completed",
+    "validation_duration_ms": 64,
+    "tier_distribution": {
+      "proposed": 3,
+      "cross_checked": 0,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": ""
+  },
+  "passes": {
+    "model": {
+      "status": "completed",
+      "durationMs": 38334
+    },
+    "validation": {
+      "status": "completed",
+      "durationMs": 64,
+      "totalFindings": 3,
+      "tierCounts": {
+        "proposed": 3,
+        "cross_checked": 0,
+        "deterministically_validated": 0,
+        "rejected": 0
+      },
+      "signalCounts": {
+        "pass": 9,
+        "fail": 0,
+        "skip": 3
+      }
+    },
+    "rerank": null
+  },
+  "parsed": {
+    "verdict": "needs-attention",
+    "summary": "The proposed change introduces complex, multi-level interactive conversational flows (including an 'API key rotation' path handling secrets) purely via unstructured natural language instructions in a Markdown prompt file. This approach lacks structural enforcement, leaving it highly vulnerable to user input injection, conversation hijacking, and silent execution failures. Furthermore, the release card explicitly acknowledges that no new automated tests were added and that verification relies entirely on manual User Acceptance Testing (UAT), creating a critical observability gap for a trust-boundary touching operation.",
+    "findings": [
+      {
+        "severity": "high",
+        "title": "Unenforced multi-level conversational flows risk state confusion and silent failures",
+        "body": "The interactive setup flow defines nested AskUserQuestion menus (e.g., selecting 'Switch preset' triggers a sub-menu, while 'Rotate API key' switches to raw chat input). In a pure LLM prompt, state transitions are purely suggestive. If the user provides ambiguous text, the model may fail to trigger AskUserQuestion, invoke the wrong companion script flags, or re-open the menu after an action—violating the specific rule 'must not re-open the menu on the post-action state'.",
+        "file": "commands/setup.md",
+        "line_start": 30,
+        "line_end": 41,
+        "confidence": 0.85,
+        "recommendation": "Consider simplifying the flow to a single-level AskUserQuestion to minimize prompt compliance failures. At minimum, add explicit error-handling instructions for ambiguous responses and strongly emphasize the negative constraint ('STOP immediately after executing the chosen action; DO NOT re-prompt or re-open the menu').",
+        "confidence_tier": "proposed",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "commands/setup.md"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 30-41 within 48"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "skip",
+            "artifact": "no stable anchor candidate in finding text"
+          }
+        ]
+      },
+      {
+        "severity": "medium",
+        "title": "Zero automated test coverage for new complex prompt logic",
+        "body": "The release card explicitly states: 'no new tests needed; skill change is prompt-layer, not Node-layer' and relies solely on 'Manual UAT'. Introducing branching and nested logic significantly increases the risk of regressions that automated CI will not catch. Relying on 100% manual testing for complex user flows is a known anti-pattern that often leads to regressions in subsequent updates.",
+        "file": "release_card.md",
+        "line_start": 111,
+        "line_end": 116,
+        "confidence": 0.9,
+        "recommendation": "Create an integration or behavioral test suite for the companion script that asserts the exact CLI arguments built for various simulated inputs. While the LLM orchestration cannot be unit-tested, the underlying companion flags must be strictly validated to prevent silent misconfigurations.",
+        "confidence_tier": "proposed",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "release_card.md"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 111-116 within 232"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "skip",
+            "artifact": "no stable anchor candidate in finding text"
+          }
+        ]
+      },
+      {
+        "severity": "low",
+        "title": "Release card state claims are structurally inaccurate for a review target",
+        "body": "The release_card.md states 'Status: READY' at the top, but later admits 'Local Verification: not yet run (DRAFT state)' and 'CI Evidence: not yet run (DRAFT state)'. Submitting a review target with a falsified or premature READY status undermines the integrity of the release process if the status is consumed by automated gates.",
+        "file": "release_card.md",
+        "line_start": 2,
+        "line_end": 2,
+        "confidence": 1,
+        "recommendation": "Update the status field to 'DRAFT' or 'IN-REVIEW' until local verification and CI evidence are actually completed and recorded.",
+        "confidence_tier": "proposed",
+        "validation_signals": [
+          {
+            "kind": "file_in_target",
+            "result": "pass",
+            "artifact": "release_card.md"
+          },
+          {
+            "kind": "known_false_reference_absent",
+            "result": "pass"
+          },
+          {
+            "kind": "line_range_in_file",
+            "result": "pass",
+            "artifact": "lines 2-2 within 232"
+          },
+          {
+            "kind": "anchor_literal_found",
+            "result": "skip",
+            "artifact": "no stable anchor candidate in finding text"
+          }
+        ]
+      }
+    ],
+    "next_steps": [
+      "Revise commands/setup.md to include strict negative constraints for the LLM to prevent re-opening the menu and to handle ambiguous user input safely.",
+      "Create automated tests for the companion script to ensure the mapping from user intent to CLI arguments is robust, offsetting the reliance on manual UAT.",
+      "Correct the Status field in release_card.md to accurately reflect the true state of verification and CI."
+    ]
+  },
+  "rawOutputHead": "{\"verdict\":\"needs-attention\",\"summary\":\"The proposed change introduces complex, multi-level interactive conversational flows (including an 'API key rotation' path handling secrets) purely via unstructured natural language instructions in a Markdown prompt file. This approach lacks structural enforcement, leaving it highly vulnerable to user input injection, conversation hijacking, and silent execution failures. Furthermore, the release card explicitly acknowledges that no new automated tests were added and that verification relies entirely on manual User Acceptance Testing (UAT), creating a critical observability gap for a trust-boundary touching operation.\",\"findings\":[{\"severity\":\"high\",\"title\":\"Unenforced multi-level conversational flows risk state confusion and silent failures\",\"body\":\"The interactive setup flow defines nested AskUserQuestion menus (e.g., selecting 'Switch preset' triggers a sub-menu, while 'Rotate API key' switches to raw chat input). In a pure LLM prompt, state transitions are purely suggestive. If the user provides ambiguous text, the model may fail to trigger AskUserQuestion, invoke the wrong companion script flags, or re-open the menu after an action—violating the specific rule 'must not re-open the menu on the post-action state'.\",\"file\":\"commands/setup.md\",\"line_start\":30,\"line_end\":41,\"confidence\":0.85,\"confidence_tier\":\"proposed\",\"validation_signals\":[{\"kind\":\"line_range_in_file\",\"result\":\"pass\",\"artifact\":\"commands/setup.md:30-41\"}],\"recommendation\":\"Consider simplifying the flow to a single-level AskUserQuestion to minimize prompt compliance failures. At minimum, add explicit error-handling instructions for ambiguous responses and strongly emphasize the negative constraint ('STOP immediately after executing the chosen action; DO NOT re-prompt or re-open the menu').\"},{\"severity\":\"medium\",\"title\":\"Zero automated test coverage for new complex prompt logic\",\"body\":\"The release card explicitly states: 'no new tests needed; skill change is prompt-layer, not Node-layer' and relies solely on 'Manual UAT'. Introducing branching and nested logic significantly increases the risk of regressions that automated CI will not catch. Relying on 100% manual testing for complex user flows is a known anti-pattern that often leads to regressions in subsequent updates.\",\"file\":\"release_card.md\",\"line_start\":111,\"line_end\":116,\"confidence\":0.9,\"confidence_tier\":\"proposed\",\"validation_signals\":[{\"kind\":\"anchor_literal_found\",\"result\":\"pass\",\"artifact\":\"No new tests for companion behavior\"}],\"recommendation\":\"Create an integration or behavioral test suite for the companion script that asserts the exact CLI arguments built for various simulated inputs. While the LLM orchestration cannot be unit-tested, the underlying companion flags must be strictly validated to prevent silent misconfigurations.\"},{\"severity\":\"low\",\"title\":\"Release card state claims are structurally inaccurate for a review target\",\"body\":\"The release_card.md states 'Status: READY' at the top, but later admits 'Local Verification: not yet run (DRAFT state)' and 'CI Evidence: not yet run (DRAFT state)'. Submitting a review target with a falsified or premature READY status undermines the integrity of the release process if the status is consumed by automated gates.\",\"file\":\"release_card.md\",\"line_start\":2,\"line_end\":2,\"confidence\":1,\"confidence_tier\":\"proposed\",\"validation_signals\":[{\"kind\":\"anchor_literal_found\",\"result\":\"pass\",\"artifact\":\"Status: READY\"},{\"kind\":\"anchor_literal_found\",\"result\":\"pass\",\"artifact\":\"DRAFT state\"}],\"recommendation\":\"Update the status field to 'DRAFT' or 'IN-REVIEW' until local verification and CI evidence are actually completed and recorded.\"}],\"next_steps\":[\"Revise commands/setup.md to include strict negative constraints for the LLM to prevent re-opening the menu and to handle ambiguous user input safely.\",\"Create automated tests for the companion script to ensure the mapping from user intent to CLI arguments is robust, offsetting the reliance on manual UAT.\",\"Correct the Status field in release_card.md to accurately reflect the true state of verification and CI.\"]}",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-25T06:34:37.987Z"
+}

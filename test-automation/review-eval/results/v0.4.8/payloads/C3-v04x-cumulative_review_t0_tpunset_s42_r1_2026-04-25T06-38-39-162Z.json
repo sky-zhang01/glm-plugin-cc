@@ -1,0 +1,42 @@
+{
+  "cell": {
+    "fixtureId": "C3-v04x-cumulative",
+    "base": "v0.4.0",
+    "head": "v0.4.6",
+    "mode": "review",
+    "adversarialFocus": "",
+    "temperature": 0,
+    "topP": null,
+    "seed": 42,
+    "thinking": "off",
+    "runIndex": 1
+  },
+  "metrics": {
+    "schema_compliance": 0,
+    "schema_empty_string": 0,
+    "schema_echo": 0,
+    "invalid_shape": 0,
+    "findings_count": 0,
+    "citation_accuracy": 1,
+    "citation_false_file_hits": 0,
+    "latency_ms": 446,
+    "model_duration_ms": 0,
+    "validation_status": "",
+    "validation_duration_ms": 0,
+    "tier_distribution": {
+      "proposed": 0,
+      "cross_checked": 0,
+      "deterministically_validated": 0,
+      "rejected": 0
+    },
+    "rejected_count": 0,
+    "error_code": "DIFF_TOO_LARGE"
+  },
+  "passes": {},
+  "rawOutputHead": "",
+  "rawOutputTruncated": false,
+  "reasoningSummaryHead": "",
+  "errorCode": "DIFF_TOO_LARGE",
+  "correctionAttempted": false,
+  "capturedAt": "2026-04-25T06:38:39.164Z"
+}
