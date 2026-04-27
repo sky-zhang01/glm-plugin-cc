@@ -1,0 +1,22 @@
+{
+  "name": "glm-plugin-cc",
+  "owner": {
+    "name": "Sky Zhang"
+  },
+  "metadata": {
+    "description": "Marketplace exposing glm-plugin-cc for Claude Code (GLM reviewer/rescue via z.ai OpenAI-compatible HTTP).",
+    "version": "0.4.8"
+  },
+  "plugins": [
+    {
+      "name": "glm",
+      "description": "Use z.ai GLM models from Claude Code to review code or delegate tasks. Stateless HTTP via OpenAI-compatible endpoint. No Stop hook — orchestration lives in an external SEV harness's /verify layer.",
+      "version": "0.4.8",
+      "author": {
+        "name": "Sky Zhang"
+      },
+      "homepage": "https://github.com/sky-zhang01/glm-plugin-cc",
+      "source": "./"
+    }
+  ]
+}

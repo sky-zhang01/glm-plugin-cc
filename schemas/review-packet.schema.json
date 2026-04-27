@@ -1,0 +1,211 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://glm-plugin-cc/schemas/review-packet.schema.json",
+  "title": "GLM review packet (v1)",
+  "description": "Pipeline-owned envelope around a single review run. Provenance, context, and pass metadata live here so review-output.schema.json (the model contract) stays free of facts the model cannot reliably self-report.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "provenance",
+    "passes"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "review-packet/v1"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["completed", "context-failed"]
+    },
+    "review_output": {
+      "$ref": "review-output.schema.json"
+    },
+    "context": {
+      "$ref": "#/$defs/context"
+    },
+    "context_failure": {
+      "$ref": "#/$defs/context_failure"
+    },
+    "failure": {
+      "$ref": "#/$defs/failure"
+    },
+    "provenance": {
+      "$ref": "#/$defs/provenance"
+    },
+    "passes": {
+      "$ref": "#/$defs/passes"
+    },
+    "repo_checks": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "title": "completed",
+      "properties": {
+        "status": { "const": "completed" }
+      },
+      "required": ["review_output", "context"],
+      "not": {
+        "anyOf": [
+          { "required": ["failure"] },
+          { "required": ["context_failure"] }
+        ]
+      }
+    },
+    {
+      "title": "context-failed",
+      "properties": {
+        "status": { "const": "context-failed" }
+      },
+      "required": ["failure", "context_failure"],
+      "not": {
+        "anyOf": [
+          { "required": ["review_output"] },
+          { "required": ["context"] }
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "plugin_version",
+        "review_mode",
+        "job_id",
+        "generated_at",
+        "base_ref",
+        "head_ref",
+        "model_requested",
+        "model_responded",
+        "prompt_template_name",
+        "prompt_template_sha256",
+        "system_prompt_sha256",
+        "final_prompt_sha256"
+      ],
+      "properties": {
+        "plugin_version": { "type": "string", "minLength": 1 },
+        "review_mode": {
+          "type": "string",
+          "enum": ["review", "adversarial-review"]
+        },
+        "job_id": { "type": "string", "minLength": 1 },
+        "generated_at": { "type": "string", "format": "date-time" },
+        "base_ref": { "type": ["string", "null"] },
+        "head_ref": { "type": ["string", "null"] },
+        "model_requested": { "type": ["string", "null"] },
+        "model_responded": { "type": ["string", "null"] },
+        "prompt_template_name": { "type": "string", "minLength": 1 },
+        "prompt_template_sha256": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "system_prompt_sha256": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "final_prompt_sha256": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input_mode",
+        "diff_bytes",
+        "file_count",
+        "max_diff_files",
+        "max_diff_bytes",
+        "diff_included_files",
+        "omitted_files"
+      ],
+      "properties": {
+        "input_mode": {
+          "type": "string",
+          "enum": ["inline-diff"]
+        },
+        "diff_bytes": { "type": "integer", "minimum": 0 },
+        "file_count": { "type": "integer", "minimum": 0 },
+        "max_diff_files": { "type": "integer", "minimum": 1 },
+        "max_diff_bytes": { "type": "integer", "minimum": 1 },
+        "diff_included_files": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "omitted_files": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "context_failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "error_code",
+        "file_count",
+        "diff_bytes",
+        "max_diff_files",
+        "max_diff_bytes"
+      ],
+      "properties": {
+        "error_code": {
+          "type": "string",
+          "enum": ["DIFF_TOO_LARGE"]
+        },
+        "file_count": { "type": "integer", "minimum": 0 },
+        "diff_bytes": { "type": "integer", "minimum": 0 },
+        "max_diff_files": { "type": "integer", "minimum": 1 },
+        "max_diff_bytes": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["error_code", "reason"],
+      "properties": {
+        "error_code": {
+          "type": "string",
+          "enum": ["DIFF_TOO_LARGE"]
+        },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "passes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model", "validation", "rerank"],
+      "properties": {
+        "model": {
+          "anyOf": [
+            { "type": "null" },
+            { "type": "object" }
+          ]
+        },
+        "validation": {
+          "anyOf": [
+            { "type": "null" },
+            { "type": "object" }
+          ]
+        },
+        "rerank": {
+          "anyOf": [
+            { "type": "null" },
+            { "type": "object" }
+          ]
+        }
+      }
+    }
+  }
+}

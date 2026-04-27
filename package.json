@@ -1,0 +1,21 @@
+{
+  "name": "glm-plugin-cc",
+  "version": "0.4.8",
+  "private": true,
+  "type": "module",
+  "description": "Claude Code plugin: GLM reviewer via z.ai (OpenAI-compatible HTTP).",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.14.1",
+    "npm": ">=11.0.0"
+  },
+  "scripts": {
+    "check": "node --check scripts/glm-companion.mjs && node --check scripts/session-lifecycle-hook.mjs && node --check scripts/check-imports.mjs && for f in scripts/lib/*.mjs; do node --check $f || exit 1; done && node scripts/check-imports.mjs",
+    "test": "node --test tests/*.test.mjs tests/eval/runner.mjs",
+    "ci:local": "bash scripts/ci/check-all.sh",
+    "ci:local:fast": "npm run check && npm test && bash scripts/ci/check-ai-quality-gate.sh",
+    "public:check": "node scripts/ci/check-public-surface.mjs",
+    "public:build": "node scripts/release/build-public-tree.mjs",
+    "hooks:install": "bash scripts/install-hooks.sh"
+  }
+}

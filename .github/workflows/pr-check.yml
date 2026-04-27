@@ -1,0 +1,56 @@
+name: PR Check
+
+# Runs on every pull request targeting develop or main. Blocks merge if any
+# step fails.
+#
+# Mirror of `npm run ci:local` so a developer who runs the pre-push hook has
+# the same verdict locally before push.
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  pr-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "24.14.1"
+
+      - name: Syntax check
+        run: npm run check
+
+      - name: Unit + integration tests
+        run: npm test
+
+      - name: Path-leak guard
+        run: bash scripts/ci/check-no-local-paths.sh
+
+      - name: Plugin manifest validation
+        run: bash scripts/ci/check-plugin-manifest.sh
+
+      - name: CHANGELOG update gate (PR only)
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin "${{ github.base_ref }}"
+          bash scripts/ci/check-changelog-updated.sh "origin/${{ github.base_ref }}"
+
+      - name: Co-Authored-By trailer (PR only)
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin "${{ github.base_ref }}"
+          bash scripts/ci/check-coauthored-by.sh "origin/${{ github.base_ref }}"

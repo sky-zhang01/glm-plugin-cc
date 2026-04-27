@@ -1,0 +1,30 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests"
+  ],
+  "baseBranches": ["develop"],
+  "enabledManagers": ["github-actions", "npm"],
+  "dependencyDashboard": true,
+  "labels": ["dependencies"],
+  "branchPrefix": "renovate/",
+  "commitMessagePrefix": "ci(deps):",
+  "rangeStrategy": "bump",
+  "automerge": false,
+  "prConcurrentLimit": 3,
+  "packageRules": [
+    {
+      "matchManagers": ["github-actions"],
+      "labels": ["dependencies", "github-actions"],
+      "groupName": "github-actions",
+      "separateMajorMinor": false
+    },
+    {
+      "matchManagers": ["npm"],
+      "labels": ["dependencies", "npm"],
+      "groupName": "npm dependencies",
+      "separateMajorMinor": false
+    }
+  ]
+}
